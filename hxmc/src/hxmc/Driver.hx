@@ -79,6 +79,7 @@ class Driver {
 		}
 		if (failure != null) throw failure;
 	}
+	static var sroa = Sys.getEnv("HXMC_SROA") != "0";
 	var raRounds = 0;
 	var raInsns = 0;
 	var raFuncs = 0;
@@ -127,6 +128,7 @@ class Driver {
 				}
 				mb.icaches = ic.count;
 			}
+			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {

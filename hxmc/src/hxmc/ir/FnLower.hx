@@ -25,6 +25,12 @@ class FnLower {
 	var structAliases = new Map<Int, TClass>(); // locals bound to a C struct class (Struct's argument)
 	public var boxed:Map<Int, Bool>;
 	var thisLocal:Null<Local>;
+	var sretLocal:Null<Local> = null; // fi.sret: the address of the caller's memory for the result
+	// struct values in this frame that nothing else holds (a call's result, a
+	// copy): whoever takes one keeps it as its own memory
+	var freshSlots = new Map<Local, Bool>();
+	var curExpr:Null<TExpr> = null; // (the expression being lowered: errors)
+	var structCtor = false; // (lowering a struct's constructor)
 	var out:Array<Stmt>;
 	var nextLocal = 0;
 
@@ -66,7 +72,18 @@ class FnLower {
 				out.push(SSet(thisLocal, ECast(thisLocal.ty, ELocal(fi.args[0]))));
 			}
 		}
+		if (fi.sret) sretLocal = fi.args[fi.args.length - 1];
 		bindArgs(tf, off);
+		stmt(tf.tfExpr);
+	}
+
+	// the constructor of a @:hxmc.struct class (Lower.structCtor): this is
+	// the struct's address
+	public function runStructCtor(tf:TFunc) {
+		boxed = Boxing.analyze(tf.tfExpr, tf.tfArgs.map(a -> a.variable));
+		thisLocal = fi.args[0];
+		structCtor = true;
+		bindArgs(tf, 1);
 		stmt(tf.tfExpr);
 	}
 
@@ -109,6 +126,7 @@ class FnLower {
 			out.push(SSet(lo, ECapture(lambda, i, clos)));
 			if (c.id == -1) thisLocal = lo else locals.set(c.id, lo);
 		}
+		if (fi.sret) sretLocal = fi.args[fi.args.length - 1];
 		bindArgs(tf, 1);
 		stmt(tf.tfExpr);
 	}
@@ -121,6 +139,11 @@ class FnLower {
 				case Var(_) if (cf.cfExpr != null):
 					var g = l.staticVar(c, cf);
 					var t = l.getProgram().globals[g].ty;
+					var sc = structOf(cf.cfType);
+					if (sc != null) {
+						copyStruct(EGlobal(g, t), structRhs(cf.cfExpr).x, sc);
+						continue;
+					}
 					var x = value(cf.cfExpr);
 					out.push(SSetGlobal(g, coerce(x, tyOf(cf.cfExpr), t)));
 				case _:
@@ -143,6 +166,12 @@ class FnLower {
 			args.unshift(ELocal(s));
 		}
 		var call = dispatch != null ? ECallDispatch(dispatch.sel, dispatch.sig, args) : ECall(f, args);
+		if (fi.sret) {
+			// (the closure's result address is the function's: its last argument)
+			out.push(SExpr(call));
+			out.push(SReturn(ELocal(fi.args[fi.args.length - 1])));
+			return;
+		}
 		if (fi.ret == TVoid) {
 			out.push(SExpr(call));
 			out.push(SReturn(null));
@@ -266,7 +295,7 @@ class FnLower {
 	// the intrinsics of hxmc.unsafe (MirBuild.intrinsic): no GC point but the
 	// allocations; these are pure (they read no memory)
 	public static var PURE_INTRINSICS = [
-		for (n in ["addr", "obj", "sym", "cstr", "abi", "os", "arm", "target", "ult", "stack", "f64Bits", "bitsF64", "words"])
+		for (n in ["addr", "obj", "sym", "cstr", "abi", "os", "arm", "target", "ult", "stack", "structSlot", "f64Bits", "bitsF64", "words"])
 			"hxmc_unsafe_Mem_" + n => true
 	];
 
@@ -287,7 +316,7 @@ class FnLower {
 				// which differ for a type read from HXB, and ty numbers the types it meets)
 				var names = [for (k in an.aFields.keys()) k];
 				names.sort(Reflect.compare);
-				var fs = [for (k in names) {name: k, ty: ty(an.aFields.get(k).cfType)}];
+				var fs = [for (k in names) {name: k, ty: l.boxed(ty(an.aFields.get(k).cfType))}];
 				var sh = l.getProgram().shape(fs);
 				var i = sh.slot(name);
 				return i > 0 && Ir.repr(sh.fields[i - 1].ty) == Ir.repr(rt) ? sh : null;
@@ -323,7 +352,9 @@ class FnLower {
 		var r = [];
 		for (e in es) {
 			var before = out.length;
-			var x = value(e);
+			// (a struct: a copy of its own, made now)
+			var sc = structOf(e.etype);
+			var x = sc != null ? ELocal(structOwn(e, sc)) : value(e);
 			if (out.length != before) {
 				var spills = [];
 				for (i in 0...r.length)
@@ -382,6 +413,7 @@ class FnLower {
 			case TI64: EConv(I2L, EInt(0));
 			case TVoid: EInt(0);
 			case TRef(_): ENull(t);
+			case TStruct(n, _): structFail('the struct $n is never null (a value: zero its fields; Null<S> may be null)');
 		}
 
 	// ---- conversions
@@ -391,8 +423,28 @@ class FnLower {
 	public function coerce(x:Ex, from:Ty, to:Ty):Ex {
 		if (to == TVoid || from == TVoid) return x;
 		switch [from, to] {
+			case [TStruct(a, _), TStruct(b, _)]:
+				if (a != b) structFail('the struct $a used as the struct $b');
+				return x;
+			// (its address: Ptr casts and the intrinsics)
+			case [TStruct(_), TI64] | [TI64, TStruct(_)]:
+				return x;
+			case [TStruct(n, _), TRef(RClos(_))] | [TRef(RClos(_)), TStruct(n, _)]:
+				structFail('the struct $n converted to or from a function');
+			case [TStruct(n, _), TRef(_)]:
+				return coerce(box(x, n), l.boxed(from), to);
+			case [TRef(_), TStruct(n, _)]:
+				return unbox(x, from, n);
+			case [TStruct(n, _), _] | [_, TStruct(n, _)]:
+				structFail('the struct $n converted to or from a number');
+			case [TRef(RClos(a)), TRef(r)] if (!r.match(RClos(_)) && hasStruct(a)):
+				structFail('a function taking or returning a struct value cannot become ' + (r == RAny ? "Dynamic" : "another type") + ' (call it directly)');
+			case _:
+		}
+		switch [from, to] {
 			case [TRef(RClos(a)), TRef(RClos(b))] if (a != b):
 				if (x.match(ENull(_))) return ENull(to);
+				if (hasStruct(a) || hasStruct(b)) structFail('a function taking or returning a struct value cannot become a function of another type');
 				var li = l.adapter(a, b);
 				var c = asLocal(x, from);
 				var r = newLocal("adapted", to);
@@ -431,6 +483,7 @@ class FnLower {
 			case TF64: temp(TRef(RStr), ECallHost(l.native("hx_str_of_float"), [x], TRef(RStr)));
 			case TI64: temp(TRef(RStr), ECallHost(l.native("hx_str_of_i64"), [x], TRef(RStr)));
 			case TBool: temp(TRef(RStr), ECallHost(l.native("hx_str_of_bool"), [x], TRef(RStr)));
+			case TStruct(_): toStr(coerce(x, t, TRef(RAny)), TRef(RAny));
 			case _: temp(TRef(RStr), ECallHost(l.native("hx_std_string"), [x], TRef(RStr)));
 		}
 	}
@@ -438,6 +491,7 @@ class FnLower {
 	// ---- statements
 
 	function stmt(e:TExpr) {
+		curExpr = e;
 		if (!Lower.survey) stmt1(e) else try stmt1(e) catch (err:LowerError) {
 			l.record(err, fi.name);
 			out.push(SThrow(ENull(TRef(RAny))));
@@ -447,10 +501,10 @@ class FnLower {
 	// (init: the local's first value; a struct local holds a C function's
 	// struct result, which lives in this frame: MirBuild.cStructRet)
 	function declare(v:TVar, ?init:TExpr):Local {
+		if (structOf(v.vType) != null) throw new LowerError('the variable ' + v.vName + ' cannot hold a struct value here', CInterop.posOf(v.vPos));
 		switch CInterop.ctype(v.vType) {
-			case CStruct(c) if (init != null && cStructResult(init)):
-			case CStruct(c) | COpaque(c):
-				throw new LowerError('local ' + v.vName + ' has the C type ' + c.clPath.name + ' by value: structs are reached through a Ptr only (p.value.field, p[i].field), or kept in a local as the result of a C function', CInterop.posOf(v.vPos));
+			case COpaque(c):
+				throw new LowerError('local ' + v.vName + ' has the opaque C type ' + c.clPath.name + ' by value: it is reached through a Ptr only', CInterop.posOf(v.vPos));
 			case _:
 		}
 		var t = ty(v.vType);
@@ -473,6 +527,22 @@ class FnLower {
 						structAliases.set(v.vId, sc);
 						return;
 					case _:
+				}
+				var sc = structOf(v.vType);
+				if (sc != null) {
+					// a struct local: its memory in the frame, a copy of the
+					// value (or the value itself, a temporary of this frame)
+					if (isBoxed(v)) cfail('the struct local ' + v.vName + ' is captured by a closure and assigned: not supported (a class instead)', e);
+					var s = if (init != null) structOwn(init, sc) else {
+						var s = newSlot(structTy(sc), false);
+						zeroStruct(ELocal(s), sc);
+						s;
+					};
+					// (a variable of the program's own holds its copy; the compiler's
+					// temporaries stay copies of the boxed value they read)
+					if (!v.vKind.match(VGenerated)) unboxed.remove(s);
+					locals.set(v.vId, s);
+					return;
 				}
 				var t = ty(v.vType);
 				if (isBoxed(v)) {
@@ -515,6 +585,17 @@ class FnLower {
 				tryStmt(body, catches, null);
 			case TReturn(null):
 				out.push(SReturn(null));
+			case TReturn(r) if (sretLocal != null):
+				// a struct result: into the caller's memory (built there by a constructor)
+				var sc = structOf(r.etype);
+				switch strip(r).eexpr {
+					case TNew(c, _, cargs) if (c == sc): newStruct(c, cargs, sretLocal);
+					case _:
+						var x = structRhs(r).x;
+						if (!x.match(ELocal(_) | EGlobal(_, _))) x = ELocal(asLocal(x, tyOf(r)));
+						if (!isLocal(x, sretLocal)) copyStruct(ELocal(sretLocal), x, sc);
+				}
+				out.push(SReturn(ELocal(sretLocal)));
 			case TReturn(r):
 				var x = value(r);
 				out.push(fi.ret == TVoid ? SReturn(null) : SReturn(coerce(x, tyOf(r), fi.ret)));
@@ -728,7 +809,7 @@ class FnLower {
 			case TDynamic(_) | TMono(_): null;
 			case TAbstract(a, _) if (a.aPath.name == "Any"): null;
 			case TInst(c, _) if (!c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface) && !c.clKind.match(KTypeParameter(_))):
-				var ci = l.classInfo(c);
+				var ci = classOrBox(c);
 				x -> EInstOf(ci, x);
 			case _:
 				var tr = typeRefOfType(t);
@@ -739,17 +820,25 @@ class FnLower {
 	function typeRefOfType(t:T):Null<TypeRef> {
 		return switch TFunctions.follow(t) {
 			case TInst(c, _):
-				if (c.hasClassFlag(CExtern) || c.clKind.match(KTypeParameter(_))) TRBuiltin(Lower.nativeName(c)) else TRClass(l.classInfo(c));
+				if (c.hasClassFlag(CExtern) || c.clKind.match(KTypeParameter(_))) TRBuiltin(Lower.nativeName(c)) else TRClass(classOrBox(c));
 			case TEnum(e, _): TREnum(l.enumInfo(e));
 			case TAbstract(a, _): TRBuiltin(Lower.ident(a.aPath.pack, a.aPath.name));
 			case _: null;
 		}
 	}
 
+	// a class, or for a @:hxmc.struct class its box's (Std.isOfType, casts,
+	// the class as a value)
+	function classOrBox(c:TClass):ClassInfo
+		return switch ty(TInst(c, [])) {
+			case TStruct(n, _): l.structBox(n);
+			case _: l.classInfo(c);
+		}
+
 	function typeRef(mt:ModuleType):TypeRef {
 		return switch mt {
 			case TClassDecl(c):
-				if (c.hasClassFlag(CExtern)) TRBuiltin(Lower.nativeName(c)) else TRClass(l.classInfo(c));
+				if (c.hasClassFlag(CExtern)) TRBuiltin(Lower.nativeName(c)) else TRClass(classOrBox(c));
 			case TEnumDecl(e): TREnum(l.enumInfo(e));
 			case TAbstractDecl(a): TRBuiltin(Lower.ident(a.aPath.pack, a.aPath.name));
 			case TTypeDecl(d): typeRefOfType(d.tType);
@@ -776,6 +865,7 @@ class FnLower {
 	// an expression that may be a call or allocation at the top, with the
 	// representation of ty(e.etype)
 	function rhs(e:TExpr):Ex {
+		curExpr = e;
 		return switch e.eexpr {
 			case TConst(TInt(i)):
 				switch tyOf(e) {
@@ -846,6 +936,8 @@ class FnLower {
 					case _: TRef(RAny);
 				};
 				ENewArr(elem, []);
+			case TNew(c, _, cargs) if (CInterop.isStruct(c)):
+				coerce(ELocal(newStruct(c, cargs, null)), structTy(c), tyOf(e));
 			case TNew(c, _, cargs) if (c.hasClassFlag(CExtern)):
 				var s = ctorSig(c);
 				var x = temp(TRef(RNative(Lower.nativeName(c))), ECallHost(l.native(Lower.nativeName(c) + "_new"), args(cargs, s, null), TRef(RNative(Lower.nativeName(c)))));
@@ -871,7 +963,7 @@ class FnLower {
 				ENewArr(elem, [for (i in 0...xs.length) coerce(xs[i], tyOf(vs[i]), elem)]);
 			case TObjectDecl(fs):
 				var xs = operands([for (f in fs) f.expr]);
-				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: tyOf(fs[i].expr)}];
+				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: l.boxed(tyOf(fs[i].expr))}];
 				var sh = l.getProgram().shape(fields);
 				var vals = [];
 				for (sf in sh.fields)
@@ -945,7 +1037,15 @@ class FnLower {
 						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), [value(obj)], t));
 						coerce(x, t, tyOf(e));
 					case Var(_) if (c.hasClassFlag(CInterface)):
-						EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+						anonGet(cf.cfName, obj, e);
+					case Var(_) if (structOf(cf.cfType) != null):
+						// a struct field (in the object's memory): copied out
+						var sc = structOf(cf.cfType);
+						var ci = l.classInfo(c);
+						var o = asLocal(value(obj), tyOf(obj));
+						var s = newSlot(structTy(sc), true);
+						copyStruct(ELocal(s), EFieldAddr(ci, ci.fieldIndex(cf.cfName), ELocal(o)), sc);
+						coerce(ELocal(s), structTy(sc), tyOf(e));
 					case Var(_):
 						var ci = l.classInfo(c);
 						var idx = ci.fieldIndex(cf.cfName);
@@ -978,7 +1078,7 @@ class FnLower {
 						coerce(x, TRef(RClos(li.sig)), tyOf(e));
 				}
 			case FAnon(cf):
-				EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+				anonGet(cf.cfName, obj, e);
 			case FDynamic(name):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));
 				var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_get"), [o, EStr(name)], TRef(RAny)));
@@ -1082,7 +1182,9 @@ class FnLower {
 			return l.getProgram().sig([for (a in f.args) a.ty], f.ret);
 		}
 		return switch Lower.followFun((decl != null ? decl : cf).cfType) {
-			case TFun(s): l.getProgram().sig([TRef(RObj(l.rootClass()))].concat([for (a in s.args) ty(a.type)]), ty(s.ret));
+			case TFun(s):
+				var rt = ty(s.ret);
+				l.getProgram().sig([TRef(RObj(l.rootClass()))].concat([for (a in s.args) ty(a.type)]).concat(rt.match(TStruct(_)) ? [TI64] : []), rt);
 			case _: fail("method type");
 		}
 	}
@@ -1091,8 +1193,13 @@ class FnLower {
 
 	function binop(op:Binop, a:TExpr, b:TExpr, e:TExpr):Ex {
 		switch op {
+			case OpAssign if (structOf(a.etype) != null):
+				return structAssign(a, b, structOf(a.etype), e);
 			case OpAssign:
 				return assign(a, () -> {x: rhs(b), t: tyOf(b)}, e);
+			case OpEq | OpNotEq if (structOf(a.etype) != null && structOf(b.etype) != null):
+				var eq = structEq(a, b, structOf(a.etype), e);
+				return op == OpEq ? eq : ENot(eq);
 			case OpAssignOp(op2):
 				return assign(a, null, e, (cur, curTy) -> arith(op2, cur, curTy, () -> {x: value(b), t: tyOf(b)}, tyOf(a), e));
 			case OpBoolAnd | OpBoolOr:
@@ -1296,11 +1403,6 @@ class FnLower {
 		var et = tyOf(e);
 		switch strip(lhs).eexpr {
 			case TLocal(v):
-				switch [CInterop.ctype(v.vType), strip(e).eexpr] {
-					case [CStruct(c), TBinop(OpAssign, _, r)] if (cStructResult(r)):
-					case [CStruct(c), _]: cfail('assigning a whole ${c.clPath.name}: a struct local takes the result of a C function only', e);
-					case _:
-				}
 				var lo = local(v, e);
 				var t = ty(v.vType);
 				if (isBoxed(v)) {
@@ -1312,11 +1414,12 @@ class FnLower {
 				out.push(SSet(lo, x));
 				return coerce(ELocal(lo), t, et);
 			case TField(obj, FInstance(c, _, cf)) if (CInterop.isStruct(c)):
+				// (the address after the value: an object may move meanwhile)
 				var f = CInterop.field(c, cf.cfName);
-				var a = ELocal(asLocal(coerce(value(obj), tyOf(obj), TI64), TI64));
+				var p = placeOf(obj, true);
 				var t = tyOf(lhs);
-				var x = pure(compute(() -> cLoad(a, f.off, f.ty, lhs), t, t), t);
-				cStore(a, f.off, f.ty, x, t, e);
+				var x = pure(compute(() -> cLoad(p.addr(), f.off, f.ty, lhs), t, t), t);
+				cStore(p.addr(), f.off, f.ty, x, t, e);
 				return coerce(x, t, et);
 			case TField(obj, FInstance(c, _, cf)) if (!c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface)):
 				var ci = l.classInfo(c);
@@ -1334,7 +1437,7 @@ class FnLower {
 				out.push(SExpr(ECallHost(l.native("Array_resize"), [o, x], TVoid)));
 				return coerce(x, TI32, et);
 			case TField(obj, FAnon(cf) | FInstance(_, _, cf)):
-				var t = tyOf(lhs);
+				var t = l.boxed(tyOf(lhs));
 				var o = ELocal(asLocal(value(obj), tyOf(obj)));
 				var x = pure(compute(() -> EAnonGet(cf.cfName, t, o, null), t, t), t);
 				out.push(SAnonSet(cf.cfName, t, o, x));
@@ -1444,17 +1547,17 @@ class FnLower {
 				var s = switch t { case TRef(RClos(s)): s; case _: fail("dynamic static " + cf.cfName + " is not a closure", e); };
 				var cl = asLocal(EGlobal(g, t), t);
 				var xs = args(cargs, s.args, null);
-				return coerceRhs(ECallClos(s, ELocal(cl), xs), s.ret, rt);
+				return callClos(s, ELocal(cl), xs, rt);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
-				var xs = args(cargs, tys(fn), l.defaults.get(fn));
-				return coerceRhs(ECall(fn, xs), fn.ret, rt);
+				var xs = args(cargs, callTys(fn), l.defaults.get(fn));
+				return callFn(fn, xs, rt);
 			case TField({eexpr: TConst(TSuper)}, FInstance(c, _, cf)):
 				var impl = l.lookupMethod(c, cf.cfName);
 				if (impl == null) fail("super." + cf.cfName + " without implementation", e);
 				var fn = l.method(impl.cls, impl.field);
-				var xs = args(cargs, tys(fn), l.defaults.get(fn), 1);
-				return coerceRhs(ECall(fn, [(ELocal(thisLocal) : Ex)].concat(xs)), fn.ret, rt);
+				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1);
+				return callFn(fn, [(ELocal(thisLocal) : Ex)].concat(xs), rt);
 			case TConst(TSuper):
 				var sup = l.superOf(self);
 				while (sup != null && sup.clConstructor == null && sup.clSuper != null)
@@ -1495,7 +1598,7 @@ class FnLower {
 						var s = switch st { case TRef(RClos(s)): s; case _: fail("dynamic method " + cf.cfName + " is not a closure", e); };
 						var cl = asLocal(dynMethod(obj, c, cf, e), st);
 						var xs = args(cargs, s.args, null); // closure calls apply defaults in the callee
-						return coerceRhs(ECallClos(s, ELocal(cl), xs), s.ret, rt);
+						return callClos(s, ELocal(cl), xs, rt);
 					case Method(_):
 				}
 				if (l.needsDispatch(c, cf.cfName)) {
@@ -1504,6 +1607,13 @@ class FnLower {
 					var impl = l.lookupMethod(c, cf.cfName);
 					var ds = impl != null ? l.defaults.get(l.method(impl.cls, impl.field)) : null;
 					var o = coerce(value(obj), tyOf(obj), TRef(RObj(l.rootClass())));
+					if (sig.ret.match(TStruct(_))) {
+						// (a struct result: the address of a slot here, last)
+						var xs = args(cargs, sig.args.slice(0, sig.args.length - 1), ds, 1);
+						var s = newSlot(sig.ret, true);
+						out.push(SExpr(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs).concat([ELocal(s)]))));
+						return coerce(ELocal(s), sig.ret, rt);
+					}
 					var xs = args(cargs, sig.args, ds, 1);
 					return coerceRhs(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs)), sig.ret, rt);
 				}
@@ -1511,8 +1621,8 @@ class FnLower {
 				if (impl == null) fail("no implementation of " + cf.cfName, e);
 				var fn = l.method(impl.cls, impl.field);
 				var o = value(obj);
-				var xs = args(cargs, tys(fn), l.defaults.get(fn), 1);
-				return coerceRhs(ECall(fn, [o].concat(xs)), fn.ret, rt);
+				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1);
+				return callFn(fn, [o].concat(xs), rt);
 			case TField(_, FEnum(en, ef)):
 				var ci = l.ctorInfo(ef, en);
 				var xs = args(cargs, ci.params, null);
@@ -1522,6 +1632,7 @@ class FnLower {
 					case TRef(RClos(s)): s;
 					case _: null;
 				};
+				if (hasStruct(s)) structFail('a struct value passed to or returned by a function of a structural type: not supported (an interface or a class)');
 				var o = asLocal(value(obj), tyOf(obj));
 				var xs = args(cargs, s.args, null);
 				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
@@ -1544,7 +1655,7 @@ class FnLower {
 				var fx = value(f);
 				var c = asLocal(fx, tyOf(f));
 				var xs = args(cargs, s.args, null);
-				return coerceRhs(ECallClos(s, ELocal(c), xs), s.ret, rt);
+				return callClos(s, ELocal(c), xs, rt);
 			case _:
 				var fx = coerce(value(f), tyOf(f), TRef(RAny));
 				var c = asLocal(fx, TRef(RAny));
@@ -1595,22 +1706,6 @@ class FnLower {
 	function cfail(msg:String, e:TExpr):Dynamic
 		throw new LowerError(msg, where(e));
 
-	// a call of a C function returning a struct
-	static function cStructResult(e:TExpr):Bool
-		return switch strip(e).eexpr {
-			case TCall({eexpr: TField(_, FStatic(c, cf))}, _):
-				(CInterop.cSymbol(c, cf) != null || Lower.hasMeta(":hxmc.indirect", cf.cfMeta)) && CInterop.ctype(e.etype).match(CStruct(_));
-			case _: false;
-		}
-
-	// a value of a C struct type cannot exist yet: only its fields through a pointer
-	function noStructValue(t:core.TType.T, what:String, e:TExpr) {
-		switch CInterop.ctype(t) {
-			case CStruct(c) | COpaque(c):
-				cfail('$what has the C type ${c.clPath.name} by value: structs are reached through a Ptr only (p.value.field, p[i].field)', e);
-			case _:
-		}
-	}
 
 	// the load of C type ct at addr + off, with the representation of ty(t)
 	function cLoad(addr:Ex, off:Int, ct:CTy, e:TExpr):Ex {
@@ -1642,7 +1737,9 @@ class FnLower {
 			case CI64 | CPtr: set("setI64", TI64);
 			case CF32: set("setF32", TF64);
 			case CF64: set("setF64", TF64);
-			case CStruct(c): cfail('assigning a whole ${c.clPath.name}: struct values are not supported yet (assign its fields)', e);
+			case CStruct(c):
+				var src = ELocal(asLocal(coerce(v, from, TI64), TI64));
+				copyStruct(off == 0 ? addr : EBin(LAdd, addr, EConv(I2L, EInt(off))), src, c);
 			case _: cfail("no C type to store (" + CInterop.name(ct) + ")", e);
 		}
 	}
@@ -1742,14 +1839,281 @@ class FnLower {
 			}
 		var t = ty(s.ret);
 		var xs = args(cargs, [for (a in s.args) ty(a.type)], null);
+		if (t.match(TStruct(_))) {
+			// (the result's slot in this frame, MirBuild.cStructRet)
+			var lo = newLocal("cr", t);
+			out.push(SSet(lo, ECallHost(sym, xs, t)));
+			freshSlots.set(lo, true);
+			return coerce(ELocal(lo), t, tyOf(e));
+		}
 		return coerceRhs(ECallHost(sym, xs, t), t, tyOf(e));
 	}
 
 	// a field of a @:hxmc.struct object (an address): a load
 	function structGet(obj:TExpr, c:TClass, cf:TClassField, e:TExpr):Ex {
 		var f = CInterop.field(c, cf.cfName);
-		var a = coerce(value(obj), tyOf(obj), TI64);
-		return cLoad(ELocal(asLocal(a, TI64)), f.off, f.ty, e);
+		var p = placeOf(obj);
+		switch f.ty {
+			case CStruct(sc) if (p.heap):
+				// (a struct in an object: copied out)
+				var s = newSlot(structTy(sc), true);
+				copyStruct(ELocal(s), EBin(LAdd, p.addr(), EConv(I2L, EInt(f.off))), sc);
+				return coerce(ELocal(s), structTy(sc), tyOf(e));
+			case _:
+		}
+		var a = p.addr();
+		return cLoad(a.match(ELocal(_)) ? a : ELocal(asLocal(a, TI64)), f.off, f.ty, e);
+	}
+
+	// ---- struct values (hxmc/LOWLEVEL.md, "Struct values"): the address
+	// of their memory, which assignments, arguments and results copy
+
+	static function isLocal(x:Ex, lo:Local):Bool
+		return switch x {
+			case ELocal(l): l == lo;
+			case _: false;
+		}
+
+	// (Null<S> is not a struct value: a reference to its box, Lower.boxed)
+	static function structOf(t:core.TType.T):Null<TClass>
+		return switch TFunctions.followWithoutNull(t) {
+			case TAbstract({aPath: {pack: [], name: "Null"}}, _): null;
+			case _:
+				switch CInterop.ctype(t) {
+					case CStruct(c): c;
+					case _: null;
+				}
+		}
+
+	static function structTy(c:TClass):Ty
+		return TStruct(core.Globals.sTypePath(c.clPath), CInterop.layout(c).size);
+
+	function structFail(msg:String):Dynamic
+		throw new LowerError(msg, curExpr != null ? where(curExpr) : "");
+
+	// a slot of this frame for a struct of type t, its address in a local
+	// (fresh: a temporary, which its user may keep)
+	function newSlot(t:Ty, fresh:Bool):Local {
+		var size = switch t {
+			case TStruct(_, n): n;
+			case _: 8;
+		};
+		var lo = newLocal("st", t);
+		out.push(SSet(lo, ECallHost("hxmc_unsafe_Mem_structSlot", [EInt(size), EInt(8)], TI64)));
+		if (fresh) freshSlots.set(lo, true);
+		return lo;
+	}
+
+	// the loads and stores that copy a C scalar's bytes
+	static function rawAccess(ct:CTy):{get:String, set:String, t:Ty}
+		return switch ct {
+			case CBool | CI8 | CU8: {get: "getU8", set: "setI8", t: TI32};
+			case CI16 | CU16: {get: "getU16", set: "setI16", t: TI32};
+			case CI32 | CF32: {get: "getI32", set: "setI32", t: TI32};
+			case CF64: {get: "getF64", set: "setF64", t: TF64};
+			case _: {get: "getI64", set: "setI64", t: TI64};
+		}
+
+	// the struct at src copied to dst, scalar by scalar (dst and src: pure)
+	function copyStruct(dst:Ex, src:Ex, c:TClass) {
+		for (f in CInterop.scalars(c, 0)) {
+			var a = rawAccess(f.ty);
+			var v = ECallHost("hxmc_unsafe_Mem_" + a.get, [src, EInt(f.off)], a.t);
+			out.push(SExpr(ECallHost("hxmc_unsafe_Mem_" + a.set, [dst, EInt(f.off), v], TVoid)));
+		}
+	}
+
+	function zeroStruct(dst:Ex, c:TClass) {
+		for (f in CInterop.scalars(c, 0)) {
+			var a = rawAccess(f.ty);
+			out.push(SExpr(ECallHost("hxmc_unsafe_Mem_" + a.set, [dst, EInt(f.off), nullOf(a.t)], TVoid)));
+		}
+	}
+
+	// a struct value: its address, which stays valid while this function runs
+	// (an object's struct field is copied out); fresh: a temporary of this
+	// frame that nothing else holds
+	function structRhs(e:TExpr):{x:Ex, fresh:Bool} {
+		var x = rhs(e);
+		return {x: x, fresh: switch x {
+			case ELocal(lo): freshSlots.exists(lo);
+			case _: false;
+		}};
+	}
+
+	// a struct value in memory of its own: the temporary itself, or a copy
+	function structOwn(e:TExpr, c:TClass):Local {
+		var r = structRhs(e);
+		switch r.x {
+			case ELocal(lo) if (r.fresh):
+				freshSlots.remove(lo);
+				return lo;
+			case _:
+		}
+		var src = r.x.match(ELocal(_) | EGlobal(_, _)) ? r.x : ELocal(asLocal(r.x, structTy(c)));
+		var s = newSlot(structTy(c), false);
+		copyStruct(ELocal(s), src, c);
+		return s;
+	}
+
+	// struct values copied out of a box: assigning their fields would change
+	// the copy only (FnLower.placeOf)
+	var unboxed = new Map<Local, Bool>();
+
+	// where the struct e is, without a copy: its address, built when the
+	// caller asks (after what it evaluates next: an object moves at a GC
+	// point); heap: in an object
+	// (write: for an assignment, which a copy out of a box cannot take)
+	function placeOf(e:TExpr, write = false):{addr:() -> Ex, heap:Bool} {
+		switch strip(e).eexpr {
+			case TField(obj, FInstance(c, _, cf)) if (CInterop.isStruct(c)):
+				var base = placeOf(obj, write);
+				var off = CInterop.field(c, cf.cfName).off;
+				return {addr: () -> off == 0 ? base.addr() : EBin(LAdd, base.addr(), EConv(I2L, EInt(off))), heap: base.heap};
+			case TField(obj, FInstance(c, _, cf)) if (!c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface) && cf.cfKind.match(Var(_)) && structOf(cf.cfType) != null):
+				var ci = l.classInfo(c);
+				var idx = ci.fieldIndex(cf.cfName);
+				var o = asLocal(value(obj), tyOf(obj));
+				return {addr: () -> EFieldAddr(ci, idx, ELocal(o)), heap: true};
+			case _:
+				var x = rhs(e);
+				var lo = switch x {
+					case ELocal(lo): lo;
+					case _: asLocal(x, tyOf(e));
+				};
+				if (write && unboxed.exists(lo)) cfail('this struct value is a copy (of an Array element, a Dynamic or a Null<T> value): assigning its fields would change the copy only (copy it into a variable, change that, store it back)', e);
+				return {addr: () -> ELocal(lo), heap: false};
+		}
+	}
+
+	// lhs = r for a struct: its bytes copied; the value is the copy's source
+	function structAssign(lhs:TExpr, r:TExpr, c:TClass, e:TExpr):Ex {
+		switch strip(lhs).eexpr {
+			case TLocal(v) if (isBoxed(v)):
+				return cfail('the struct local ' + v.vName + ' is captured by a closure and assigned: not supported (a class instead)', e);
+			case TLocal(v):
+				var lo = local(v, lhs);
+				var src = structRhs(r).x;
+				if (!src.match(ELocal(_) | EGlobal(_, _))) src = ELocal(asLocal(src, tyOf(r)));
+				if (!isLocal(src, lo)) copyStruct(ELocal(lo), src, c);
+				return coerce(ELocal(lo), structTy(c), tyOf(e));
+			case TField(_, FStatic(k, cf)) if (!k.hasClassFlag(CExtern)):
+				var g = l.staticVar(k, cf);
+				var t = l.getProgram().globals[g].ty;
+				var src = structRhs(r).x;
+				if (!src.match(ELocal(_) | EGlobal(_, _))) src = ELocal(asLocal(src, tyOf(r)));
+				copyStruct(EGlobal(g, t), src, c);
+				return coerce(EGlobal(g, t), t, tyOf(e));
+			case TField(_, FInstance(k, _, _)) if (!k.hasClassFlag(CInterface) && !k.hasClassFlag(CExtern)):
+				var p = placeOf(lhs, true);
+				var src = ELocal(asLocal(structRhs(r).x, tyOf(r)));
+				copyStruct(p.addr(), src, c);
+				return coerce(src, structTy(c), tyOf(e));
+			case _:
+				// (an Array's element, a structural type's field: a new box)
+				return assign(lhs, () -> {x: rhs(r), t: tyOf(r)}, e);
+		}
+	}
+
+	// a == b for structs: every scalar equal (floats as floats: NaN differs from itself)
+	function structEq(a:TExpr, b:TExpr, c:TClass, e:TExpr):Ex {
+		var pa = placeOf(a);
+		var pb = placeOf(b);
+		var r:Null<Ex> = null;
+		for (f in CInterop.scalars(c, 0)) {
+			var x:Ex;
+			switch f.ty {
+				case CF64 | CF32:
+					var n = f.ty == CF64 ? "getF64" : "getF32";
+					x = EBin(FEq, temp(TF64, ECallHost("hxmc_unsafe_Mem_" + n, [pa.addr(), EInt(f.off)], TF64)),
+						temp(TF64, ECallHost("hxmc_unsafe_Mem_" + n, [pb.addr(), EInt(f.off)], TF64)));
+				case _:
+					var acc = rawAccess(f.ty);
+					var ga = temp(acc.t, ECallHost("hxmc_unsafe_Mem_" + acc.get, [pa.addr(), EInt(f.off)], acc.t));
+					var gb = temp(acc.t, ECallHost("hxmc_unsafe_Mem_" + acc.get, [pb.addr(), EInt(f.off)], acc.t));
+					x = EBin(acc.t == TI64 ? LEq : Eq, ga, gb);
+			}
+			r = r == null ? x : EBin(And, r, x);
+		}
+		return r == null ? EInt(1) : temp(TBool, r);
+	}
+
+	// new S(args) for a @:hxmc.struct class: its memory (a fresh slot, or
+	// into) zeroed, then the constructor called on it
+	function newStruct(c:TClass, cargs:Array<TExpr>, into:Null<Local>):Local {
+		var t = structTy(c);
+		var s = into != null ? into : newSlot(t, true);
+		if (c.clConstructor == null) {
+			zeroStruct(ELocal(s), c);
+			return s;
+		}
+		var ctor = l.structCtor(c);
+		var xs = args(cargs, tys(ctor), l.defaults.get(ctor), 1);
+		zeroStruct(ELocal(s), c);
+		out.push(SExpr(ECall(ctor, [(ELocal(s) : Ex)].concat(xs))));
+		return s;
+	}
+
+	// the argument types a call passes to f (without its result's address)
+	static function callTys(f:FuncInfo):Array<Ty> {
+		var t = tys(f);
+		if (f.sret) t.pop();
+		return t;
+	}
+
+	// a call of f; a struct result lands in a slot of this frame
+	function callFn(f:FuncInfo, xs:Array<Ex>, rt:Ty):Ex {
+		if (!f.sret) return coerceRhs(ECall(f, xs), f.ret, rt);
+		var s = newSlot(f.ret, true);
+		out.push(SExpr(ECall(f, xs.concat([ELocal(s)]))));
+		return coerce(ELocal(s), f.ret, rt);
+	}
+
+	static function hasStruct(s:SigInfo):Bool {
+		for (t in s.args)
+			if (t.match(TStruct(_))) return true;
+		return s.ret.match(TStruct(_));
+	}
+
+	// a call of a closure; a struct result lands in a slot of this frame
+	function callClos(s:SigInfo, c:Ex, xs:Array<Ex>, rt:Ty):Ex {
+		if (!s.ret.match(TStruct(_))) return coerceRhs(ECallClos(s, c, xs), s.ret, rt);
+		var r = newSlot(s.ret, true);
+		out.push(SExpr(ECallClos(s, c, xs.concat([ELocal(r)]))));
+		return coerce(ELocal(r), s.ret, rt);
+	}
+
+	// a struct value in a new box (its copy)
+	function box(x:Ex, n:String):Ex {
+		var ci = l.structBox(n);
+		var c = l.structClasses.get(n);
+		var src = x.match(ELocal(_) | EGlobal(_, _)) ? x : ELocal(asLocal(x, structTy(c)));
+		var b = temp(TRef(RObj(ci)), ENewObj(ci));
+		copyStruct(EFieldAddr(ci, 0, b), src, c);
+		return b;
+	}
+
+	// the value a box holds, copied out (null: zeros); a reference that is
+	// not one fails as a cast does
+	function unbox(x:Ex, from:Ty, n:String):Ex {
+		var ci = l.structBox(n);
+		var c = l.structClasses.get(n);
+		var t = TRef(RObj(ci));
+		var b = switch from {
+			case TRef(RObj(k)) if (k == ci): asLocal(x, from);
+			case _: asLocal(temp(TRef(RAny), ECallHost(l.native("hx_cast"), [coerce(x, from, TRef(RAny)), EType(TRClass(ci))], TRef(RAny))), TRef(RAny));
+		};
+		var s = newSlot(structTy(c), true);
+		unboxed.set(s, true);
+		out.push(SIf(EBin(RefEq, ELocal(b), ENull(b.ty)), block(() -> zeroStruct(ELocal(s), c)), block(() -> copyStruct(ELocal(s), EFieldAddr(ci, 0, ECast(t, ELocal(b))), c))));
+		return ELocal(s);
+	}
+
+	// a field of a structural type (or an interface's variable): a struct's box
+	function anonGet(name:String, obj:TExpr, e:TExpr):Ex {
+		var t = l.boxed(tyOf(e));
+		var x = EAnonGet(name, t, value(obj), anonHint(obj.etype, name, t));
+		return t == tyOf(e) ? x : coerce(temp(t, x), t, tyOf(e));
 	}
 
 	// ---- closures
@@ -1762,6 +2126,7 @@ class FnLower {
 		for (v in free) {
 			if (v == null) {
 				if (thisLocal == null) continue;
+				if (structCtor) cfail('a closure cannot capture this in the constructor of a struct (its memory is the caller\'s)', e);
 				caps.push({id: -1, ty: thisLocal.ty});
 				capVals.push(ELocal(thisLocal));
 				captureLocals.push(new Local(-1, "this", thisLocal.ty));
@@ -1769,6 +2134,7 @@ class FnLower {
 			}
 			var lo = locals.get(v.vId);
 			if (lo == null) continue;
+			if (lo.ty.match(TStruct(_))) cfail('a closure cannot capture the struct local ' + v.vName + ' (its memory is in this frame: copy the fields into locals)', e);
 			caps.push({id: v.vId, ty: lo.ty});
 			capVals.push(ELocal(lo));
 			captureLocals.push(new Local(v.vId, v.vName, lo.ty));

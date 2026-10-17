@@ -119,7 +119,7 @@ class Roots {
 	// whether e is (arithmetic on) the address of a heap object
 	static function derived(e:Ex, raw:Bits):Bool
 		return switch e {
-			case ECallHost("hxmc_unsafe_Mem_addr", _, _): true;
+			case ECallHost("hxmc_unsafe_Mem_addr", _, _) | EFieldAddr(_): true;
 			case ELocal(l): raw.get(l.id);
 			case EBin(LAdd | LSub | LAnd | LOr | LXor, a, b): derived(a, raw) || derived(b, raw);
 			case ECast(_, a): derived(a, raw);

@@ -60,7 +60,7 @@ class MirBuild {
 			case TF64: F64;
 			case TI64: I64;
 			case TVoid: Void;
-			case TRef(_): I64;
+			case TRef(_) | TStruct(_): I64;
 		};
 
 	// ---- instruction helpers
@@ -721,11 +721,12 @@ class MirBuild {
 		seal(entry);
 		cur = entry;
 		var params = [];
-		for (i in 0...fn.args.length) {
-			var pi = mk(Param, f.params[i]);
-			pi.imm = i;
-			params.push(add(pi));
-		}
+		if (fn.cAbi != null) params = cEntry() else
+			for (i in 0...fn.args.length) {
+				var pi = mk(Param, f.params[i]);
+				pi.imm = i;
+				params.push(add(pi));
+			}
 		if (nslots > 0) {
 			fr = push(nslots);
 			// (the other slots hold null or a valid reference already: rt_sp_hw)
@@ -1021,6 +1022,12 @@ class MirBuild {
 			case SReturn(null):
 				unwindTo(0);
 				retFrom(-1);
+			case SReturn(e) if (cSret >= 0):
+				// (a callback's struct result, through the memory its caller gave)
+				var v = ex(e);
+				copyBytes(cSret, v, cSretSize);
+				unwindTo(0);
+				retFrom(f.ret == Void ? -1 : cSret);
 			case SReturn(e):
 				var v = ex(e);
 				unwindTo(0);
@@ -1583,6 +1590,7 @@ class MirBuild {
 			case EBox(t, x): boxFrom(t, ex(x));
 			case EUnbox(t, x): unboxTo(t, ex(x));
 			case EField(c, idx, obj): slotLoad(ex(obj), c.locs[idx], c.fields[idx].ty);
+			case EFieldAddr(c, idx, obj): op2(Add, I64, ex(obj), lconst32(8 * c.locs[idx]));
 			case EAnonGet(name, t, obj, hint): anonGet(name, t, obj, hint);
 			case ECast(_, x): ex(x);
 			case EInstOf(c, x): instOf(ex(x), c);
@@ -1624,7 +1632,8 @@ class MirBuild {
 				var c = ex(clos);
 				var xs = [for (a in args) ex(a)];
 				var fp = load(I64, 8, c, 0);
-				callInd(fp, [c].concat(xs), mty(s.ret), [I64].concat([for (t in s.args) mty(t)]));
+				// (a struct result: the address of the caller's memory, last)
+				callInd(fp, [c].concat(xs), mty(s.ret), [I64].concat([for (t in s.args) mty(t)]).concat(s.ret.match(TStruct(_)) ? [I64] : []));
 			case ECallAnon(name, s, obj, args): callAnon(name, s, obj, args);
 			case ECallHost(name, args, ret): host(name, args, ret);
 			case ENewObj(c): alloc(c.nslots < 1 ? 1 : c.nslots, c.tindex, Abi.K_OBJ, true);
@@ -2022,7 +2031,7 @@ class MirBuild {
 			var k = k - first;
 			switch ct {
 				case CStruct(c):
-					cStructArg(name, c, v, args, sizes, groups);
+					cStructArg(c, v, args, sizes, groups);
 					structs = true;
 					continue;
 				case _:
@@ -2036,26 +2045,59 @@ class MirBuild {
 			args.push(v);
 			groups.push(1);
 		}
+		// (a struct result: its address the last argument, not passed but where
+		// the registers are stored, or passed in x8 on arm64; a first argument
+		// on x86-64 and WebAssembly)
 		var sret = switch sig.ret {
-			case CStruct(c): cStructRet(name, c);
+			case CStruct(c): cStructRet(c);
 			case _: null;
 		}
-		if (sret != null) {
-			args.push(sret.addr);
-			sizes.push(8);
-			groups.push(1);
-		}
+		var rt = mty(ret);
+		if (sret != null)
+			switch sret.ret {
+				case RRegs(_):
+					args.push(sret.addr);
+					sizes.push(8);
+					groups.push(1);
+					rt = Void;
+				case RSret if (abi.arm):
+					args.push(sret.addr);
+					sizes.push(8);
+					groups.push(1);
+					rt = Void;
+				case RSret:
+					args.unshift(sret.addr);
+					sizes.unshift(8);
+					groups.unshift(1);
+					rt = Void;
+				case RScalar(_, ct):
+					rt = ct == CF64 || ct == CF32 ? F64 : ct == CI64 || ct == CPtr ? I64 : I32;
+			}
 		var blocking = hxmc.ir.CInterop.BLOCKING.exists(name) && !abi.wasm;
 		if (blocking) call("rt_blocking_enter", [], Void);
-		var rt = sret != null ? Void : mty(ret);
 		var r = indirect ? callInd(xs[0], args, rt) : call(name, args, rt);
 		var ci = f.vals[r];
 		ci.cSizes = sizes;
 		if (structs) ci.cGroups = groups;
-		if (sret != null) ci.cRet = sret.parts;
 		if (va != null) ci.variadic = va;
+		if (sret != null)
+			switch sret.ret {
+				case RRegs(ps): ci.cRet = ps;
+				case RSret if (abi.arm): ci.cRet = [];
+				case _:
+			}
 		if (blocking) call("rt_blocking_leave", [], Void);
-		if (sret != null) return sret.addr;
+		if (sret != null) {
+			switch sret.ret {
+				case RScalar(off, ct):
+					switch ct {
+						case CF32: store(4, sret.addr, off, special("f64_to_f32", [r], I32));
+						case _: store(hxmc.ir.CInterop.sizeOf(ct), sret.addr, off, r);
+					}
+				case _:
+			}
+			return sret.addr;
+		}
 		return switch sig.ret {
 			case CI8: op2(Sar, I32, op2(Shl, I32, r, iconst(24)), iconst(24));
 			case CI16: op2(Sar, I32, op2(Shl, I32, r, iconst(16)), iconst(16));
@@ -2066,63 +2108,154 @@ class MirBuild {
 		}
 	}
 
-	// Structs by value in C calls, AAPCS64 (macOS, Linux and Windows on
-	// arm64): a homogeneous aggregate of one to four floats or doubles travels
-	// in float registers, another struct of up to 16 bytes in one or two
-	// integer registers, a larger one as the address of a copy (an argument)
-	// or of the caller's memory (a result, x8). A struct value is its address:
-	// a result lives in a slot of the caller's frame, until the caller returns
+	// Structs by value in C calls (CAbi: the rules of each ABI). A struct
+	// value is its address: an argument is read from it, a result is stored
+	// in a slot of the caller's frame, which lives until the caller returns
 	// or the same call runs again.
-	function cStructCheck(name:String) {
-		if (!abi.arm || abi.wasm) throw new Unsupported('C function ${cName(name)}: structs by value are implemented on arm64 only (pass a Ptr)');
-	}
-
 	static function cName(name:String):String
 		return StringTools.startsWith(name, hxmc.ir.CInterop.INDIRECT) ? name.substr(hxmc.ir.CInterop.INDIRECT.length) : name;
 
-	// 8 or 4: the struct is a homogeneous aggregate of doubles or floats; 0: not one
-	static function hfa(c:core.TType.TClass):Int {
-		var fs = hxmc.ir.CInterop.scalars(c, 0);
-		if (fs.length == 0 || fs.length > 4) return 0;
-		var t = fs[0].ty;
-		if (t != CF64 && t != CF32) return 0;
-		for (x in fs)
-			if (x.ty != t) return 0;
-		return t == CF64 ? 8 : 4;
+	// a part of the struct at v as an argument: a double or a float's bits in
+	// a float register, or the bytes as the low bytes of a word
+	function cPart(v:Int, p:CAbi.CPart):Int
+		return !p.float ? cWord(v, p.off, p.size) : p.size == 8 ? load(F64, 8, v, p.off) : special("f32bits_to_freg", [load(I32, 4, v, p.off)], F64);
+
+	// a scalar of C type ct at v + off, as the value cCall passes for it
+	function cScalar(v:Int, off:Int, ct:CTy):Int
+		return switch ct {
+			case CF64: load(F64, 8, v, off);
+			case CF32: special("f32_to_f64", [load(I32, 4, v, off)], F64);
+			case CI64 | CPtr: load(I64, 8, v, off);
+			case CI8 | CI16: load(I32, ct == CI8 ? 1 : 2, v, off, true);
+			case _: load(I32, hxmc.ir.CInterop.sizeOf(ct), v, off);
+		}
+
+	function cStructArg(c:core.TType.TClass, v:Int, args:Array<Int>, sizes:Array<Int>, groups:Array<Int>) {
+		switch CAbi.arg(abi, c) {
+			case PRegs(ps) | PStack(ps):
+				var stack = CAbi.arg(abi, c).match(PStack(_));
+				for (k in 0...ps.length) {
+					args.push(cPart(v, ps[k]));
+					sizes.push(ps[k].float ? ps[k].size : 8);
+					groups.push(k > 0 ? 0 : stack ? -ps.length : ps.length);
+				}
+			case PScalar(off, ct):
+				args.push(cScalar(v, off, ct));
+				sizes.push(hxmc.ir.CInterop.sizeOf(ct));
+				groups.push(1);
+			case PCopy:
+				var l = hxmc.ir.CInterop.layout(c);
+				var copy = stackAddr(f.slot((l.size + 7) & ~7, l.align > 8 ? l.align : 8));
+				copyBytes(copy, v, l.size);
+				args.push(copy);
+				sizes.push(8);
+				groups.push(1);
+		}
 	}
 
-	function cStructArg(name:String, c:core.TType.TClass, v:Int, args:Array<Int>, sizes:Array<Int>, groups:Array<Int>) {
-		cStructCheck(name);
-		var l = hxmc.ir.CInterop.layout(c);
-		var h = hfa(c);
-		if (h != 0) {
-			var fs = hxmc.ir.CInterop.scalars(c, 0);
-			for (k in 0...fs.length) {
-				args.push(h == 8 ? load(F64, 8, v, fs[k].off) : special("f32bits_to_freg", [load(I32, 4, v, fs[k].off)], F64));
-				sizes.push(h);
-				groups.push(k == 0 ? fs.length : 0);
-			}
-			return;
+	// A function entered from C with structs by value (FuncInfo.cAbi: a
+	// callback's wrapper): its parameters by the ABI's rules (CAbi), each
+	// struct's parts stored in a slot whose address is the argument (or the
+	// address of the caller's copy); a struct result returned in registers
+	// from its memory (MFunc.cRet), or copied to the memory the caller gives
+	// (cSret: a first argument, x8 on arm64). WebAssembly (hxmc's own
+	// convention for callbacks, which JavaScript calls): structs by address,
+	// a result stored at a first argument.
+	var cSret = -1;
+	var cSretSize = 0;
+
+	function cEntry():Array<Int> {
+		var sig = fn.cAbi;
+		var tys:Array<MTy> = [], groups = [], sizes = [];
+		var plan:Array<{at:Int, pass:Null<CAbi.CPass>}> = [];
+		var rc = switch sig.ret {
+			case CStruct(c): c;
+			case _: null;
+		};
+		var rr = rc == null ? null : abi.wasm ? CAbi.CRet.RSret : CAbi.ret(abi, rc);
+		var first = rr != null && rr.match(RSret) && !abi.arm;
+		if (first) {
+			tys.push(I64);
+			groups.push(1);
+			sizes.push(8);
 		}
-		if (l.size <= 16) {
-			var n = (l.size + 7) >> 3;
-			for (k in 0...n) {
-				args.push(cWord(v, 8 * k, l.size - 8 * k < 8 ? l.size - 8 * k : 8));
-				sizes.push(8);
-				groups.push(k == 0 ? n : 0);
+		for (ct in sig.args) {
+			var at = tys.length;
+			switch ct {
+				case CStruct(c):
+					var p = abi.wasm ? CAbi.CPass.PCopy : CAbi.arg(abi, c);
+					switch p {
+						case PRegs(ps) | PStack(ps):
+							for (k in 0...ps.length) {
+								tys.push(ps[k].float ? F64 : I64);
+								sizes.push(ps[k].float ? ps[k].size : 8);
+								groups.push(k > 0 ? 0 : p.match(PStack(_)) ? -ps.length : ps.length);
+							}
+						case PCopy | PScalar(_):
+							tys.push(I64);
+							sizes.push(8);
+							groups.push(1);
+					}
+					plan.push({at: at, pass: p});
+				case _:
+					tys.push(ct == CF64 ? F64 : ct == CI32 ? I32 : I64);
+					sizes.push(hxmc.ir.CInterop.sizeOf(ct));
+					groups.push(1);
+					plan.push({at: at, pass: null});
 			}
-			return;
 		}
-		var copy = stackAddr(f.slot((l.size + 7) & ~7, l.align > 8 ? l.align : 8));
+		f.params = tys;
+		f.cParams = groups;
+		f.cParamSizes = sizes;
+		var ps = [];
+		for (i in 0...tys.length) {
+			var pi = mk(Param, tys[i]);
+			pi.imm = i;
+			ps.push(add(pi));
+		}
+		if (rc != null) {
+			cSretSize = hxmc.ir.CInterop.layout(rc).size;
+			switch rr {
+				case RSret if (first): cSret = ps[0];
+				case RSret:
+					var pi = mk(Param, I64);
+					pi.imm = -1;
+					cSret = add(pi);
+				case RRegs(parts): f.cRet = parts;
+				case _:
+			}
+			if (abi.wasm) f.ret = Void;
+		}
+		var vals = [];
+		for (k in 0...sig.args.length) {
+			var p = plan[k];
+			switch p.pass {
+				case PRegs(parts) | PStack(parts):
+					var c = switch sig.args[k] {
+						case CStruct(c): c;
+						case _: null;
+					};
+					var s = stackAddr(f.slot((hxmc.ir.CInterop.layout(c).size + 7) & ~7, 8));
+					for (j in 0...parts.length) {
+						var v = ps[p.at + j];
+						if (parts[j].float && parts[j].size == 4) store(4, s, parts[j].off, special("freg_to_f32bits", [v], I32))
+						else store(8, s, parts[j].off, v);
+					}
+					vals.push(s);
+				case _: vals.push(ps[p.at]);
+			}
+		}
+		return vals;
+	}
+
+	// n bytes from src to dst, in the largest accesses that fit
+	function copyBytes(dst:Int, src:Int, n:Int) {
 		var at = 0;
-		while (at < l.size) {
-			var s = l.size - at >= 8 ? 8 : l.size - at >= 4 ? 4 : l.size - at >= 2 ? 2 : 1;
-			store(s, copy, at, load(s == 8 ? I64 : I32, s, v, at));
+		while (at < n) {
+			var s = n - at >= 8 ? 8 : n - at >= 4 ? 4 : n - at >= 2 ? 2 : 1;
+			store(s, dst, at, load(s == 8 ? I64 : I32, s, src, at));
 			at += s;
 		}
-		args.push(copy);
-		sizes.push(8);
-		groups.push(1);
 	}
 
 	// n bytes (1 to 8) at base + off as the low bytes of a word (not reading past them)
@@ -2139,15 +2272,24 @@ class MirBuild {
 		return w;
 	}
 
-	// the memory of a struct result and the registers it comes back in
-	function cStructRet(name:String, c:core.TType.TClass):{addr:Int, parts:Array<Int>} {
-		cStructCheck(name);
+	// the memory of a struct result (in this frame) and how it comes back
+	function cStructRet(c:core.TType.TClass):{addr:Int, ret:CAbi.CRet} {
 		var l = hxmc.ir.CInterop.layout(c);
-		var h = hfa(c);
 		// (the registers' words are stored whole: the slot is rounded up to them)
 		var addr = stackAddr(f.slot((l.size + 7) & ~7, l.align > 8 ? l.align : 8));
-		var parts = h != 0 ? [for (_ in hxmc.ir.CInterop.scalars(c, 0)) -h] : l.size <= 16 ? [for (_ in 0...(l.size + 7) >> 3) 8] : [];
-		return {addr: addr, parts: parts};
+		return {addr: addr, ret: CAbi.ret(abi, c)};
+	}
+
+	// MIns.cRet of a result in registers: per part, 8 an integer register's
+	// word, -8 a float register's 8 bytes, -4 its low 4 (a float)
+	static function cRetParts(ps:Array<CAbi.CPart>):Array<Int>
+		return [for (p in ps) !p.float ? 8 : p.size == 4 && ps.length > 0 && allFloat4(ps) ? -4 : -8];
+
+	// (AAPCS64's aggregate of floats comes back one float per register)
+	static function allFloat4(ps:Array<CAbi.CPart>):Bool {
+		for (p in ps)
+			if (!p.float || p.size != 4 || p.off % 8 == 0 && ps.length <= 2 && ps[ps.length - 1].off == 8) return false;
+		return true;
 	}
 
 	// ---- the intrinsics of hxmc.unsafe (Mem, Atomic: the runtime's Haxe code)
@@ -2303,6 +2445,8 @@ class MirBuild {
 			case "arm": iconst(abi.arm ? 1 : 0);
 			case "target": iconst(targetCode(abi));
 			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
+			// (a struct value's memory: FnLower.newSlot)
+			case "structSlot": stackAddr(f.slot((intLiteral(args[0], "a struct slot") + 7) & ~7, intLiteral(args[1], "a struct slot")));
 			case "ult": cmp(CULt, ex(args[0]), ex(args[1]));
 			case "f64Bits": op1(FToBits, I64, ex(args[0]));
 			case "bitsF64": op1(BitsToF, F64, ex(args[0]));

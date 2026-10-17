@@ -571,6 +571,29 @@ class Isel implements hxmc.Target.Selector {
 	function ins(i:MIns, b:MBlock, next:Null<MBlock>) {
 		switch i.op {
 			case Phi | Const | SymAddr | StackAddr:
+			case Param if (i.imm < 0):
+				// (x8: the address of the struct result, MirBuild.cEntry)
+				mov(reg(i.id), 8);
+			case Param if (m.cParams != null):
+				var loc = paramLocs()[i.imm];
+				var d = reg(i.id);
+				if (loc.reg >= 0) mov(d, loc.reg) else if (loc.size == 4 && i.ty == F64) {
+					var g = f.newReg(false);
+					var x = emit(LOAD);
+					x.d = g;
+					x.base = -3;
+					x.disp = loc.off;
+					x.size = 4;
+					var fm = emit(FMOVSW);
+					fm.d = d;
+					fm.s1 = g;
+				} else {
+					var x = emit(LOAD);
+					x.d = d;
+					x.base = -3;
+					x.disp = loc.off;
+					x.size = loc.size;
+				}
 			case Param:
 				var k = i.imm;
 				// (stack arguments: 8-byte slots; Apple packs them by size)
@@ -822,6 +845,32 @@ class Isel implements hxmc.Target.Selector {
 				jmp(le);
 			case Switch:
 				switchIns(i, b);
+			case Ret if (i.a >= 0 && m.cRet != null):
+				// a struct in x0-x1 or d0-d3 (s0-s3), from its memory
+				var rs = [];
+				for (p in m.cRet) {
+					var r = f.newReg(p.float);
+					var l = emit(LOAD);
+					l.d = p.float && p.size == 4 ? f.newReg(false) : r;
+					l.size = p.float && p.size == 4 ? 4 : 8;
+					memOf(l, i.a, -1, 1, p.off, l.size);
+					if (p.float && p.size == 4) {
+						var fm = emit(FMOVSW);
+						fm.d = r;
+						fm.s1 = l.d;
+					}
+					rs.push(r);
+				}
+				var x = new LIns(RET);
+				x.uses = [];
+				var gk = 0, fk = 0;
+				for (k in 0...rs.length) {
+					var d = m.cRet[k].float ? D0 + fk++ : gk++;
+					mov(d, rs[k], 8);
+					x.uses.push(d);
+				}
+				flush();
+				push(x);
 			case Ret:
 				var x = new LIns(RET);
 				if (i.a >= 0) {
@@ -990,6 +1039,44 @@ class Isel implements hxmc.Target.Selector {
 		}
 	}
 
+	// where the parameters of a function entered from C with structs by
+	// value are (MFunc.cParams): a register, or a stack slot of the caller
+	// (offset, size), placed as call places arguments
+	var pLocs:Null<Array<{reg:Int, off:Int, size:Int}>> = null;
+	var pLocsOf:Null<MFunc> = null;
+
+	function paramLocs():Array<{reg:Int, off:Int, size:Int}> {
+		if (pLocsOf == m) return pLocs;
+		var r = [];
+		var gi = 0, fi = 0, stack = 0, spill = 0;
+		for (k in 0...m.params.length) {
+			var t = m.params[k];
+			var parts = m.cParams[k];
+			if (parts > 1 && (t == F64 ? fi : gi) + parts > 8) {
+				if (t == F64) fi = 8 else gi = 8;
+				spill = parts;
+				var al = apple ? m.cParamSizes[k] : 8;
+				stack = (stack + al - 1) & ~(al - 1);
+			}
+			if (t == F64 && fi < 8) {
+				r.push({reg: D0 + fi++, off: 0, size: 8});
+				continue;
+			}
+			if (t != F64 && gi < 8) {
+				r.push({reg: ARG_GPRS[gi++], off: 0, size: 8});
+				continue;
+			}
+			var size = !apple && spill == 0 ? 8 : m.cParamSizes[k];
+			stack = (stack + size - 1) & ~(size - 1);
+			if (spill > 0) spill--;
+			r.push({reg: -1, off: stack, size: size});
+			stack += size;
+		}
+		pLocs = r;
+		pLocsOf = m;
+		return r;
+	}
+
 	function call(i:MIns) {
 		f.hasCalls = true;
 		var gi = 0, fi = 0, stack = 0;
@@ -1096,22 +1183,22 @@ class Isel implements hxmc.Target.Selector {
 		if (i.ty != Void) mov(reg(i.id), i.ty == F64 ? D0 : 0, 8);
 		if (i.cRet != null && i.cRet.length > 0) {
 			// a struct in x0-x1 or d0-d3 (s0-s3): out of them first, then into its memory
-			var rs = [];
-			for (k in 0...i.cRet.length) {
-				var p = i.cRet[k];
-				var r = f.newReg(p == -8);
-				if (p == -4) {
+			var rs = [], gk = 0, fk = 0;
+			for (p in i.cRet) {
+				var r = f.newReg(p.float && p.size == 8);
+				if (p.float && p.size == 4) {
 					var fm = emit(FMOVWS);
 					fm.d = r;
-					fm.s1 = D0 + k;
-				} else mov(r, p == 8 ? k : D0 + k, 8);
+					fm.s1 = D0 + fk++;
+				} else mov(r, p.float ? D0 + fk++ : gk++, 8);
 				rs.push(r);
 			}
 			for (k in 0...i.cRet.length) {
+				var p = i.cRet[k];
 				var s = emit(STORE);
-				s.size = i.cRet[k] == -4 ? 4 : 8;
+				s.size = p.float && p.size == 4 ? 4 : 8;
 				s.s1 = rs[k];
-				memOf(s, i.args[n], -1, 1, k * s.size, s.size);
+				memOf(s, i.args[n], -1, 1, p.off, s.size);
 			}
 		}
 	}

@@ -95,6 +95,10 @@ abstract Arena(Ptr) {
 	public inline function makeArray<T>(c:Class<T>, n:Int):Ptr<T>
 		return alloc(Struct.sizeOf(c) * n, Struct.alignOf(c) > 16 ? 16 : Struct.alignOf(c));
 
+	// the same as a bounds-checked Slice
+	public inline function slice<T>(c:Class<T>, n:Int):Slice<T>
+		return new Slice(makeArray(c, n), n);
+
 	// s as UTF-8 with a NUL (null for null)
 	public function cstring(s:String):CString {
 		if (s == null) return Ptr.nil();
