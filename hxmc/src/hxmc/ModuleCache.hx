@@ -74,9 +74,19 @@ import hxmc.ModuleStore;
 // after the module was restored runs the build again, with the modules
 // whose macros keep state there typed from their source
 // (HXMC_MODULE_CACHE_RETYPE); an edited module whose macros keep state has
-// the others that keep it there typed from the start. HXMC_STATS=1
-// prints what the cache did, HXMC_MODULE_CACHE_LOG=1 each module checked
-// and each one not kept.
+// the others that keep it there typed from the start.
+//
+// Nondeterministic macros (EvalStdLib.volatileHook, fileHook, envHook: the
+// macro std's natives, for the module being typed when the macro runs): a
+// call whose result changes from run to run (the time, randomness, the
+// network, processes) makes the module typed every build ("!" in its
+// macroState, "!!" when its dependents can copy the result: then what
+// stands for it in their hashes is new every build); a file or an
+// environment variable a macro reads is a read of the module (roles 3 and
+// 2 beside the defines' 0 and 1), kept with its value. @:hxmc.noCache and
+// -D hxmc.no-cache type a module every build, its dependents with it.
+// HXMC_STATS=1 prints what the cache did, HXMC_MODULE_CACHE_LOG=1 each
+// module checked, each one not kept and why one is typed every build.
 //
 // A build rewrites its key's index when it typed modules or restored other
 // variants: its modules first, then the variants it did not use, at most
@@ -119,6 +129,9 @@ class ModuleCache {
 		typing.TypeloadModule.typeFromSourceHook = onTypeFromSource;
 		core.TUnification.maybeUsedHook = onMaybeUsed;
 		macros.eval.EvalJit.staticVarHook = onStaticVar;
+		macros.eval.EvalStdLib.volatileHook = onVolatile;
+		macros.eval.EvalStdLib.fileHook = onFileRead;
+		macros.eval.EvalStdLib.envHook = onEnvRead;
 		// (a module of the macros' context restored as processed: -1, ModuleStore.readExtra)
 		typing.MacroContext.processedTypeHook = mt -> state != null && core.TFunctions.tModule(mt).mExtra.mProcessed < 0;
 		// (a lazy typing continues the typing of the module that made it)
@@ -171,10 +184,16 @@ class ModuleCache {
 			var s = state;
 			if (s == null) return typeExpr(ctx, e, withType, mode);
 			s.typingStack.push(ctx.m.curmod);
+			s.typerStack.push(ctx);
+			s.typerDepths.push(s.typingStack.length);
 			var r = try typeExpr(ctx, e, withType, mode) catch (x:Dynamic) {
+				s.typerStack.pop();
+				s.typerDepths.pop();
 				s.typingStack.pop();
 				throw x;
 			}
+			s.typerStack.pop();
+			s.typerDepths.pop();
 			s.typingStack.pop();
 			return r;
 		}
@@ -259,6 +278,197 @@ class ModuleCache {
 
 	static inline var RETYPE = "HXMC_MODULE_CACHE_RETYPE";
 
+	// the role and key of the module a maker stands for (a ModuleDef, or a
+	// module being typed from its source); null: of no context the store knows
+	static function makerKey(s:ModuleCacheState, maker:Dynamic):Null<String> {
+		if (Std.isOfType(maker, core.TType.ModuleDef)) {
+			var m:ModuleDef = maker;
+			var r = s.roleOfSign(m.mExtra.mSign);
+			return r < 0 ? null : r + "|" + key(m.mPath);
+		}
+		var x:{com:CommonContext, path:GlobalTypePath} = maker;
+		var r = s.roleOfSign(context.CommonCache.getCacheSign(x.com));
+		return r < 0 ? null : r + "|" + key(x.path);
+	}
+
+	// whether typing is still going on (a macro's call outside the typing of
+	// a module then is one a restored module would not make again)
+	static function stillTyping(s:ModuleCacheState):Bool
+		return s.com.stage.getIndex() < CTypingDone.getIndex();
+
+	// EvalStdLib.volatileHook: a macro called something whose result changes
+	// from run to run (the time, randomness, the network, a process): the
+	// module being typed is typed every build. Its dependents see it through
+	// its interface as parsed, unless the call is in what they can copy (an
+	// inline or macro field, a field whose type is not written out, a build
+	// macro): then its interface is new every build too ("!!")
+	static function onVolatile(what:String) {
+		var s = state;
+		if (s == null) return;
+		var maker = s.typingStack.length == 0 ? null : s.typingStack[s.typingStack.length - 1];
+		if (maker == null) {
+			if (stillTyping(s) && s.volatileReason == null) s.volatileReason = "a macro called " + what + " outside the typing of a module";
+			return;
+		}
+		if (maker == s.lastVolatileMaker && s.lastVolatileLeaky) return;
+		var leaky = leakyCall(s);
+		if (maker == s.lastVolatileMaker && !leaky) return;
+		s.lastVolatileMaker = maker;
+		s.lastVolatileLeaky = leaky;
+		var k = makerKey(s, maker);
+		if (k == null) return;
+		mutex.acquire();
+		var known = s.volatileMakers.get(k);
+		if (known == true || (known == false && !leaky)) {
+			mutex.release();
+			return;
+		}
+		s.volatileMakers.set(k, leaky);
+		mutex.release();
+		var reason = "macro called " + what + callSite(s);
+		mutex.acquire();
+		s.liveState.push({maker: maker, path: (leaky ? "!!" : "!") + reason});
+		mutex.release();
+	}
+
+	// whether the macro running now was called where the module's dependents
+	// can copy its result (see onVolatile)
+	static function leakyCall(s:ModuleCacheState):Bool {
+		var n = s.typerStack.length;
+		if (n == 0) return true;
+		// (a build macro, a lazy typing: not an expression of a field)
+		if (s.typerDepths[n - 1] != s.typingStack.length) return true;
+		var cf = s.typerStack[n - 1].f.curfield;
+		if (cf == null) return true;
+		switch cf.cfKind {
+			case Method(MethInline | MethMacro): return true;
+			case Var(v) if (v.vRead == AccInline): return true;
+			case _:
+		}
+		return inferred(cf.cfType, 0);
+	}
+
+	// whether a field's type has parts inferred from its expression
+	static function inferred(t:T, depth:Int):Bool {
+		if (depth > 16) return true;
+		return switch t {
+			case TMono(_): true;
+			// (a field being typed: its type as declared)
+			case TLazy(l):
+				switch l.value {
+					case LAvailable(x) | LProcessing(x): inferred(x, depth + 1);
+					case LWait(_): true;
+				}
+			case TEnum(_, l) | TInst(_, l) | TType(_, l) | TAbstract(_, l):
+				var r = false;
+				for (x in l)
+					if (inferred(x, depth + 1)) r = true;
+				r;
+			case TFun(sig):
+				var r = inferred(sig.ret, depth + 1);
+				for (a in sig.args)
+					if (inferred(a.type, depth + 1)) r = true;
+				r;
+			case TAnon(a):
+				var r = false;
+				for (f in a.aFields)
+					if (inferred(f.cfType, depth + 1)) r = true;
+				r;
+			case TDynamic(x): x != null && inferred(x, depth + 1);
+		}
+	}
+
+	// where the macro made the call: the innermost frame of Eval's stack in
+	// a file of no std (else the innermost), as file:line
+	static function callSite(s:ModuleCacheState):String {
+		var env = try macros.eval.EvalContext.getEvalOpt(null).env catch (_:Dynamic) null;
+		var first:Null<String> = null;
+		var cwd = haxe.io.Path.addTrailingSlash(haxe.io.Path.normalize(Sys.getCwd()));
+		var depth = 0;
+		while (env != null && depth++ < 256) {
+			var file = try macros.eval.EvalHash.revHash(env.envInfo.pfile) catch (_:Dynamic) null;
+			if (file != null && file != "" && file != "?") {
+				var line = try syntax.Lexer.findPos(new core.Globals.Pos(file, env.envLeavePmin, env.envLeavePmax)).line catch (_:Dynamic) 0;
+				var f = haxe.io.Path.normalize(file);
+				if (StringTools.startsWith(f, cwd)) f = f.substr(cwd.length);
+				var site = f + ":" + line;
+				if (first == null) first = site;
+				if (!s.isStdFile(file)) return " at " + site;
+			}
+			env = env.envParent;
+		}
+		return first == null ? "" : " at " + first;
+	}
+
+	// EvalStdLib.fileHook: a macro read a file (its content, a directory's
+	// listing, whether it exists, its status, its full path): a read of the
+	// module being typed, kept with its value (ModuleCacheState.value, role 3)
+	static function onFileRead(kind:String, path:String) {
+		var s = state;
+		if (s == null) return;
+		var abs = haxe.io.Path.normalize(try FileSystem.absolutePath(path) catch (_:Dynamic) path);
+		macroRead(s, 3, kind + ":" + abs, "a macro read " + path);
+	}
+
+	// EvalStdLib.envHook: a macro read an environment variable (null: the
+	// whole environment): a read of the module being typed (role 2)
+	static function onEnvRead(name:Null<String>) {
+		var s = state;
+		if (s == null) return;
+		macroRead(s, 2, name == null ? "*" : name, "a macro read the environment");
+	}
+
+	static function macroRead(s:ModuleCacheState, role:Int, name:String, what:String) {
+		var maker = s.typingStack.length == 0 ? null : s.typingStack[s.typingStack.length - 1];
+		if (maker == null) {
+			if (stillTyping(s) && s.volatileReason == null) s.volatileReason = what + " outside the typing of a module";
+			return;
+		}
+		var k = makerKey(s, maker);
+		if (k == null) return;
+		mutex.acquire();
+		var l = s.moduleReads.get(k);
+		if (l == null) s.moduleReads.set(k, l = new Map());
+		l.set(role + "\x00" + name, true);
+		mutex.release();
+	}
+
+	// -D hxmc.no-cache=<entries> (comma-separated: a package or module path,
+	// or a directory named so in the path of the class path the module's
+	// file is in, such as a library's; without a value, every module):
+	// whether it names the module. Read without Define.readHook (not a read
+	// of the build's)
+	static function noCache(s:ModuleCacheState, path:GlobalTypePath, file:Null<String>):Bool {
+		var l = s.noCacheList;
+		if (l == null) {
+			var d = s.com.defines.values;
+			var v = d.get("hxmc.no-cache");
+			if (v == null) v = d.get("hxmc.no_cache");
+			l = s.noCacheList = v == null ? [] : v == "1" || v == "" ? ["*"] : [for (x in v.split(",")) if (StringTools.trim(x) != "") StringTools.trim(x)];
+		}
+		if (l.length == 0) return false;
+		var dotted = path.pack.concat([path.name]).join(".");
+		// (the class path the file is in: its directory without the package's)
+		var root = file == null ? "" : "/" + haxe.io.Path.directory(StringTools.replace(file, "\\", "/")) + "/";
+		var packDir = "/" + path.pack.join("/") + (path.pack.length > 0 ? "/" : "");
+		if (StringTools.endsWith(root, packDir)) root = root.substr(0, root.length - packDir.length + 1);
+		for (e in l) {
+			if (e == "*" || dotted == e || StringTools.startsWith(dotted, e + ".")) return true;
+			if (root.indexOf("/" + e + "/") >= 0) return true;
+		}
+		return false;
+	}
+
+	// @:hxmc.noCache on a type of the module
+	static function noCacheMeta(m:ModuleDef):Bool {
+		for (t in m.mTypes) {
+			var meta = core.TFunctions.tInfos(t).mtMeta;
+			for (x in meta)
+				if (core.Meta.toString(x.meta) == ":hxmc.noCache") return true;
+		}
+		return false;
+	}
+
 	// per module, the macro classes whose state its macros used (Variant.macroState)
 	static function stateMakers(s:ModuleCacheState):haxe.ds.ObjectMap<ModuleDef, Array<String>> {
 		var r = new haxe.ds.ObjectMap<ModuleDef, Array<String>>();
@@ -273,6 +483,15 @@ class ModuleCache {
 			}
 			var l = r.get(maker);
 			if (l == null) r.set(maker, l = []);
+			// (one reason a module is typed every build: the first call whose
+			// result its dependents can copy, else the first)
+			if (StringTools.startsWith(ls.path, "!")) {
+				var i = -1;
+				for (j in 0...l.length)
+					if (StringTools.startsWith(l[j], "!")) i = j;
+				if (i < 0) l.push(ls.path) else if (!StringTools.startsWith(l[i], "!!") && StringTools.startsWith(ls.path, "!!")) l[i] = ls.path;
+				continue;
+			}
 			if (l.indexOf(ls.path) < 0) l.push(ls.path);
 		}
 		for (l in r)
@@ -698,9 +917,14 @@ class ModuleCache {
 
 	static function verify(com:CommonContext, s:ModuleCacheState, v:Variant, mPath:GlobalTypePath, mExtra:ModuleDefExtra):Null<ModuleSkipReason> {
 		var file = core.Path.UniqueKey.lazyPath(mExtra.mFile);
-		if (!v.matched) return FileChanged(file + " (defines)");
+		if (!v.matched) return FileChanged(file + " (" + s.mismatch(v) + ")");
+		if (noCache(s, mPath, file)) return FileChanged(file + " (-D hxmc.no-cache)");
 		// (its macros kept state, for other modules' macros too: restored
-		// while no macro of this build uses that state, else typed again)
+		// while no macro of this build uses that state, else typed again;
+		// "!": typed every build, its macros' results change from run to run)
+		for (c in v.macroState)
+			if (StringTools.startsWith(c, "!"))
+				return FileChanged(file + " (" + c.substr(StringTools.startsWith(c, "!!") ? 2 : 1) + ", every build)");
 		for (c in v.macroState)
 			if (StringTools.startsWith(c, "Context.") || s.retype.exists(c) || s.touched.exists(c))
 				return FileChanged(file + " (its macros keep state in " + c + ", " + (StringTools.startsWith(c, "Context.") ? "every build" : "used by this build's macros") + ")");
@@ -763,6 +987,15 @@ class ModuleCache {
 		if (s == null) return;
 		s.captured = true;
 		var t0 = haxe.Timer.stamp();
+		// (the files and environment the macros read, as they are now)
+		s.macroValues = new Map();
+		{
+			var mcom = com.getMacros();
+			var cs = mcom != null && context.CommonCache.getCacheSign(mcom) == s.signs[1] ? [com, mcom] : [com];
+			for (c in cs)
+				for (m in c.modules)
+					if ((m.mExtra.mKind == MCode || m.mExtra.mKind == MMacro) && s.restored(m) == null) s.typedCount++;
+		}
 		{
 			var mcom = com.getMacros();
 			fixMarks(s, mcom != null && context.CommonCache.getCacheSign(mcom) == s.signs[1] ? [com, mcom] : [com]);
@@ -770,6 +1003,9 @@ class ModuleCache {
 		// (a mark the store could not give back to its maker)
 		if (s.unattributedMarks > 0 && s.volatileReason == null) s.volatileReason = s.unattributedMarks + " structural marks made outside the typing of a module";
 		var stateful = stateMakers(s);
+		for (l in stateful)
+			for (c in l)
+				if (StringTools.startsWith(c, "!")) s.volatileCount++;
 		if (s.volatileReason != null) return;
 		if (Common.hasErrorToReport(com)) {
 			s.volatileReason = "errors";
@@ -824,6 +1060,22 @@ class ModuleCache {
 				if (x.mKind == MExtern) {
 					skip("kind");
 					continue;
+				}
+				// (two types with one path: an abstract whose implementation class
+				// @:native gave the abstract's path, processed in the macros'
+				// context, eval's mbedtls.SslAuthmode; HXB names a type by its
+				// module and name, so read back one would stand for the other)
+				if (m.mTypes.length > 1) {
+					var names = new Map<String, Bool>(), twice = false;
+					for (t in m.mTypes) {
+						var n = core.Globals.sTypePath(core.TFunctions.tInfos(t).mtPath);
+						if (names.exists(n)) twice = true;
+						names.set(n, true);
+					}
+					if (twice) {
+						skip("two types with one path");
+						continue;
+					}
 				}
 				var file = core.Path.UniqueKey.lazyPath(x.mFile);
 				var time = Common.fileTime(file);
@@ -904,15 +1156,33 @@ class ModuleCache {
 						for (n in names.keys())
 							reads.push({role: role, name: n, value: s.value(role, n)});
 					var mr = s.moduleReads.get(role + "|" + v.key);
-					if (mr != null)
+					// (its macros reading its own file, as the view package's markup
+					// does: already what the module is checked by)
+					var own = haxe.io.Path.normalize(core.Path.getFullPath(file));
+					if (mr != null) {
+						var any = false;
 						for (k in mr.keys()) {
 							var i = k.indexOf("\x00");
 							var r = Std.parseInt(k.substr(0, i));
 							var n = k.substr(i + 1);
+							if (r == 3 && n.substr(n.indexOf(":") + 1) == own) continue;
+							any = true;
 							reads.push({role: r, name: n, value: s.value(r, n)});
 						}
+						if (!any) mr = null;
+					}
 					reads.sort((a, b) -> Reflect.compare(a.role + a.name, b.role + b.name));
 					v.reads = reads;
+					// (files and environment variables its macros read)
+					var outside = false;
+					for (r in reads)
+						if (r.role >= 2) {
+							outside = true;
+							if (s.log)
+								Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " reads "
+									+ (r.role == 2 ? "environment variable " + r.name : r.name) + " (its macros)");
+						}
+					if (outside) s.readingCount++;
 					v.buildReads = buildReads;
 					var ifaceMode = (x.mKind == MCode || x.mKind == MMacro) && StringTools.endsWith(file, ".hx") && !macroDefines && mr == null
 						&& !optimize && !macroBuilt(m);
@@ -926,6 +1196,17 @@ class ModuleCache {
 				v.marks = old != null ? old.marks : made == null ? [] : made;
 				var st = old != null ? null : stateful.get(m);
 				v.macroState = old != null ? old.macroState : st == null ? [] : st;
+				// (@:hxmc.noCache: typed every build, its dependents with it)
+				if (old == null && noCacheMeta(m) && !Lambda.exists(v.macroState, c -> StringTools.startsWith(c, "!"))) {
+					v.macroState = v.macroState.concat(["!!@:hxmc.noCache"]);
+					s.volatileCount++;
+				}
+				if (s.log)
+					for (c in v.macroState)
+						if (StringTools.startsWith(c, "!"))
+							Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " typed every build ("
+								+ c.substr(StringTools.startsWith(c, "!!") ? 2 : 1) + (StringTools.startsWith(c, "!!") ? ", its dependents with it" : "") + ")");
+				if (s.log && noCache(s, m.mPath, file)) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(m.mPath) + " typed every build (-D hxmc.no-cache)");
 				all.push(v);
 				byKey[role].set(v.key, v);
 				// restored and not processed again: the stored blob
@@ -1124,7 +1405,8 @@ class ModuleCache {
 		}
 		if (stats())
 			Sys.println('hxmc: module cache: ${s.checked} checked (${Std.int(s.checkTime * 1000)} ms), ${s.written} modules encoded (${Std.int(s.captureTime * 1000)} ms), '
-				+ '${s.typedUnder} typed again under restored ones, ${s.cycleTyped} with their cycle, interfaces ${Std.int(s.ifaceTime * 1000)} ms, $blobs blobs, index ${wrote ? "written" : "unchanged"} (${ms(t0)} ms)'
+				+ '${s.typedUnder} typed again under restored ones, ${s.cycleTyped} with their cycle, interfaces ${Std.int(s.ifaceTime * 1000)} ms, $blobs blobs, index ${wrote ? "written" : "unchanged"} (${ms(t0)} ms), '
+				+ '${s.typedCount} typed from source, ${s.volatileCount} every build, ${s.readingCount} reading files or the environment'
 				+ (s.volatileReason != null ? ' (not written: ${s.volatileReason})' : ''));
 	}
 }
@@ -1341,6 +1623,22 @@ class ModuleCacheState {
 	// the static variables of macro classes used by the macros run in the
 	// typing of a module (Variant.macroState)
 	public var liveState:Array<{maker:Dynamic, path:String}> = [];
+	// the typers of the expressions being typed through typeExprRef, and the
+	// depth of the typing stack each is at (ModuleCache.leakyCall)
+	public var typerStack:Array<context.Typecore.Typer> = [];
+	public var typerDepths:Array<Int> = [];
+	// per module (role and key) whose macros' results change from run to run,
+	// whether its dependents can copy them (ModuleCache.onVolatile)
+	public var volatileMakers = new Map<String, Bool>();
+	public var lastVolatileMaker:Null<Dynamic> = null;
+	public var lastVolatileLeaky = false;
+	// -D hxmc.no-cache's entries (ModuleCache.noCache)
+	public var noCacheList:Null<Array<String>> = null;
+	// the modules typed from their source, those typed every build
+	public var typedCount = 0;
+	public var volatileCount = 0;
+	// the modules typed in this build whose macros read files or the environment
+	public var readingCount = 0;
 	public var lastStateMaker:Null<Dynamic> = null;
 	public var lastStateClass:Null<TClass> = null;
 	// the macro classes this build's macros used, the restored modules whose
@@ -1531,6 +1829,13 @@ class ModuleCacheState {
 
 	// a define's value in a role now (null: not defined); "*": all of them
 	public function value(role:Int, name:String):Null<String> {
+		if (role >= 2) {
+			var k = role + "\x00" + name;
+			if (macroValues.exists(k)) return macroValues.get(k);
+			var x = role == 2 ? envValue(name) : fileValue(name);
+			macroValues.set(k, x);
+			return x;
+		}
 		var d = defsNow(role);
 		if (d == null) return "?";
 		if (name == "*") {
@@ -1539,6 +1844,59 @@ class ModuleCacheState {
 			return Fingerprint.hash([for (k in ks) k + "=" + d.get(k)].join("\n"));
 		}
 		return d.get(name);
+	}
+
+	// the values of the macros' reads of files and of the environment (roles 2
+	// and 3), computed once a build (again at the capture)
+	public var macroValues = new Map<String, Null<String>>();
+
+	// an environment variable's value ("*": the whole environment, without
+	// hxmc's own variables)
+	function envValue(name:String):Null<String> {
+		if (name != "*") return Sys.getEnv(name);
+		var env = Sys.environment();
+		var ks = [for (k in env.keys()) if (!StringTools.startsWith(k, "HXMC_")) k];
+		ks.sort(Reflect.compare);
+		return Fingerprint.hash([for (k in ks) k + "=" + env.get(k)].join("\n"));
+	}
+
+	// what a macro saw of a file: kind:path (ModuleCache.onFileRead)
+	function fileValue(name:String):Null<String> {
+		var i = name.indexOf(":");
+		var kind = name.substr(0, i), path = name.substr(i + 1);
+		return try switch kind {
+			case "c": CacheDir.hashBytes(File.getBytes(path));
+			case "d":
+				var l = FileSystem.readDirectory(path);
+				l.sort(Reflect.compare);
+				Fingerprint.hash(l.join("\n"));
+			case "e": FileSystem.exists(path) ? (FileSystem.isDirectory(path) ? "dir" : "file") : null;
+			case "s":
+				var st = FileSystem.stat(path);
+				st.mtime.getTime() + "/" + st.size + "/" + st.mode;
+			case "p": FileSystem.fullPath(path);
+			case _: null;
+		} catch (_:Dynamic) null;
+	}
+
+	// why a variant does not match the build: its first read whose value differs
+	public function mismatch(v:Variant):String {
+		for (r in v.reads.concat(v.buildReads))
+			if (value(r.role, r.name) != r.value)
+				return switch r.role {
+					case 2: "environment variable " + (r.name == "*" ? "(all)" : r.name) + ", read by a macro";
+					case 3:
+						var i = r.name.indexOf(":");
+						(switch r.name.substr(0, i) {
+							case "d": "directory listing ";
+							case "e": "existence of ";
+							case "s": "status of ";
+							case "p": "full path of ";
+							case _: "";
+						}) + r.name.substr(i + 1) + ", read by a macro";
+					case _: "define " + r.name;
+				};
+		return "defines";
 	}
 
 	final buildMatch = new haxe.ds.ObjectMap<Array<Read>, Bool>();
@@ -1589,8 +1947,11 @@ class ModuleCacheState {
 	// what stands for something not known now (never equal to anything)
 	var unknowns = 0;
 
+	// (with a nonce: never the same as a hash an earlier build kept)
+	final nonce = CacheDir.nonce();
+
 	function unknown():String
-		return "?" + (unknowns++);
+		return "?" + nonce + (unknowns++);
 
 	// the content hash of a variant's file now ("-": none, "?": missing)
 	function curFileHash(v:Variant):String {
@@ -1626,10 +1987,22 @@ class ModuleCacheState {
 	// interface (its file's declarations as parsed now, or its content and
 	// its own defines for a module typed with macros: not the build's, which
 	// would make the same interface typed in two builds two)
-	public function sFull(v:Variant):String
+	public function sFull(v:Variant):String {
+		if (leaky(v)) return unknown();
 		return Fingerprint.hash("full\n" + curFileHash(v) + "\n" + readsValues(v.reads) + buildValuesOf(v.buildReads));
+	}
+
+	// whether a variant's dependents can copy results of its macros that
+	// change from run to run (or -D hxmc.no-cache names it): what stands for it
+	// is new every build
+	function leaky(v:Variant):Bool {
+		for (c in v.macroState)
+			if (StringTools.startsWith(c, "!!")) return true;
+		return @:privateAccess ModuleCache.noCache(this, v.path, v.file);
+	}
 
 	public function sIface(v:Variant):String {
+		if (leaky(v)) return unknown();
 		if (v.iface == null) return Fingerprint.hash("own\n" + curFileHash(v) + "\n" + readsValues(v.reads));
 		return Fingerprint.hash("iface\n" + curIface(v));
 	}

@@ -9,7 +9,7 @@ import hxmc.unsafe.Ptr;
 
 // The Array natives (formerly in rt_std.c): generic natives over arrays of
 // any element kind (rt.h: slot 0 the length and the element kind, slot 1
-// the data, null while empty; Int elements take 4 bytes, others 8). The
+// the data, null while empty; Int and Bool elements take 4 bytes, others 8). The
 // element access, growth and kind conversion themselves stay in rt.c with
 // the collector (hx_arr_*); here they are the language's own array
 // operations on Array<Dynamic>, which go through them.
@@ -28,7 +28,7 @@ class Arr {
 		return Mem.getPtr(Mem.addr(a), 8);
 
 	static inline function elemSize(a:Dynamic):Int
-		return kindOf(a) == AK_I32 ? 4 : 8;
+		return ak4(kindOf(a)) ? 4 : 8;
 
 	// a new array of this kind and length (elements zero)
 	static function make(kind:Int, n:Int):Dynamic {
@@ -95,6 +95,13 @@ class Arr {
 				for (i in from...n)
 					if (Mem.getI32At(d, 0, i) == v) return i;
 				return -1;
+			case AK_BOOL:
+				if (Str.isNull(x) || tindex(x) != T_BOXBOOL) return -1;
+				var v = Mem.getI32(Mem.addr(x), 0);
+				var d = data(a);
+				for (i in from...n)
+					if (Mem.getI32At(d, 0, i) == v) return i;
+				return -1;
 			case AK_F64:
 				if (Str.isNull(x)) return -1;
 				var v:Float = x;
@@ -124,6 +131,8 @@ class Arr {
 			if (kindOf(a) == AK_PTR) {
 				var e = Mem.getRefAt(data(a), 0, i);
 				if (Mem.addr(e) == Mem.addr(x) || Dyn.dynEq(e, x)) return i;
+			} else if (kindOf(a) == AK_BOOL) {
+				if (!Str.isNull(x) && tindex(x) == T_BOXBOOL && Mem.getI32At(data(a), 0, i) == Mem.getI32(Mem.addr(x), 0)) return i;
 			} else if (!Str.isNull(x)) {
 				var v:Float = x;
 				var e = kindOf(a) == AK_I32 ? (Mem.getI32At(data(a), 0, i) : Float) : kindOf(a) == AK_F64 ? Mem.getF64At(data(a), 0, i) : {

@@ -29,6 +29,7 @@ class Abi {
 	public static inline var AK_I32 = 1;
 	public static inline var AK_F64 = 2;
 	public static inline var AK_I64 = 3;
+	public static inline var AK_BOOL = 4; // stored as AK_I32 (Types.hx)
 
 	public var name:String; // linux-x86_64, ...
 	public var arm:Bool;
