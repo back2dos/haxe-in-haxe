@@ -202,19 +202,28 @@ elements. Bool uses 1 byte, Int 4, Float and Int64 8, and reference elements
 indexing lowers to direct loads/stores in `MirBuild`, without bounds,
 growth or storage-kind checks; references keep the generational write
 barrier. The collectors skip the length/kind word in reference arrays.
-`rt/NArray.hx` handles erased generic access and Dynamic indexing, keeping
-the storage kind fixed. Construction with an erased element type requires
-`@:generic` on the enclosing function or class; the compiler rejects an
-unspecialized constructor. Copies preserve the runtime layout even in
-erased generic code; reference copies retain the bulk write barrier.
-Array conversions copy.
+Copies preserve the runtime layout even in erased generic code; reference
+copies retain the bulk write barrier. Array conversions copy.
+
+A NativeArray whose element type is Dynamic (`Dynamic`, `Any`, an
+abstract over them, an erased type parameter) may hold storage of any
+kind: its accesses test the kind inline (reference storage directly) and
+go through `rt/NArray.hx` otherwise. Haxe lets any NativeArray be seen so,
+and lets `Vector<Int>` and `Vector<Null<Int>>` alias. Storage taken as a
+typed NativeArray (from a Dynamic-typed one, from a Dynamic, between Int
+and Null<Int>) is checked once there (`hx_narray_view`), and a mismatch
+throws, as a cast does on HL and the JVM; a `cast` is not checked. A
+NativeArray made for an erased type parameter is a wrapper (a NativeArray
+of one reference) of reference storage: the first typed view converts the
+storage to its kind if needed and the wrapper keeps pointing at the result,
+so generic code and typed code share it (HL's `ArrayDyn` does the same); a
+view of another kind later throws.
 
 `hxmc/std/haxe/ds/Vector.hx` shadows the reference standard library on the
 hxmc target and implements `haxe.ds.Vector<T>` as an abstract over
 `hxmc.NativeArray<T>`. Indexing, length and construction inline to the same
 operations as NativeArray. `toData`/`fromData` share NativeArray storage;
-`toArray`/`fromArrayCopy` copy. Generic construction has the same
-specialization requirement as NativeArray. `MkStd` keeps the upstream
+`toArray`/`fromArrayCopy` copy. `MkStd` keeps the upstream
 Vector for Eval and macros in the merged `bin/hxmc/std`, and for WasmGC
 (`-D hxmc.wasm-gc`), which does not implement NativeArray: there Vector is the
 original over an Array, its reads unchecked (`EArrGetU`). `make bench-arrays`

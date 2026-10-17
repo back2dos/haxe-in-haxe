@@ -46,6 +46,10 @@ class Types {
 	// element is boxed (Std.string, Dynamic, reflection); a NativeArray stores
 	// one byte per Bool
 	public static inline var AK_BOOL = 4;
+	// a NativeArray made for an erased type parameter: a wrapper of its
+	// storage, open until a typed view takes it, then fixed (NArray)
+	public static inline var AK_OPEN = 5;
+	public static inline var AK_WRAP = 6;
 
 	// the elements of these kinds take 4 bytes
 	public static inline function ak4(k:Int):Bool

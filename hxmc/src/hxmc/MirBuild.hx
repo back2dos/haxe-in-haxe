@@ -1208,6 +1208,37 @@ class MirBuild {
 		cur = done;
 	}
 
+	// an element of a NativeArray seen as Dynamic (FnLower.nativeGet): of
+	// reference storage directly, else through the runtime (rt/NArray's
+	// hx_narray_get_slow, hx_narray_set_slow: the other kinds, wrappers). A
+	// wrapper's kind changes, but never to AK_PTR, so the test may be shared
+	// as that of a constant. At a cold site (Facts.markCold), the live
+	// references are spilled around that call only
+	function narrayDyn(name:String, xs:Array<Int>):Int {
+		var a = xs[0];
+		var get = name == "hxmc_narray_dget";
+		var r = get ? newVar(I64) : -1;
+		var fast = newBlock(), slow = newBlock(), join = newBlock();
+		br(cmp(CEq, loadM(Opt.MConst, I32, 4, a, 4), iconst(Abi.AK_PTR)), fast, slow);
+		seal(fast);
+		seal(slow);
+		cur = fast;
+		var ix = op1(SExt, I64, xs[1]);
+		if (get) writeVar(r, cur, loadM(Opt.MElem, I64, 8, a, 8, false, ix, 8));
+		else nativeSetPtr(a, op2(Add, I64, a, op2(Add, I64, lconst32(8), op2(Shl, I64, ix, iconst(3)))), xs[2]);
+		jmp(join);
+		cur = slow;
+		var list = coldList;
+		var sp = spillOpen(list, 0);
+		var c = call(get ? "hx_narray_get_slow" : "hx_narray_set_slow", xs, get ? I64 : Void);
+		spillClose(list, sp);
+		if (get) writeVar(r, cur, c);
+		jmp(join);
+		seal(join);
+		cur = join;
+		return get ? readVar(r, cur) : iconst(0);
+	}
+
 	function tindex(o:Int):Int
 		return loadM(Opt.MConst, I32, 2, o, Abi.HDR_TINDEX);
 
@@ -1309,6 +1340,8 @@ class MirBuild {
 				arrSet(elem, a, i, v, true);
 			case SArrPush(elem, a, v):
 				arrPush(elem, a, v, true);
+			case SExpr(e):
+				ex(e);
 			case _:
 				throw new Unsupported("cold statement");
 		}
@@ -2018,6 +2051,7 @@ class MirBuild {
 				return a;
 			}
 			if (name == "hxmc_narray_length") return loadM(Opt.MConst, I32, 4, xs[0], 0);
+			if (name == "hxmc_narray_dget" || name == "hxmc_narray_dset") return narrayDyn(name, xs);
 			var suffix = name.substr(name.length - 1);
 			var size = suffix == "b" ? 1 : suffix == "i" ? 4 : 8;
 			var ix = op1(SExt, I64, xs[1]);

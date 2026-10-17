@@ -321,6 +321,8 @@ class Roots {
 			case SArrPush(_, a, v):
 				live.set(a.id);
 				uses(v, live);
+			case SExpr(e):
+				uses(e, live);
 			case _:
 				throw "cold statement";
 		}

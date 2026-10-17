@@ -685,6 +685,9 @@ class Facts {
 						ss[k] = SCold(next++, st);
 					case SSet(_, ECallHost("hxmc_narray_new", args, _)) if (args.filter(a -> !gcFree(a)).length == 0):
 						ss[k] = SCold(next++, st);
+					// (a NativeArray seen as Dynamic: the runtime, on the slow path only)
+					case SSet(_, ECallHost("hxmc_narray_dget", args, _)) | SExpr(ECallHost("hxmc_narray_dset", args, _)) if (args.filter(a -> !gcFree(a)).length == 0):
+						ss[k] = SCold(next++, st);
 					case SIf(_, a, b):
 						mark(a);
 						mark(b);

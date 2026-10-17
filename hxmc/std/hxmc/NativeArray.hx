@@ -6,11 +6,14 @@ package hxmc;
 	Bool uses 8-bit elements, Int uses 32 bits, Float and Int64 use 64 bits,
 	and other types use references (including boxed nullable numbers).
 	Elements start at zero, false or null. Indices must be in 0...length;
-	out-of-bounds access and casts between different storage types are unsafe.
+	out-of-bounds access is unchecked, as are casts between storage types.
+	Seen as NativeArray<Dynamic> (or Any, or an erased type parameter), any
+	storage is read and written by its kind. Taken as a typed NativeArray
+	(from those, or from a Dynamic), the storage must be of that type: an
+	error is thrown there otherwise. Made for an erased type parameter, its
+	storage holds references until the first typed view converts it to its
+	own type, shared with the generic code from then on.
 	Conversions to and from Array copy the elements.
-	Constructing NativeArray<T> while T is erased requires `@:generic` on
-	the enclosing function or class;
-	ordinary generic functions can read and write existing native arrays.
 **/
 @:final extern class NativeArray<T> implements ArrayAccess<T> {
 	public var length(default, never):Int;

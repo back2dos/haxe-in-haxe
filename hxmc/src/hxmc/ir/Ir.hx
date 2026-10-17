@@ -24,7 +24,7 @@ enum RefTy {
 	REnum(e:Null<EnumInfo>); // enum value; null: any enum (EnumValue)
 	RCtor(c:CtorInfo); // a specific enum constructor (after a tag test)
 	RArr(elem:Ty); // the runtime array also records its element kind (Boxes.hx, arrays)
-	RNativeArr(elem:Ty, erased:Bool); // fixed storage; erased type parameters use the runtime element kind
+	RNativeArr(elem:Ty); // fixed-size storage; a Dynamic element (Dynamic, an erased type parameter): any kind, through the runtime (rt/NArray)
 	RClos(s:SigInfo);
 	RBox(t:Ty); // captured mutable local
 	RNull(t:Ty); // Null<Int>, Null<Float>, Null<Bool>: a Dynamic box or null

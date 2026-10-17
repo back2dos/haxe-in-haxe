@@ -100,7 +100,7 @@ class FnLower {
 			if (d != null && Ir.isRef(a.ty) && !strip(d).eexpr.match(TConst(TNull)))
 				out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(a, coerceRhs(rhs(d), tyOf(d), a.ty)))), []));
 			var x:Ex = ELocal(a);
-			if (Ir.repr(t) != Ir.repr(a.ty) || closureConversion(a.ty, t)) {
+			if (Ir.repr(t) != Ir.repr(a.ty) || refConversion(a.ty, t)) {
 				var lo = newLocal(v.vName, t);
 				out.push(SSet(lo, coerce(x, a.ty, t)));
 				x = ELocal(lo);
@@ -193,9 +193,10 @@ class FnLower {
 					});
 					out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), dflt, [SSet(v, coerce(ELocal(a), a.ty, t))]));
 					args.push(ELocal(v));
-				// (the function takes a closure as the type it declares, which
-				// the one passed here may not have: signatures keep it Dynamic)
-				case _ if (closureConversion(a.ty, target)):
+				// (the function takes a closure, or a NativeArray, as the type it
+				// declares, which the one passed here may not have: signatures keep
+				// it Dynamic)
+				case _ if (refConversion(a.ty, target)):
 					args.push(coerce(ELocal(a), a.ty, target));
 				case _:
 					args.push(ELocal(a));
@@ -549,10 +550,11 @@ class FnLower {
 			case _:
 		}
 		switch [from, to] {
-			case [TRef(RNativeArr(a, false)), TRef(RNativeArr(b, false))] if (nativeKind(a) != nativeKind(b)):
-				throw "hxmc: NativeArray storage types cannot be converted implicitly";
-			case [TRef(RNativeArr(_, true)), TRef(RNativeArr(b, false))]:
-				return temp(to, ECallHost(l.native("hx_narray_check"), [x, EInt(nativeKind(b))], to));
+			// a typed view takes storage of its own kind (rt/NArray.view): from
+			// a Dynamic-typed view or a Dynamic, and between the kinds Haxe lets
+			// alias (Int and Null<Int>), checked; an open wrapper's storage, converted
+			case [_, TRef(RNativeArr(b))] if (nativeConversion(from, to)):
+				return temp(to, ECallHost(l.native("hx_narray_view"), [x, EInt(nativeKind(b))], to));
 			case [TRef(RClos(a)), TRef(RClos(b))] if (a != b):
 				if (x.match(ENull(_))) return ENull(to);
 				if (hasStruct(a) || hasStruct(b)) structFail('a function taking or returning a struct value cannot become a function of another type');
@@ -607,8 +609,13 @@ class FnLower {
 			case _: 0;
 		};
 
-	function nativeGet(elem:Ty, erased:Bool, a:Ex, i:Ex):Ex {
-		if (erased) return coerce(temp(TRef(RAny), ECallHost(l.native("hx_narray_get"), [a, i], TRef(RAny))), TRef(RAny), elem);
+	// a NativeArray whose element is Dynamic (Dynamic, Any, an erased type
+	// parameter) may hold any kind of storage, or be a wrapper (rt/NArray)
+	static function dynElem(elem:Ty):Bool
+		return elem.match(TRef(RAny));
+
+	function nativeGet(elem:Ty, a:Ex, i:Ex):Ex {
+		if (dynElem(elem)) return temp(TRef(RAny), ECallHost("hxmc_narray_dget", [a, i], TRef(RAny)));
 		return ECallHost("hxmc_narray_get_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [a, i], elem);
 	}
 
@@ -779,8 +786,20 @@ class FnLower {
 	static function closureConversion(from:Ty, to:Ty):Bool
 		return to.match(TRef(RClos(_))) && (from.match(TRef(RClos(_))) || from.match(TRef(RAny)));
 
+	// a NativeArray taken by a typed view that may not have its kind (coerce)
+	static function nativeConversion(from:Ty, to:Ty):Bool
+		return switch [from, to] {
+			case [TRef(RNativeArr(a)), TRef(RNativeArr(b))]: !dynElem(b) && (dynElem(a) || nativeKind(a) != nativeKind(b));
+			case [TRef(_), TRef(RNativeArr(b))]: !dynElem(b); // (Dynamic; another reference, cast)
+			case _: false;
+		}
+
+	// a conversion between two references that is not a cast (coerce)
+	static function refConversion(from:Ty, to:Ty):Bool
+		return closureConversion(from, to) || nativeConversion(from, to);
+
 	function coerceRhs(x:Ex, from:Ty, to:Ty):Ex {
-		if (Ir.repr(from) == Ir.repr(to) && !closureConversion(from, to)) return x;
+		if (Ir.repr(from) == Ir.repr(to) && !refConversion(from, to)) return x;
 		if (isImpure(x)) x = temp(from, x);
 		return coerce(x, from, to);
 	}
@@ -1077,9 +1096,9 @@ class FnLower {
 				coerce(EEnumParam(c, i, value(e1)), c.params[i], tyOf(e));
 			case TArray(a, i):
 				switch tyOf(a) {
-					case TRef(RNativeArr(elem, erased)):
+					case TRef(RNativeArr(elem)):
 						var xs = operands([a, i]);
-						coerce(nativeGet(elem, erased, xs[0], coerce(xs[1], tyOf(i), TI32)), elem, tyOf(e));
+						coerce(nativeGet(elem, xs[0], coerce(xs[1], tyOf(i), TI32)), elem, tyOf(e));
 					case TRef(RArr(elem)):
 						var xs = operands([a, i]);
 						var ix = coerce(xs[1], tyOf(i), TI32);
@@ -1096,12 +1115,19 @@ class FnLower {
 			case TBinop(op, a, b): binop(op, a, b, e);
 			case TUnop(op, flag, e1): unop(op, flag, e1, e);
 			case TCall(f, cargs): call(f, cargs, e);
-			case TNew(c, _, cargs) if (Lower.isNativeArray(c)):
-				var elem = switch tyOf(e) {
-					case TRef(RNativeArr(t, false)): t;
-					case _: return fail("new NativeArray<T> requires a known element type; specialize the enclosing function with @:generic", e);
+			case TNew(c, params, cargs) if (Lower.isNativeArray(c)):
+				var n = coerce(value(cargs[0]), tyOf(cargs[0]), TI32);
+				// (of an erased type parameter: a wrapper, which the first typed
+				// view converts to its kind, rt/NArray)
+				var erased = switch TFunctions.follow(params[0]) {
+					case TInst(pc, _): pc.clKind.match(KTypeParameter(_));
+					case _: false;
 				};
-				ECallHost("hxmc_narray_new", [EInt(nativeKind(elem)), coerce(value(cargs[0]), tyOf(cargs[0]), TI32)], tyOf(e));
+				if (erased) temp(tyOf(e), ECallHost(l.native("hx_narray_open"), [n], tyOf(e)));
+				else ECallHost("hxmc_narray_new", [EInt(nativeKind(switch tyOf(e) {
+					case TRef(RNativeArr(t)): t;
+					case _: fail("NativeArray type", e);
+				})), n], tyOf(e));
 			case TNew(c, _, cargs) if (Lower.isCore(c, "Array")):
 				var elem = switch tyOf(e) {
 					case TRef(RArr(t)): t;
@@ -1690,11 +1716,11 @@ class FnLower {
 				return coerce(x, t, et);
 			case TArray(a, i):
 				switch tyOf(a) {
-					case TRef(RNativeArr(elem, erased)):
+					case TRef(RNativeArr(elem)):
 						var al = asLocal(value(a), tyOf(a));
 						var ix = ELocal(asLocal(coerce(value(i), tyOf(i), TI32), TI32));
-						var x = pure(compute(() -> nativeGet(elem, erased, ELocal(al), ix), elem, elem), elem);
-						if (erased) out.push(SExpr(ECallHost(l.native("hx_narray_set"), [ELocal(al), ix, coerce(x, elem, TRef(RAny))], TVoid)));
+						var x = pure(compute(() -> nativeGet(elem, ELocal(al), ix), elem, elem), elem);
+						if (dynElem(elem)) out.push(SExpr(ECallHost("hxmc_narray_dset", [ELocal(al), ix, x], TVoid)));
 						else out.push(SExpr(ECallHost("hxmc_narray_set_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [ELocal(al), ix, x], TVoid)));
 						return coerce(x, elem, et);
 					case TRef(RArr(elem)):

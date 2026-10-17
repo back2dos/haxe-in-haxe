@@ -34,8 +34,10 @@ private typedef VectorData<T> = hxmc.NativeArray<T>;
 	Int, Float, Int64 and Bool elements are unboxed. Indices must be in
 	0...length; out-of-bounds access is unchecked unless compiled with
 	`-D hxmc.check-vector-access`, which throws ArgumentException.
-	Constructing a vector with an erased element type requires `@:generic`
-	on the enclosing function or class, as for hxmc.NativeArray.
+	Vector<Dynamic> (and Vector<Any>) sees any vector; a vector taken as a
+	typed one from Dynamic or from generic code must have that element type,
+	or an error is thrown there (as on HL and the JVM). A vector made in
+	generic code takes the type of its first typed view (hxmc.NativeArray).
 **/
 abstract Vector<T>(VectorData<T>) {
 	/** Creates a vector initialized with zero, false or null elements. **/
