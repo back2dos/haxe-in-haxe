@@ -28,15 +28,56 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 	public function new()
 		reset(0); // the index is allocated by the first set
 
+	// an empty table shares read-only empty arrays (nothing is stored into
+	// them: its first set grows it first); a grown one reserves its arrays for
+	// the entries that fit before the next growth (resize keeps the capacity
+	// when it shrinks), so the pushes do not reallocate them one by one. The
+	// empty arrays are made on first use, not by a static initializer: tables
+	// are made by other classes' static initializers, which may run first
+	// (two threads may each make one: they are never written).
+	static var emptyInts:Array<Int>;
+	static var emptyBools:Array<Bool>;
+	static var emptyRefs:Array<Dynamic>;
+
+	static function noInts():Array<Int> {
+		if (emptyInts == null) emptyInts = [];
+		return emptyInts;
+	}
+
+	static function noBools():Array<Bool> {
+		if (emptyBools == null) emptyBools = [];
+		return emptyBools;
+	}
+
+	static function noRefs():Array<Dynamic> {
+		if (emptyRefs == null) emptyRefs = [];
+		return emptyRefs;
+	}
+
 	function reset(cap:Int) {
-		index = [];
-		if (cap > 0) index.resize(cap);
-		hashes = [];
-		ks = [];
-		vs = [];
-		dead = [];
+		if (cap == 0) {
+			index = noInts();
+			hashes = noInts();
+			ks = cast noInts();
+			vs = cast noRefs();
+			dead = noBools();
+		} else {
+			index = [];
+			index.resize(cap);
+			var room = (cap * 3) >> 2;
+			hashes = reserve([], room);
+			ks = reserve([], room);
+			vs = reserve([], room);
+			dead = reserve([], room);
+		}
 		live = 0;
 		mask = cap - 1;
+	}
+
+	static inline function reserve<A>(a:Array<A>, n:Int):Array<A> {
+		a.resize(n);
+		a.resize(0);
+		return a;
 	}
 
 	inline function hashOf(k:Int):Int {
