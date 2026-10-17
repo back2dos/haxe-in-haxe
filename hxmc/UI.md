@@ -334,8 +334,8 @@ Where this departs from section 6:
 - **Layout uses CSS's automatic minimum size**, not Yoga's 0: items do not
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
-- **Not yet**: the accessibility adapters of Windows and Linux (UI
-  Automation, AT-SPI; macOS's NSAccessibility is written), Windows'
+- **Not yet**: Linux's accessibility adapter (AT-SPI; macOS's
+  NSAccessibility and Windows' UI Automation are written), Windows'
   compositions drawn in the field (its IME draws its own), image formats
   beyond PNG and JPEG; on X11 a clipboard over about 256 KB (sent in parts,
   INCR) is not read.
