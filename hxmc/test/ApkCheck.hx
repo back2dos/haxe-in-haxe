@@ -16,9 +16,9 @@ using StringTools;
 //   library's data at a multiple of 16 KB, the rest of 4 bytes (zipalign -c
 //   -p 4 too, when there);
 // - the manifest read back from its binary XML (Axml.dump, aapt dump
-//   xmltree when there): NativeActivity, its library, no code; or, for an
-//   app with views, org.hxmc.Activity and code;
-// - classes.dex (an app with views): Dex.check's structure (header,
+//   xmltree when there): NativeActivity, its library, no code (or, with
+//   Java's listeners, classes.dex); with views, org.hxmc.Activity;
+// - classes.dex (an app with listeners): Dex.check's structure (header,
 //   checksum, signature, the map, the order of the ids, class data, code),
 //   Glue's classes and methods in it, dexdump when there;
 // - the library (readelf): a shared object of the APK's ABI, 16 KB
@@ -95,25 +95,25 @@ class ApkCheck {
 		}
 		if (has("zipalign")) check("zipalign -c -p 4", exec(["zipalign", "-c", "-p", "4", apk]).code == 0);
 		var lib = [for (k in entries.keys()) if (k.startsWith("lib/")) k];
-		var views = entries.exists("classes.dex");
-		check("zip: AndroidManifest.xml and one library" + (views ? ", classes.dex" : ""),
-			entries.exists("AndroidManifest.xml") && lib.length == 1 && Lambda.count([for (k in entries.keys()) k]) == (views ? 3 : 2), lib.join(" "));
+		var code = entries.exists("classes.dex");
+		check("zip: AndroidManifest.xml and one library" + (code ? ", classes.dex" : ""),
+			entries.exists("AndroidManifest.xml") && lib.length == 1 && Lambda.count([for (k in entries.keys()) k]) == (code ? 3 : 2), lib.join(" "));
 		if (lib.length != 1 || !entries.exists("AndroidManifest.xml")) return;
 		var abi = lib[0].split("/")[1];
 		check("zip: the library is lib/<abi>/libmain.so", lib[0] == 'lib/$abi/libmain.so' && (abi == "arm64-v8a" || abi == "x86_64"), lib[0]);
 		// the manifest
 		var xml = Axml.dump(entries.get("AndroidManifest.xml").data);
-		var activity = views ? Glue.ACTIVITY : "android.app.NativeActivity";
-		check("manifest: " + activity, xml.indexOf('android:name(0x01010003)="' + activity + '"') >= 0);
+		var views = xml.indexOf('"' + Glue.ACTIVITY + '"') >= 0, activity = views ? Glue.ACTIVITY : "android.app.NativeActivity";
+		check("manifest: " + activity + (views && !code ? ", but no classes.dex" : ""), xml.indexOf('android:name(0x01010003)="' + activity + '"') >= 0 && (code || !views));
 		check("manifest: android.app.lib_name main", xml.indexOf('"android.app.lib_name"') >= 0 && xml.indexOf('android:value(0x01010024)="main"') >= 0);
-		check("manifest: hasCode " + views + ", extractNativeLibs false", xml.indexOf("android:hasCode(0x0101000c)=" + views) >= 0
+		check("manifest: hasCode " + code + ", extractNativeLibs false", xml.indexOf("android:hasCode(0x0101000c)=" + code) >= 0
 			&& xml.indexOf("android:extractNativeLibs(0x010104ea)=false") >= 0, [for (l in xml.split("\n")) if (l.indexOf("<application") >= 0) l.trim()].join(""));
 		check("manifest: the launcher's intent filter", xml.indexOf('"android.intent.action.MAIN"') >= 0 && xml.indexOf('"android.intent.category.LAUNCHER"') >= 0);
 		if (has("aapt")) {
 			var r = exec(["aapt", "dump", "badging", apk]);
 			check("aapt dump badging", r.code == 0 && r.out.indexOf("launchable-activity: name='" + activity + "'") >= 0, r.out.split("\n")[0]);
 		}
-		if (views) dex(entries.get("classes.dex").data);
+		if (code) dex(entries.get("classes.dex").data);
 		// the library
 		var dir = "bin/hxmc-apk";
 		mkdirs(dir);

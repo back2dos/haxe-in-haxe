@@ -35,8 +35,10 @@
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
 #     and WebGL2, web's demo page hydrated in Chromium).
 #   - android: the APKs for android-arm64 and android-x86_64 checked, then
-#     AndroidTest and AndroidNativeTest (views, real input, accessibility)
-#     on an x86-64 emulator (not required yet: continue-on-error).
+#     AndroidTest, AndroidNativeTest (views, real input, accessibility),
+#     AndroidMixTest (a GPU view among views) and AndroidTextTest (the input
+#     method in a drawn window) on an x86-64 emulator (not required yet:
+#     continue-on-error).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -737,6 +739,7 @@ jobs:
           script: |
             sh packages/gfx/test/android.sh bin/android/android-x86_64/AndroidTest.apk bin/android/android-x86_64
             sh packages/ui/test/android-native.sh bin/android/android-x86_64/AndroidNativeTest.apk bin/android/android-x86_64
+            sh packages/ui/test/android-mix.sh bin/android/android-x86_64/AndroidMixTest.apk bin/android/android-x86_64/AndroidTextTest.apk bin/android/android-x86_64
       - uses: actions/upload-artifact@v7
         if: always()
         with:

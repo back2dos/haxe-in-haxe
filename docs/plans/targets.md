@@ -173,11 +173,20 @@ Order:
    edge-to-edge insets on Android 15 (the root fits the system bars), the
    theme following a dark mode change while running (the activity keeps
    `uiMode` changes).
-3. Mixing, as on the desktop (the UI design, [ui.md](ui.md)): a
-   GPU view inside native controls (`SurfaceView`/`TextureView` giving an
-   `ANativeWindow`) is the supported direction; a native control inside a
-   drawn tree only for text input (a hidden or overlaid `EditText` for the
-   keyboard and IME).
+3. Mixing, as on the desktop (done, [hxmc.md](../hxmc.md#android); the UI
+   design, [ui.md](ui.md)): a GPU view inside native controls (a
+   `SurfaceView` giving an `ANativeWindow` to the GL back end:
+   `ChildSurface`, ui's `GpuView`); a native control inside a drawn tree
+   only for text input (a hidden `EditText` for the keyboard and the input
+   method: `Window.startTextInput`, `TextInput`). CI: the cube among views
+   through Home and back; the soft keyboard shown and hidden, a composition
+   and a commit through the field's `InputConnection`. Left: several GPU
+   views in one window (each frame does not make its context current),
+   a `TextureView` for a GPU view under other views or animated with them,
+   the input method's candidates placed at the caret (`CursorAnchorInfo`),
+   a drawn UI's text on Android checked in CI (`hxmc.text` does not look in
+   `/system/fonts` yet), `GpuView` on the desktop backends (a child
+   window or view where gfx draws).
 
 ## iOS
 

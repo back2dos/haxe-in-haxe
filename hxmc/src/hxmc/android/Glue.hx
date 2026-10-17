@@ -2,8 +2,10 @@ package hxmc.android;
 
 import hxmc.android.Dex;
 
-// The Java an app with views needs (classes.dex, written by Dex; Apk adds
-// it when the program uses packages/os's hxmc.os.android.Glue, USED_BY):
+// The Java an app needs for views and listeners (classes.dex, written by
+// Dex; Apk adds it when the program uses packages/os's
+// hxmc.os.android.Glue, USED_BY, and makes org.hxmc.Activity the activity
+// when it sets the activity's content, VIEWS_USED_BY):
 //
 // - org.hxmc.Activity, the APK's activity: NativeActivity (which loads the
 //   program's library and runs it as without classes.dex), whose window
@@ -23,8 +25,10 @@ import hxmc.android.Dex;
 //   (SurfaceHolder.Callback: the holder), KEY (View.OnKeyListener: the key
 //   code and the action; handled when non-zero).
 class Glue {
-	// the Haxe function whose presence in the program makes Apk add classes.dex
+	// the Haxe functions whose presence in the program makes Apk add
+	// classes.dex, and org.hxmc.Activity the activity (views)
 	public static inline var USED_BY = "hxmc_os_android_Glue_event";
+	public static inline var VIEWS_USED_BY = "hxmc_os_android_Glue_setContentView";
 	public static inline var ACTIVITY = "org.hxmc.Activity";
 
 	public static inline var CLICK = 0;

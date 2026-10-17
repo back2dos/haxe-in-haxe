@@ -169,9 +169,9 @@ help:
 ##             (DebugCheck: its --run on the target's machine runs gdb or lldb)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
 ## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube,Instances}[.exe]: packages/gfx's test programs (Linux: glibc mode)
-## android-programs  bin/android/ANDROID_TARGET/{AndroidTest,Cube,AndroidNativeTest}.apk: APKs written by hxmc (android-x86_64, android-arm64)
+## android-programs  bin/android/ANDROID_TARGET/*.apk: APKs written by hxmc (android-x86_64, android-arm64)
 ## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature, classes.dex)
-## android-device-check  AndroidTest and AndroidNativeTest on the device or emulator adb reaches (android.sh, android-native.sh)
+## android-device-check  the Android tests on the device or emulator adb reaches (android.sh, android-native.sh, android-mix.sh)
 ## shared-check  shared libraries of the glibc mode (-D hxmc.shared), loaded by an hxmc program (hxmc/test/SharedCheck.hx)
 ## gfx-check   packages/gfx: the triangle, cube and instances examples headless and in a window, against
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
@@ -540,21 +540,26 @@ gfx-check: gfx-programs
 
 # Android: APKs written by hxmc (hxmc/src/hxmc/android/Apk.hx), AndroidTest
 # (packages/gfx/test/AndroidTest.hx), the cube example and AndroidNativeTest
-# (packages/ui/test/AndroidNativeTest.hx: views, so classes.dex)
+# (packages/ui/test/AndroidNativeTest.hx: views, so classes.dex), AndroidMixTest
+# (a GPU view among views) and AndroidTextTest (packages/os/test: text input
+# in a drawn window)
 android-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTest.apk,$(GFX_CP) -main AndroidTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.gfxtest)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/Cube.apk,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.cube)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk,$(UI_CP) -main AndroidNativeTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.nativetest)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk,$(UI_CP) -cp packages/gfx/examples -main AndroidMixTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.mixtest)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk,-cp packages/os/src -cp packages/os/test -main AndroidTextTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.texttest)
 # their structure without a device (hxmc/test/ApkCheck.hx: zip, manifest, ELF, signature, classes.dex; zipalign, aapt, apksigner, dexdump when there)
 android-check: android-programs
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck $(foreach a,AndroidTest Cube AndroidNativeTest,bin/android/$(ANDROID_TARGET)/$(a).apk)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck $(foreach a,AndroidTest Cube AndroidNativeTest AndroidMixTest AndroidTextTest,bin/android/$(ANDROID_TARGET)/$(a).apk)
 # shared libraries of the glibc mode loaded by an hxmc program (hxmc/test/SharedCheck.hx), Android's built
 shared-check: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) SharedCheck
-# AndroidTest and AndroidNativeTest on the device or emulator adb reaches (packages/gfx/test/android.sh, packages/ui/test/android-native.sh)
+# the Android tests on the device or emulator adb reaches (packages/gfx/test/android.sh, packages/ui/test/android-native.sh, android-mix.sh)
 android-device-check: android-programs
 	sh packages/gfx/test/android.sh bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)
 	sh packages/ui/test/android-native.sh bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk bin/android/$(ANDROID_TARGET)
+	sh packages/ui/test/android-mix.sh bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk bin/android/$(ANDROID_TARGET)
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)

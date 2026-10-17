@@ -386,6 +386,21 @@ accessibility is the views'): NativeForm's APK (`AndroidNativeTest`) is
 1.79 MB (arm64), 1.69 MB (x86-64), most of it ui's core; `classes.dex`
 3 KB.
 
+Mixing GPU and native views: a GPU view among views is a `SurfaceView`
+(`hxmc.os.android.ChildSurface`) whose holder's callbacks make its surface
+the `ANativeWindow` of an `hxmc.os.Surface`, as the activity's window is in
+the GPU-only case: gfx's GL back end makes its EGL surface on it, lets go
+of it in `surfaceDestroyed` (`Surface.lost`) and makes one on the next, on
+the main thread's frames; `hxmc.ui.native.android.GpuView` is the node
+for it in a `NativeHost`, laid out like the others. A native control in a
+drawn window only for text: `Window.startTextInput` on Android
+(`hxmc.os.android.TextInput`, enabled by ui's `UiWindow`) focuses a hidden
+`EditText` in NativeActivity's window and shows the soft keyboard; what the
+input method composes comes as `TextEditing`, what it commits as
+`TextInput` (the field emptied again); keys still come through the input
+queue, which the system serves before the focused view. A program that
+never takes text keeps neither (nor `classes.dex`).
+
 Checks: `hxmc/test/ApkCheck.hx` (`make android-check`: the zip, the
 manifest read back, the library's ELF, the signature's digest and
 signature, `classes.dex` read back by `Dex.check`; `zipalign`, `aapt`,
@@ -393,7 +408,9 @@ signature, `classes.dex` read back by `Dex.check`; `zipalign`, `aapt`,
 device or emulator (`make android-device-check`; CI: an x86-64 emulator)
 `packages/gfx/test/android.sh` and `packages/ui/test/android-native.sh`
 (the form's own checks on the device, uiautomator's accessibility dump,
-taps and text typed through the input method). Not yet: one ABI per APK,
+taps and text typed through the input method) and `android-mix.sh` (the
+cube in a `GpuView` among views, its surface taken by Home and given back;
+the soft keyboard for a drawn window, keys, a composition and a commit). Not yet: one ABI per APK,
 release signing (a keystore), icons and resources, the clipboard
 ([plans/targets.md](plans/targets.md#android)).
 
