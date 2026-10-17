@@ -168,7 +168,9 @@ initializer when live code uses a static it sets (as the lowering already
 initializes only the classes whose statics it meets), and a method when live
 code instantiates its class or a subclass and either dispatches on its
 selector or can look its name up. Names looked up: those of structural and
-Dynamic access, literals passed to the runtime's lookups or to functions
+Dynamic access (a structural read only where the field's type is a
+function's or Dynamic: a method unifies with no other), literals passed to
+the runtime's lookups or to functions
 passing them on (`Reflect.field(o, "x")`, `Reflect.getProperty`'s
 `"get_" + field`), and names from the runtime's own tables (`Reflect.fields`,
 `Type.getInstanceFields`), which name only what the tables keep; a name
@@ -178,8 +180,14 @@ Dropped: the functions, their entries in the method tables (so
 dispatch rows of selectors no live code calls, the types of dead closures.
 The dispatch rows themselves (DataGen: a row per selector, indexed by type)
 are laid over each other, as a call reads only the entries of the classes
-implementing the selector. The tool: 17.9 MB instead of 18.4; ui's counter
-example: 1.50 MB instead of 1.85. `HXMC_STATS=1` prints the live
+implementing the selector. Closures share a type when their signatures and
+captures' representations are the same (the code is in the object), only
+the signatures of methods in the tables have a bound-method type and
+trampoline, only closures' signatures a dynamic-call one, and a closure
+capturing nothing is an object in the data, made once (Prep.staticClosures),
+not allocated where it is used. The tool: 16.8 MB instead of 18.4; ui's
+counter example (with the ui changes of the same work): 1.21 MB instead of
+1.77. `HXMC_STATS=1` prints the live
 functions (and where a name is computed) and the data's parts;
 `HXMC_REACH_WHY=<pack.Class.method>` the chain that keeps a function;
 `HXMC_REACH=0` keeps everything.

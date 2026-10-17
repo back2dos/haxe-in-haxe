@@ -23,8 +23,6 @@ class Driver {
 	function new(prog:Program, out:String, o:Options) {
 		this.o = o;
 		this.out = out;
-		// (-D hxmc.jit: every function stays, for the native macros the compiler loads)
-		if (!o.jit) hxmc.ir.Reach.run(prog, o.stats);
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
 		abi.setLibc(o.libc);
@@ -43,9 +41,14 @@ class Driver {
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
 
+	// (-D hxmc.jit: every function stays, for the native macros the compiler
+	// loads, and closures are made as they are in those, Prep.staticClosures;
+	// native macros' own code makes a Driver itself, Guest)
 	public static function run(prog:Program, out:String, o:Options) {
 		var t0 = haxe.Timer.stamp();
+		if (!o.jit) hxmc.ir.Reach.run(prog, o.stats);
 		var d = new Driver(prog, out, o);
+		d.prep.staticClosures = !o.jit;
 		var t1 = haxe.Timer.stamp();
 		d.build(t0, t1);
 	}

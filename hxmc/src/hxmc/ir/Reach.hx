@@ -29,7 +29,8 @@ import hxmc.ir.Ir;
 // The program keeps its classes, enums and globals (type indices, layouts);
 // what the analysis drops: the functions no live code can reach (Program.funcs
 // keeps the live ones, Program.live tells), the closure types of dead
-// closures, the method-table entries and dispatch rows of dead methods (Facts,
+// closures, the layouts of object literals live code neither makes nor
+// reads, the method-table entries and dispatch rows of dead methods (Facts,
 // DataGen) and the rows of selectors no live code dispatches on.
 class Reach {
 	var p:Program;
@@ -37,6 +38,7 @@ class Reach {
 	var work:Array<FuncInfo> = [];
 	var inst:Array<Bool>; // by class id
 	var valueClasses = new Map<ClassInfo, Bool>(); // class values (EType) in live code
+	var shapes = new Map<ShapeInfo, Bool>(); // the object literals' layouts live code makes or reads
 	var selLive:Array<Bool>;
 	var names = new Map<String, Bool>();
 	var anyName:Null<String> = null; // the function passing a computed name, once one does
@@ -149,6 +151,7 @@ class Reach {
 		p.funcs = [for (f in p.funcs) if (live.exists(f)) f];
 		p.inits = [for (f in p.inits) if (live.exists(f)) f];
 		p.lambdas = [for (l in p.lambdas) if (live.exists(l.fn)) l];
+		p.shapes = [for (s in p.shapes) if (shapes.exists(s)) s];
 		p.liveSelectors = selLive;
 		if (stats)
 			Sys.println('hxmc: reach: ${p.funcs.length} live functions'
@@ -465,8 +468,15 @@ class Reach {
 						arrayArg(f, args[k]);
 				case ECallDispatch(sel, _, _):
 					selLive[sel] = true;
-				case ECallAnon(n, _, _, _) | EAnonGet(n, _, _, _):
+				case ECallAnon(n, _, _, _):
 					names.set(n, true);
+				case EAnonGet(n, t, _, hint):
+					// (a method only where the field's type is a function's or Dynamic:
+					// a class's method unifies with no other structural field)
+					if (t.match(TRef(RClos(_) | RAny))) names.set(n, true);
+					if (hint != null) shapes.set(hint, true);
+				case ENewAnon(s, _):
+					shapes.set(s, true);
 				case ECallHost("hx_dyn_get" | "hx_dyn_call_field", args, _):
 					nameArg(f, args[1], true);
 				case ECallHost("hx_dyn_set", args, _):
@@ -485,8 +495,6 @@ class Reach {
 		}
 		function st(s:Stmt) {
 			switch s {
-				case SAnonSet(n, _, _, _):
-					names.set(n, true);
 				case SSetGlobal(g, _):
 					setBy(g, f);
 				case _:

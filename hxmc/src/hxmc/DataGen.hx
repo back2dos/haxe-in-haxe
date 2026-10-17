@@ -136,6 +136,7 @@ class DataGen {
 		globals();
 		part('${e.types.length} types', types);
 		part('${p.selectors.length} dispatch rows', dispatch);
+		if (prep.staticClosures) closures();
 		mainBody();
 	}
 
@@ -185,14 +186,17 @@ class DataGen {
 		int32Global("rt_nfield_names", names.length);
 	}
 
+	// (the trampolines of the signatures closures have: Facts.closureSigs,
+	// boundTypes; -D hxmc.jit: every signature's, for the native macros')
 	function signatures() {
+		var all = spareSigs > 0;
 		for (s in p.sigs) {
-			compile(dynTrampoline(s));
-			compile(boundTrampoline(s));
+			if (all || e.closureSigs.exists(s.id)) compile(dynTrampoline(s));
+			if (all || e.boundTypes.exists(s.id)) compile(boundTrampoline(s));
 		}
 		begin(data, "rt_dyncalls", 8, true);
 		for (s in p.sigs)
-			ptr(data, "DYN" + s.id);
+			if (all || e.closureSigs.exists(s.id)) ptr(data, "DYN" + s.id) else data.buf.u64(0, 0);
 		data.buf.zeros(8 * spareSigs);
 		var keys = [for (s in p.sigs) cstr(s.key)];
 		begin(data, "rt_sig_keys", 8, true);
@@ -202,13 +206,13 @@ class DataGen {
 		int32Global("rt_nsigs", p.sigs.length);
 		begin(data, "rt_bound_tramps", 8, true);
 		for (s in p.sigs)
-			ptr(data, "BT" + s.id);
+			if (all || e.boundTypes.exists(s.id)) ptr(data, "BT" + s.id) else data.buf.u64(0, 0);
 		data.buf.zeros(8 * spareSigs);
 		var bt = spareSigs > 0 ? data : rodata;
 		bt.buf.align(4);
 		obj.define("rt_bound_types", bt, bt.buf.len, 4 * (p.sigs.length + spareSigs), true);
 		for (s in p.sigs)
-			bt.buf.u32(e.boundTypes.get(s.id));
+			bt.buf.u32(e.boundTypes.exists(s.id) ? e.boundTypes.get(s.id) : 0);
 		bt.buf.zeros(4 * spareSigs);
 	}
 
@@ -377,6 +381,19 @@ class DataGen {
 		}
 		data.buf.zeros(Abi.TYPE_SIZE * spareTypes);
 		int32Global("rt_ntypes", types.length);
+	}
+
+	// the closures capturing nothing (Prep.staticClosures), each an object
+	// as the heap has one, outside it: header (one slot, its type), code
+	function closures() {
+		for (l in p.lambdas)
+			if (l.captures.length == 0) {
+				data.buf.align(8);
+				data.buf.u32(1 | (Abi.K_OBJ << 28));
+				data.buf.u32(l.tindex);
+				obj.define(prep.closureSym(l), data, data.buf.len, 8, true);
+				ptr(data, e.symbol(l.fn));
+			}
 	}
 
 	// A dispatch row per selector, indexed by a class's type index - T_FIRST

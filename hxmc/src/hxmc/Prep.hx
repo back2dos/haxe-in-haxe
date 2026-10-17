@@ -10,6 +10,9 @@ import hxmc.ir.Ir;
 class Prep {
 	public var e:Facts;
 	public var p:Program;
+	// closures capturing nothing are objects in the data, made once
+	// (DataGen.closures), not allocated where they are used
+	public var staticClosures = false;
 
 	public function new(p:Program) {
 		this.p = p;
@@ -73,6 +76,10 @@ class Prep {
 
 	public function funcSym(f:FuncInfo):String
 		return e.symbol(f);
+
+	// the object of a closure capturing nothing (staticClosures)
+	public function closureSym(l:LambdaInfo):String
+		return "CLOS_" + e.symbol(l.fn);
 
 	public function selectorSym(sel:Int):String
 		return e.selNames[sel];
