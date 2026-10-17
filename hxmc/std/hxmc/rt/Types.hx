@@ -41,6 +41,13 @@ class Types {
 	public static inline var AK_I32 = 1;
 	public static inline var AK_F64 = 2;
 	public static inline var AK_I64 = 3;
+	// Bool: stored as AK_I32 is (4 bytes, 0 or 1), but read as Bool where the
+	// element is boxed (Std.string, Dynamic, reflection)
+	public static inline var AK_BOOL = 4;
+
+	// the elements of these kinds take 4 bytes
+	public static inline function ak4(k:Int):Bool
+		return k == AK_I32 || k == AK_BOOL;
 
 	// ---- headers: slot count bits 0..27, kind 28..31, type index 32..47,
 	// identity hash 48..63
