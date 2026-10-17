@@ -131,6 +131,87 @@ class EvalStdLib {
 		return EvalContext.excString(what + " is not supported by haxe-in-haxe");
 	}
 
+	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) learns here what a macro's
+	// ... result depends on beyond the sources: a call whose result changes from run to run
+	// ... (volatileHook: the time, randomness, the network, processes; its name), a file read
+	// ... (fileHook: its kind, "c" the content, "d" a directory's listing, "e" whether it exists and
+	// ... what it is, "s" its status, "p" its full path; then the path as given), an environment
+	// ... variable read (envHook: its name, null for the whole environment). Called before the
+	// ... native runs (a file that does not exist is a dependency too); always null in the compiler
+	// ... itself, where the wrapped natives do what upstream's do.
+	public static var volatileHook:Null<String->Void> = null;
+	public static var fileHook:Null<(kind:String, path:String) -> Void> = null;
+	public static var envHook:Null<Null<String>->Void> = null;
+
+	// port: a native wrapped to tell volatileHook it ran (what: the call, as a user writes it)
+	static function volatile(what:String, v:Value):Value {
+		return switch v {
+			case VFunction(f, isStatic):
+				VFunction(vl -> {
+					var h = volatileHook;
+					if (h != null) h(what);
+					f(vl);
+				}, isStatic);
+			case _: v;
+		}
+	}
+
+	// port: every native of a list wrapped by volatile
+	static function volatileFields(what:String, l:Array<{name:String, value:Value}>):Array<{name:String, value:Value}> {
+		return [for (f in l) {name: f.name, value: volatile(what, f.value)}];
+	}
+
+	// port: eval.luv.Env's getEnv and environ wrapped by envRead
+	static function luvEnv(l:Array<{name:String, value:Value}>):Array<{name:String, value:Value}> {
+		return [
+			for (f in l)
+				{name: f.name, value: f.name == "getEnv" ? envRead(false, f.value) : f.name == "environ" ? envRead(true, f.value) : f.value}
+		];
+	}
+
+	// port: a constructor wrapped to tell volatileHook it ran
+	static function volatileConstructor(what:String, f:Array<Value>->Value):Array<Value>->Value {
+		return vl -> {
+			var h = volatileHook;
+			if (h != null) h(what);
+			f(vl);
+		}
+	}
+
+	// port: a native whose first argument is a path, wrapped to tell fileHook it is read
+	static function fileRead(kind:String, v:Value):Value {
+		return switch v {
+			case VFunction(f, isStatic):
+				VFunction(vl -> {
+					var h = fileHook;
+					if (h != null && vl.length > 0) {
+						var path = try EvalDecode.decodeString(vl[0]) catch (_:Dynamic) null;
+						if (path != null) h(kind, path);
+					}
+					f(vl);
+				}, isStatic);
+			case _: v;
+		}
+	}
+
+	// port: Sys.getEnv (whole: Sys.environment), wrapped to tell envHook
+	static function envRead(whole:Bool, v:Value):Value {
+		return switch v {
+			case VFunction(f, isStatic):
+				VFunction(vl -> {
+					var h = envHook;
+					if (h != null) {
+						if (whole) h(null) else if (vl.length > 0) {
+							var name = try EvalDecode.decodeString(vl[0]) catch (_:Dynamic) null;
+							if (name != null) h(name);
+						}
+					}
+					f(vl);
+				}, isStatic);
+			case _: v;
+		}
+	}
+
 	public static function initFields(builtins:Builtins, path:GlobalTypePath, staticFields:Array<{name:String, value:Value}>,
 			instanceFields:Array<{name:String, value:Value}>):Void {
 		function map(f:{name:String, value:Value}):{name:Int, value:Value}
@@ -251,7 +332,7 @@ class EvalStdLib {
 			case _:
 				die();
 		});
-		add(EvalHash.key_sys_io__Process_NativeProcess, vl -> switch vl {
+		add(EvalHash.key_sys_io__Process_NativeProcess, volatileConstructor("sys.io.Process", vl -> switch vl {
 			case [cmd, args]:
 				var cmd = EvalDecode.decodeString(cmd);
 				var args:Null<Array<String>> = switch args {
@@ -262,8 +343,8 @@ class EvalStdLib {
 				var proc = StdLibBHelpers.processCatch(_ -> EvalProcess.run(cmd, args), null);
 				EvalEncode.encodeInstance(EvalHash.key_sys_io__Process_NativeProcess, IProcess(proc));
 			case _: die();
-		});
-		add(EvalHash.key_eval_vm_NativeSocket, _ -> {
+		}));
+		add(EvalHash.key_eval_vm_NativeSocket, volatileConstructor("sys.net.Socket", _ -> {
 			#if (target.name == "hxmc" || hl)
 			// port: catch_unix_error Unix.socket PF_INET SOCK_STREAM 0
 			var fd = macros.eval.EvalStdLibB.StdSocket.check(#if hl macros.eval.EvalHostNet #else NativeNet #end.socket(), "socket");
@@ -271,7 +352,7 @@ class EvalStdLib {
 			#else
 			notSupported("Sockets (eval.vm.NativeSocket)");
 			#end
-		});
+		}));
 		add(EvalHash.key_haxe_zip_Compress, vl -> switch vl {
 			case [level]:
 				var level = EvalDecode.decodeInt(level);
@@ -320,7 +401,7 @@ class EvalStdLib {
 		add(EvalHash.key_sys_net_Deque, _ -> {
 			EvalEncode.encodeInstance(EvalHash.key_sys_net_Deque, IDeque(EvalThread.Deque.create()));
 		});
-		EvalSsl.initConstructors(add);
+		EvalSsl.initConstructors((key, f) -> add(key, volatileConstructor("sys.ssl", f)));
 	}
 
 	public static function initEmptyConstructors(builtins:Builtins):Void {
@@ -436,7 +517,7 @@ class EvalStdLib {
 		initFields(builtins, tp([], "Date"), [
 			{name: "fromString", value: StdDate.fromString},
 			{name: "fromTime", value: StdDate.fromTime},
-			{name: "now", value: StdDate.now},
+			{name: "now", value: volatile("Date.now", StdDate.now)},
 		], [
 			{name: "getDate", value: StdDate.getDate},
 			{name: "getDay", value: StdDate.getDay},
@@ -475,9 +556,9 @@ class EvalStdLib {
 		]);
 		initFields(builtins, tp(["sys", "io"], "File"), [
 			{name: "append", value: StdFile.append},
-			{name: "getBytes", value: StdFile.getBytes},
-			{name: "getContent", value: StdFile.getContent},
-			{name: "read", value: StdFile.read},
+			{name: "getBytes", value: fileRead("c", StdFile.getBytes)},
+			{name: "getContent", value: fileRead("c", StdFile.getContent)},
+			{name: "read", value: fileRead("c", StdFile.read)},
 			{name: "saveBytes", value: StdFile.saveBytes},
 			{name: "saveContent", value: StdFile.saveContent},
 			{name: "update", value: StdFile.update},
@@ -509,12 +590,12 @@ class EvalStdLib {
 			{name: "createDirectory", value: StdFileSystem.createDirectory},
 			{name: "deleteFile", value: StdFileSystem.deleteFile},
 			{name: "deleteDirectory", value: StdFileSystem.deleteDirectory},
-			{name: "exists", value: StdFileSystem.exists},
-			{name: "fullPath", value: StdFileSystem.fullPath},
-			{name: "isDirectory", value: StdFileSystem.isDirectory},
+			{name: "exists", value: fileRead("e", StdFileSystem.exists)},
+			{name: "fullPath", value: fileRead("p", StdFileSystem.fullPath)},
+			{name: "isDirectory", value: fileRead("e", StdFileSystem.isDirectory)},
 			{name: "rename", value: StdFileSystem.rename},
-			{name: "readDirectory", value: StdFileSystem.readDirectory},
-			{name: "stat", value: StdFileSystem.stat},
+			{name: "readDirectory", value: fileRead("d", StdFileSystem.readDirectory)},
+			{name: "stat", value: fileRead("s", StdFileSystem.stat)},
 		], []);
 		initFields(builtins, tp(["eval", "vm"], "Gc"), [
 			{name: "allocated_bytes", value: StdGc.allocatedBytes},
@@ -533,10 +614,10 @@ class EvalStdLib {
 			{name: "stat", value: StdGc.stat},
 		], []);
 		initFields(builtins, tp(["sys", "net"], "Host"), [
-			{name: "localhost", value: StdHost.localhost},
-			{name: "hostReverse", value: StdHost.hostReverse},
+			{name: "localhost", value: volatile("sys.net.Host", StdHost.localhost)},
+			{name: "hostReverse", value: volatile("sys.net.Host", StdHost.hostReverse)},
 			{name: "hostToString", value: StdHost.hostToString},
-			{name: "resolve", value: StdHost.resolve},
+			{name: "resolve", value: volatile("sys.net.Host", StdHost.resolve)},
 		], []);
 		initFields(builtins, tp(["sys", "thread"], "Lock"), [],
 			[{name: "release", value: StdLock.release}, {name: "wait", value: StdLock.wait},]);
@@ -564,7 +645,7 @@ class EvalStdLib {
 			{name: "max", value: StdMath.max},
 			{name: "min", value: StdMath.min},
 			{name: "pow", value: StdMath.pow},
-			{name: "random", value: StdMath.random},
+			{name: "random", value: volatile("Math.random", StdMath.random)},
 			{name: "round", value: StdMath.round},
 			{name: "sin", value: StdMath.sin},
 			{name: "sqrt", value: StdMath.sqrt},
@@ -624,7 +705,7 @@ class EvalStdLib {
 		], []);
 		initFields(builtins, tp(["haxe", "crypto"], "Sha1"),
 			[{name: "encode", value: StdSha1.encode}, {name: "make", value: StdSha1.make},], []);
-		initFields(builtins, tp(["eval", "vm"], "NativeSocket"), [{name: "select", value: StdSocket.select},], [
+		initFields(builtins, tp(["eval", "vm"], "NativeSocket"), [{name: "select", value: volatile("sys.net.Socket", StdSocket.select)},], [
 			{name: "accept", value: StdSocket.accept},
 			{name: "bind", value: StdSocket.bind},
 			{name: "close", value: StdSocket.close},
@@ -650,7 +731,7 @@ class EvalStdLib {
 			{name: "parseFloat", value: StdStd.parseFloat},
 			{name: "parseInt", value: StdStd.parseInt},
 			{name: "string", value: StdStd.string},
-			{name: "random", value: StdStd.random},
+			{name: "random", value: volatile("Std.random", StdStd.random)},
 		], []);
 		initFields(builtins, tp([], "String"), [{name: "fromCharCode", value: StdString.fromCharCode},], [
 			{name: "charAt", value: StdString.charAt},
@@ -681,13 +762,13 @@ class EvalStdLib {
 		], []);
 		initFields(builtins, tp([], "Sys"), [
 			{name: "args", value: StdSys.args},
-			{name: "_command", value: StdSys._command},
-			{name: "cpuTime", value: StdSys.cpuTime},
-			{name: "environment", value: StdSys.environment},
+			{name: "_command", value: volatile("Sys.command", StdSys._command)},
+			{name: "cpuTime", value: volatile("Sys.cpuTime", StdSys.cpuTime)},
+			{name: "environment", value: envRead(true, StdSys.environment)},
 			{name: "exit", value: StdSys.exit},
-			{name: "getChar", value: StdSys.getChar},
+			{name: "getChar", value: volatile("Sys.getChar", StdSys.getChar)},
 			{name: "getCwd", value: StdSys.getCwd},
-			{name: "getEnv", value: StdSys.getEnv},
+			{name: "getEnv", value: envRead(false, StdSys.getEnv)},
 			{name: "print", value: StdSys.print},
 			{name: "println", value: StdSys.println},
 			{name: "programPath", value: StdSys.programPath},
@@ -699,8 +780,8 @@ class EvalStdLib {
 			{name: "stdin", value: StdSys.stdin},
 			{name: "stdout", value: StdSys.stdout},
 			{name: "systemName", value: StdSys.systemName},
-			{name: "time", value: StdSys.time},
-			{name: "timestamp_ms", value: StdSys.timestampMs},
+			{name: "time", value: volatile("Sys.time", StdSys.time)},
+			{name: "timestamp_ms", value: volatile("Sys.time", StdSys.timestampMs)},
 		], []);
 		initFields(builtins, tp(["eval", "vm"], "NativeThread"), [
 			{name: "delay", value: StdThread.delay},
@@ -779,22 +860,22 @@ class EvalStdLib {
 		initFields(builtins, tp(["eval", "luv", "_Timer"], "Timer_Impl_"), EvalLuv.fields(EvalLuv.timerFields), []);
 		initFields(builtins, tp(["eval", "luv", "_Buffer"], "Buffer_Impl_"), EvalLuv.fields(EvalLuv.bufferFields), []);
 		initFields(builtins, tp(["eval", "luv", "_SockAddr"], "SockAddr_Impl_"), EvalLuv.fields(EvalLuv.sockaddrFields), []);
-		initFields(builtins, tp(["eval", "luv", "_Tcp"], "Tcp_Impl_"), EvalLuv.fields(EvalLuv.tcpFields), []);
-		initFields(builtins, tp(["eval", "luv", "_Udp"], "Udp_Impl_"), EvalLuv.fields(EvalLuv.udpFields), []);
-		initFields(builtins, tp(["eval", "luv", "_ConnectedUdp"], "ConnectedUdp_Impl_"), EvalLuv.fields(EvalLuv.connectedUdpFields), []);
-		initFields(builtins, tp(["eval", "luv", "_Pipe"], "Pipe_Impl_"), EvalLuv.fields(EvalLuv.pipeFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Tcp"], "Tcp_Impl_"), volatileFields("eval.luv.Tcp", EvalLuv.fields(EvalLuv.tcpFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_Udp"], "Udp_Impl_"), volatileFields("eval.luv.Udp", EvalLuv.fields(EvalLuv.udpFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_ConnectedUdp"], "ConnectedUdp_Impl_"), volatileFields("eval.luv.Udp", EvalLuv.fields(EvalLuv.connectedUdpFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_Pipe"], "Pipe_Impl_"), volatileFields("eval.luv.Pipe", EvalLuv.fields(EvalLuv.pipeFields)), []);
 		initFields(builtins, tp(["eval", "luv", "_Tty"], "Tty_Impl_"), EvalLuv.fields(EvalLuv.ttyFields), []);
 		initFields(builtins, tp(["eval", "luv", "_Stream"], "Stream_Impl_"), EvalLuv.fields(EvalLuv.streamFields), []);
-		initFields(builtins, tp(["eval", "luv", "_Signal"], "Signal_Impl_"), EvalLuv.fields(EvalLuv.signalFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Signal"], "Signal_Impl_"), volatileFields("eval.luv.Signal", EvalLuv.fields(EvalLuv.signalFields)), []);
 		initFields(builtins, tp(["eval", "luv", "_Signal"], "SigNum_Impl_"), EvalLuv.fields(EvalLuv.signumFields), []);
-		initFields(builtins, tp(["eval", "luv", "_Process"], "Process_Impl_"), EvalLuv.fields(EvalLuv.processFields), []);
+		initFields(builtins, tp(["eval", "luv", "_Process"], "Process_Impl_"), volatileFields("eval.luv.Process", EvalLuv.fields(EvalLuv.processFields)), []);
 		initFields(builtins, tp(["eval", "luv", "_Request"], "Request_Impl_"), EvalLuv.fields(EvalLuv.requestFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Dns"), EvalLuv.fields(EvalLuv.dnsFields), []);
-		initFields(builtins, tp(["eval", "luv", "_File"], "File_Impl_"), EvalLuv.fields(EvalLuv.fileFields), []);
-		initFields(builtins, tp(["eval", "luv", "_Dir"], "Dir_Impl_"), EvalLuv.fields(EvalLuv.dirFields), []);
-		initFields(builtins, tp(["eval", "luv"], "FileSync"), EvalLuv.fields(EvalLuv.fileSyncFields), []);
-		initFields(builtins, tp(["eval", "luv"], "DirSync"), EvalLuv.fields(EvalLuv.dirSyncFields), []);
-		initFields(builtins, tp(["eval", "luv", "_FsEvent"], "FsEvent_Impl_"), EvalLuv.fields(EvalLuv.fsEventFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Dns"), volatileFields("eval.luv.Dns", EvalLuv.fields(EvalLuv.dnsFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_File"], "File_Impl_"), volatileFields("eval.luv.File", EvalLuv.fields(EvalLuv.fileFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_Dir"], "Dir_Impl_"), volatileFields("eval.luv.Dir", EvalLuv.fields(EvalLuv.dirFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "FileSync"), volatileFields("eval.luv.File", EvalLuv.fields(EvalLuv.fileSyncFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "DirSync"), volatileFields("eval.luv.Dir", EvalLuv.fields(EvalLuv.dirSyncFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_FsEvent"], "FsEvent_Impl_"), volatileFields("eval.luv.FsEvent", EvalLuv.fields(EvalLuv.fsEventFields)), []);
 		initFields(builtins, tp(["eval", "luv"], "ThreadPool"), EvalLuv.fields(EvalLuv.threadPoolFields), []);
 		initFields(builtins, tp(["eval", "luv", "_Thread"], "Thread_Impl_"), EvalLuv.threadFields, []);
 		initFields(builtins, tp(["eval", "luv", "_Once"], "Once_Impl_"), EvalLuv.onceFields, []);
@@ -803,18 +884,18 @@ class EvalStdLib {
 		initFields(builtins, tp(["eval", "luv", "_Semaphore"], "Semaphore_Impl_"), EvalLuv.semaphoreFields, []);
 		initFields(builtins, tp(["eval", "luv", "_Condition"], "Condition_Impl_"), EvalLuv.conditionFields, []);
 		initFields(builtins, tp(["eval", "luv", "_Barrier"], "Barrier_Impl_"), EvalLuv.barrierFields, []);
-		initFields(builtins, tp(["eval", "luv"], "Env"), EvalLuv.fields(EvalLuv.envFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Time"), EvalLuv.fields(EvalLuv.timeFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Env"), luvEnv(EvalLuv.fields(EvalLuv.envFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "Time"), volatileFields("eval.luv.Time", EvalLuv.fields(EvalLuv.timeFields)), []);
 		initFields(builtins, tp(["eval", "luv"], "Path"), EvalLuv.fields(EvalLuv.pathFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Random"), EvalLuv.fields(EvalLuv.randomFields), []);
-		initFields(builtins, tp(["eval", "luv"], "RandomSync"), EvalLuv.fields(EvalLuv.randomSyncFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Network"), EvalLuv.fields(EvalLuv.networkFields), []);
-		initFields(builtins, tp(["eval", "luv", "_FsPoll"], "FsPoll_Impl_"), EvalLuv.fields(EvalLuv.fsPollFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Resource"), EvalLuv.fields(EvalLuv.resourceFields), []);
-		initFields(builtins, tp(["eval", "luv"], "SystemInfo"), EvalLuv.fields(EvalLuv.systemInfoFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Pid"), EvalLuv.fields(EvalLuv.pidFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Random"), volatileFields("eval.luv.Random", EvalLuv.fields(EvalLuv.randomFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "RandomSync"), volatileFields("eval.luv.Random", EvalLuv.fields(EvalLuv.randomSyncFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "Network"), volatileFields("eval.luv.Network", EvalLuv.fields(EvalLuv.networkFields)), []);
+		initFields(builtins, tp(["eval", "luv", "_FsPoll"], "FsPoll_Impl_"), volatileFields("eval.luv.FsPoll", EvalLuv.fields(EvalLuv.fsPollFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "Resource"), volatileFields("eval.luv.Resource", EvalLuv.fields(EvalLuv.resourceFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "SystemInfo"), volatileFields("eval.luv.SystemInfo", EvalLuv.fields(EvalLuv.systemInfoFields)), []);
+		initFields(builtins, tp(["eval", "luv"], "Pid"), volatileFields("eval.luv.Pid", EvalLuv.fields(EvalLuv.pidFields)), []);
 		initFields(builtins, tp(["eval", "luv"], "Passwd"), EvalLuv.fields(EvalLuv.passwdFields), []);
-		initFields(builtins, tp(["eval", "luv"], "Metrics"), EvalLuv.fields(EvalLuv.metricsFields), []);
+		initFields(builtins, tp(["eval", "luv"], "Metrics"), volatileFields("eval.luv.Metrics", EvalLuv.fields(EvalLuv.metricsFields)), []);
 		initFields(builtins, tp(["eval", "luv", "_Prepare"], "Prepare_Impl_"), EvalLuv.fields(EvalLuv.prepareFields), []);
 		initFields(builtins, tp(["eval", "luv", "_Check"], "Check_Impl_"), EvalLuv.fields(EvalLuv.checkFields), []);
 		initFields(builtins, tp(["eval", "luv"], "Version"), EvalLuv.fields(EvalLuv.versionFields), []);
