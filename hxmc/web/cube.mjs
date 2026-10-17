@@ -3,7 +3,10 @@
 // browser.mjs with the imports.mjs of @hxmc/os and @hxmc/gfx (gfx/os.mjs,
 // gfx/gfx.mjs), drawing on the section's canvas with WebGPU, else WebGL2
 // (?gfx=webgl2: WebGL2 even with WebGPU; ?cube-angle=a: still, turned by a
-// radians, as the tests draw it). The caption names the API it drew with.
+// radians, as the tests draw it, a drag still turning it). The caption
+// names the API it drew with. Touch: a vertical swipe over the canvas
+// scrolls the page (touchAction: 'pan-y'; on a phone the canvas is about
+// as wide as the screen), a horizontal one turns the cube.
 // The files carry this script's ?v= (the site's build, Version.hx).
 const v = new URL(import.meta.url).search;
 const canvas = document.getElementById('cube');
@@ -21,7 +24,7 @@ try {
 	const gfx = query.get('gfx') ?? undefined, angle = query.get('cube-angle');
 	const { run } = await import('./gfx/browser.mjs' + v);
 	const { host } = await run('gfx/cube.wasm' + v, {
-		imports: ['gfx/os.mjs' + v, 'gfx/gfx.mjs' + v], canvas, gfx, args: angle ? ['--angle', angle] : [],
+		imports: ['gfx/os.mjs' + v, 'gfx/gfx.mjs' + v], canvas, gfx, touchAction: 'pan-y', args: angle ? ['--angle', angle] : [],
 		stderr: (s) => console.error('cube: ' + s),
 	});
 	// (for the site's browser test)
