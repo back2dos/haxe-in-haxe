@@ -1,0 +1,25 @@
+exit 0
+StructInline.hx:173: 1, 2
+StructInline.hx:174: 6, (1, 0)
+StructInline.hx:175: 3, (1, 0)
+StructInline.hx:176: 50, (1, 0)
+StructInline.hx:178: (1, 0)
+StructInline.hx:179: -1, 1, (1, 0)
+StructInline.hx:180: 1
+StructInline.hx:181: 2, 2, (1, 0)
+StructInline.hx:185: 105, (1, 2), 0
+StructInline.hx:189: 8, (7, 8)
+StructInline.hx:190: 105, (1, 1), 0
+StructInline.hx:194: 21, (10, 20)
+StructInline.hx:195: 20, (10, 20)
+StructInline.hx:199: 4, 3
+StructInline.hx:200: 4, 3
+StructInline.hx:201: 7
+StructInline.hx:202: 30, 3
+StructInline.hx:205: 3, 4, 0, 0
+StructInline.hx:210: 2, 4, 45, 1
+StructInline.hx:216: (1, 1), (42, 1)
+StructInline.hx:219: (1, 1), (1, 7)
+StructInline.hx:222: (3, 8), (7, 8)
+StructInline.hx:225: (1, 7), (5, 5)
+StructInline.hx:228: (5, 5)
