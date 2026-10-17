@@ -222,7 +222,7 @@ class GcModule {
 			case TRef(RObj(c)) if (!c.isInterface): "t" + classType(c);
 			case TRef(RStr): "t" + tString;
 			case TRef(RArr(_)): "t" + tArrBase;
-			case TRef(REnum(e)): "t" + (e == null ? tEnum : tEnumOf.get(e));
+			case TRef(REnum(e)): "t" + (e == null ? tEnum : enumBase(e));
 			case TRef(RClos(s)): "t" + closType(s);
 			case TRef(RNative("haxe_io_Bytes")): "t" + tBytes;
 			case _: repr(t);
@@ -285,14 +285,8 @@ class GcModule {
 			tDyn.set(k, structType([{r: k == "b" ? "i" : k, mut: false}], -1, false));
 		for (k in ["i", "f", "l", "p"])
 			tBox.set(k, structType([{r: k, mut: true}], -1, false));
-		// (before the classes: their fields may be of these types)
-		for (e in prog.enums) {
-			var te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, Lambda.exists(e.ctors, c -> c.params.length > 0));
-			tEnumOf.set(e, te);
-			for (c in e.ctors)
-				if (c.params.length > 0)
-					tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false));
-		}
+		for (e in prog.enums)
+			enumBase(e);
 		// classes in preorder: a superclass before its subclasses
 		var cs = [for (c in reach.classes.keys()) c];
 		cs.sort((a, b) -> a.id - b.id);
@@ -305,7 +299,28 @@ class GcModule {
 		for (l in reach.lambdas.keys())
 			lambdaType(l);
 		for (s in prog.shapes)
+			// (by representation: a layout is shared by the literals of its names and representations)
 			tShape.set(s, structType([{r: "p", mut: true}, {r: "i", mut: false}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
+	}
+
+	// an enum's type and its constructors' (made when first asked for: their
+	// arguments may be of other enums', or of their own)
+	function enumBase(e:EnumInfo):Int {
+		var te = tEnumOf.get(e);
+		if (te != null) return te;
+		te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, Lambda.exists(e.ctors, c -> c.params.length > 0));
+		tEnumOf.set(e, te);
+		for (c in e.ctors)
+			if (c.params.length > 0)
+				tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false,
+					[null, null].concat([for (p in c.params) b -> fieldType(b, p)])));
+		return te;
+	}
+
+	// a field's value type: its type when keyOf proves one (a cast less where it is read)
+	function fieldType(b:Buf, t:Ty) {
+		var k = keyOf(t);
+		if (k.charAt(0) == "t") refType(b, Std.parseInt(k.substr(1))) else valType(b, repr(t));
 	}
 
 	function closType(s:SigInfo):Int {
@@ -325,7 +340,7 @@ class GcModule {
 		var base = closType(l.sig);
 		var ft = tFn.get(l.sig.key);
 		var fields = [{r: "p", mut: false}].concat([for (c in l.captures) {r: repr(c.ty), mut: false}]);
-		var ftys:Array<Buf->Void> = [b -> refType(b, ft, false)];
+		var ftys:Array<Buf->Void> = [b -> refType(b, ft, false)].concat([for (c in l.captures) b -> fieldType(b, c.ty)]);
 		t = structType(fields, base, false, ftys);
 		tLambda.set(l, t);
 		return t;
@@ -365,7 +380,7 @@ class GcModule {
 			var g = prog.globals[i];
 			var r = repr(g.ty);
 			var tb = new Buf();
-			valType(tb, r);
+			fieldType(tb, g.ty);
 			var ib = new Buf();
 			if (g.init != null && g.init.params.length == 0) {
 				// an enum singleton: its constructor's tag
@@ -387,7 +402,7 @@ class GcModule {
 		var codes = [
 			for (f in funcs) {
 				if (trace) Sys.println("wasm-gc: " + f.name);
-				if (survey == null) new FuncGen(this, f).emit() else try new FuncGen(this, f).emit() catch (e:Dynamic) {
+				if (survey == null) emitFunc(f) else try emitFunc(f) catch (e:Dynamic) {
 					var s = Std.string(e), at = s.indexOf(": ", s.indexOf(f.display != null ? f.display : f.name));
 					note(at < 0 ? s : s.substr(at + 2), f.display != null ? f.display : f.name);
 					var u = new Buf();
@@ -459,6 +474,14 @@ class GcModule {
 	public function foreignOf(sym:String):Null<Int> {
 		var lib = hxmc.ir.CInterop.LIBS.get(sym);
 		return lib == null ? null : importIndex.get(lib + "." + sym);
+	}
+
+	// a function's code: emitted again when locals can be given a type (FuncGen.refine)
+	function emitFunc(f:FuncInfo):Buf {
+		var g = new FuncGen(this, f);
+		var code = g.emit();
+		var r = g.refine();
+		return r == null ? code : new FuncGen(this, f, r).emit();
 	}
 
 	// a function written here (its body without the final end), after the program's;
@@ -831,6 +854,16 @@ class GcModule {
 
 	public function globalOf(g:Int):Int
 		return progGlobal.get(g);
+
+	// the keys (keyOf) of a program global, an enum constructor's argument, a closure's capture
+	public function globalKey(g:Int):String
+		return keyOf(prog.globals[g].ty);
+
+	public function ctorParamKey(c:CtorInfo, idx:Int):String
+		return keyOf(c.params[idx]);
+
+	public function captureKey(l:LambdaInfo, idx:Int):String
+		return keyOf(l.captures[idx].ty);
 
 	public function selOf(sel:Int):Int
 		return selIndex.get(sel);

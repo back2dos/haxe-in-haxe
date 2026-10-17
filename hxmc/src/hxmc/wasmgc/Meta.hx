@@ -103,6 +103,13 @@ class Meta {
 	function box(b:Buf, t:Ty)
 		m.box(b, t);
 
+	// a Dynamic on the stack as a t: unboxed, or cast to its type (keyOf)
+	function unboxAs(b:Buf, t:Ty) {
+		unbox(b, t);
+		var k = m.keyOf(t);
+		if (k.charAt(0) == "t") m.castTo(b, Std.parseInt(k.substr(1)));
+	}
+
 	function unbox(b:Buf, t:Ty)
 		if (GcModule.repr(t) != "p") {
 			b.u8(0x10);
@@ -550,7 +557,7 @@ class Meta {
 							i32(b, k);
 							b.u8(0x10);
 							Enc.uleb(b, arrGet);
-							unbox(b, c.params[k]);
+							unboxAs(b, c.params[k]);
 						}
 						m.gc(b, 0x00, m.ctorType(c));
 					}

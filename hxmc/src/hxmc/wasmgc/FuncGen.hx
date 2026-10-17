@@ -13,8 +13,13 @@ private enum Frame {
 // One function of the IR as a WasmGC function body (GcModule). The IR's
 // statements are structured, so they map onto wasm's blocks: a loop is a
 // block (its exit) around a loop (its head), a switch nested blocks and a
-// br_table. Locals are the function's (references as eqref), plus temporaries
-// taken and given back around the code that needs them.
+// br_table. Locals are the function's (references as eqref unless their IR
+// type proves one: keyOf), plus temporaries taken and given back around the
+// code that needs them. A local or parameter of no such type that the code
+// only ever casts to one type (Dynamic and closure parameters read as a
+// class, a runtime function's Dynamic as Bytes) gets that type: the function
+// is emitted again with the local of that type, cast where it is set (a
+// parameter: once, on entry) instead of where it is read (refine).
 class FuncGen {
 	final m:GcModule;
 	final f:FuncInfo;
@@ -25,10 +30,34 @@ class FuncGen {
 	final free = new Map<String, Array<Int>>();
 	final frames:Array<Frame> = [];
 	var nparams = 0;
+	// the locals given a type (a second emission), by id
+	final refined:Map<Int, Int>;
+	// the types each untyped local is cast to where read, and those read otherwise
+	final castUses = new Map<Int, Map<Int, Bool>>();
+	final otherUses = new Map<Int, Bool>();
+	var castUse = false;
 
-	public function new(m:GcModule, f:FuncInfo) {
+	public function new(m:GcModule, f:FuncInfo, ?refined:Map<Int, Int>) {
 		this.m = m;
 		this.f = f;
+		this.refined = refined != null ? refined : new Map();
+	}
+
+	// the locals the code only casts to one type (for a second emission), or null
+	public function refine():Null<Map<Int, Int>> {
+		var r = null;
+		for (id => ts in castUses) {
+			if (otherUses.exists(id)) continue;
+			var t = -1, n = 0;
+			for (k in ts.keys()) {
+				t = k;
+				n++;
+			}
+			if (n != 1) continue;
+			if (r == null) r = new Map();
+			r.set(id, t);
+		}
+		return r;
 	}
 
 	static function repr(t:Ty):String
@@ -45,9 +74,8 @@ class FuncGen {
 			var a = f.args[i];
 			local.set(a.id, nparams++);
 			localKey.set(a.id, m.paramKey(f, i));
-			if (m.precise(f)) continue;
-			// (a parameter of a class type, or this: cast once into a local of its type)
-			var k = i == 0 && f.selfClass != null ? "t" + m.classType(f.selfClass) : keyOf(a.ty);
+			// (a parameter of a class type, or this, or refined: cast once into a local of its type)
+			var k = refined.exists(a.id) ? "t" + refined.get(a.id) : m.precise(f) ? "" : i == 0 && f.selfClass != null ? "t" + m.classType(f.selfClass) : keyOf(a.ty);
 			if (k.charAt(0) == "t") shadows.push({param: nparams - 1, id: a.id, key: k});
 		}
 		for (s in shadows) {
@@ -63,7 +91,7 @@ class FuncGen {
 		for (l in code.locals)
 			if (!local.exists(l.id) && repr(l.ty) != "v") {
 				local.set(l.id, nparams + extra.length);
-				var k = keyOf(l.ty);
+				var k = refined.exists(l.id) ? "t" + refined.get(l.id) : keyOf(l.ty);
 				extra.push(k);
 				localKey.set(l.id, k);
 			}
@@ -150,12 +178,33 @@ class FuncGen {
 			case EStr(_): "t" + m.stringType;
 			case ECast(_, x): wtype(x);
 			case ENull(_): "n";
+			case EGlobal(g, _): m.globalKey(g);
+			case EEnumParam(c, idx, _): m.ctorParamKey(c, idx);
+			case ECapture(l, idx, _): m.captureKey(l, idx);
+			case ENewEnum(c, _): "t" + (c.params.length == 0 ? m.enumTypeOf(c.en) : m.ctorType(c));
+			case ENewArr(t, _): "t" + m.arrType(GcModule.elemKind(t));
+			case ENewClos(l, _): "t" + m.lambdaTypeOf(l);
+			case ENewBox(t, _): "t" + m.boxType(t);
+			case ENewAnon(s, _): "t" + m.shapeType(s);
 			case _: rOf(e);
 		}
 
+	// the value of e on the stack as a value of key k (keyOf: cast when a type)
+	function exprKey(e:Ex, k:String)
+		if (k.charAt(0) == "t") exprAs(e, Std.parseInt(k.substr(1))) else expr(e);
+
 	// the value of e on the stack as a (ref null t): cast unless its type already is one
 	function exprAs(e:Ex, t:Int) {
+		// (an untyped local cast: noted for refine)
+		var l = castBase(e);
+		if (l != null) {
+			var ts = castUses.get(l.id);
+			if (ts == null) castUses.set(l.id, ts = new Map());
+			ts.set(t, true);
+			castUse = true;
+		}
 		expr(e);
+		castUse = false;
 		var k = wtype(e);
 		if (k == "n") return;
 		if (k.charAt(0) == "t" && m.isSubtype(Std.parseInt(k.substr(1)), t)) return;
@@ -164,6 +213,13 @@ class FuncGen {
 
 	function gc(o:Int, ?a:Int, ?c:Int)
 		m.gc(b, o, a, c);
+
+	function castBase(e:Ex):Null<Local>
+		return switch e {
+			case ELocal(l) if (localKey.get(l.id) == "p"): l;
+			case ECast(_, x): castBase(x);
+			case _: null;
+		}
 
 	// ---- statements
 
@@ -243,7 +299,7 @@ class FuncGen {
 				expr(v);
 				gc(0x05, m.boxType(t), 0);
 			case SSetGlobal(g, v):
-				expr(v);
+				exprKey(v, m.globalKey(g));
 				op(0x24);
 				Enc.uleb(b, m.globalOf(g));
 			case SIf(c, a, e):
@@ -543,6 +599,8 @@ class FuncGen {
 				opened++;
 			}
 			localGet(t);
+			// (set from the exception, any value: never refined)
+			otherUses.set(c.l.id, true);
 			if (local.exists(c.l.id)) localSet(local.get(c.l.id)) else op(0x1A);
 			stmts(c.body);
 			if (c.test == null) {
@@ -624,6 +682,7 @@ class FuncGen {
 			case ELocal(l):
 				var i = local.get(l.id);
 				if (i == null) unsupported("the local " + l.name + " (not declared)");
+				if (!castUse) otherUses.set(l.id, true);
 				localGet(i);
 			case EGlobal(g, _):
 				op(0x23);
@@ -810,8 +869,8 @@ class FuncGen {
 				i32(c.tag);
 				i32(m.enumId(c.en));
 				if (c.params.length == 0) gc(0x00, m.enumTypeOf(c.en)) else {
-					for (a in args)
-						expr(a);
+					for (k in 0...args.length)
+						exprKey(args[k], m.ctorParamKey(c, k));
 					gc(0x00, m.ctorType(c));
 				}
 			case ENewArr(t, values):
@@ -826,8 +885,8 @@ class FuncGen {
 				m.declare(fi);
 				op(0xD2);
 				Enc.uleb(b, fi);
-				for (c in captures)
-					expr(c);
+				for (k in 0...captures.length)
+					exprKey(captures[k], m.captureKey(l, k));
 				gc(0x00, m.lambdaTypeOf(l));
 			case ENewBox(t, v):
 				expr(v);

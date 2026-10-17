@@ -352,10 +352,11 @@ private class Sra {
 			case _: false;
 		}
 
+	// (a layout's references as Dynamic: literals of other types share it, Program.shape)
 	public static function fieldsOf(kind:Ex):Array<{name:String, ty:Ty}>
 		return switch kind {
 			case ENewObj(c): c.fields;
-			case ENewAnon(s, _): s.fields;
+			case ENewAnon(s, _): [for (f in s.fields) {name: f.name, ty: Ir.isRef(f.ty) ? TRef(RAny) : f.ty}];
 			case _: throw "unreachable";
 		}
 
