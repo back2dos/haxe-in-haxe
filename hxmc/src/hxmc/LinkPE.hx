@@ -8,7 +8,12 @@ import hxmc.Obj;
 // its import directory written directly from the runtime's import list
 // (.hxmc.imports: which DLL exports what), call thunks for imported code,
 // the TLS directory of the C runtime (_tls_used) and the exception
-// directory (.pdata).
+// directory (.pdata: the runtime object's, and the generated functions'
+// with their unwind information in .xdata, from Unwind; sorted by address,
+// as RtlLookupFunctionEntry searches it). With `symbols` (-debug, -D
+// hxmc.symbols), a COFF symbol table of the code and, with -debug's lines,
+// DWARF sections (Dwarf), as MinGW's toolchain writes them for gdb and lldb
+// (no PDB: PLANS.md).
 class LinkPE {
 	// the image base: x86-64 a fixed 0x400000 (addresses are kept absolute);
 	// arm64 0x140000000, relocatable (addresses are kept as RVAs, BASE 0, and
@@ -21,6 +26,7 @@ class LinkPE {
 
 	var objs:Array<Obj>;
 	var arm:Bool;
+	public var symbols = false;
 	var globals = new Map<String, Symbol>();
 	var imports = new Map<String, {dll:String, name:String, code:Bool}>();
 	var addr = new Map<Section, Int>();
@@ -156,6 +162,7 @@ class LinkPE {
 						sec.name = ".data$hxmc_" + l + "1" + sec.name;
 						sec.kind = Data;
 					}
+		unwindInfo(extra);
 		objs.push(extra);
 		// output sections
 		var groups:Array<{name:String, chars:Int, secs:Array<Section>}> = [
@@ -189,7 +196,9 @@ class LinkPE {
 			g.secs.sort((a, b) -> a.name < b.name ? -1 : a.name > b.name ? 1 : idx.get(a) - idx.get(b));
 		}
 		var nsec = groups.length;
-		var headers = align(64 + 4 + 20 + 240 + 40 * nsec, FILE);
+		// (-debug: the DWARF sections after the others)
+		var hasLines = symbols && Lambda.exists(objs, o -> Lambda.exists(o.funcs, r -> r.lines != null));
+		var headers = align(64 + 4 + 20 + 240 + 40 * (nsec + (hasLines ? 5 : 0)), FILE);
 		var rva = align(headers, SECT);
 		var starts = [], sizes = [];
 		var idata:Buf = null;
@@ -341,6 +350,56 @@ class LinkPE {
 			if (g.name == ".idata") out.b.blit(at, idata.b, 0, idata.len) else if (g.name == ".reloc") out.b.blit(at, relocBuf.b, 0, relocBuf.len) else
 				for (s in g.secs)
 					if (s.kind != Bss && s.kind != Tbss) out.b.blit(at + addr.get(s) - BASE - starts[gi], s.buf.b, 0, s.buf.len);
+			if (g.name == ".pdata") sortPdata(out, at, sizes[gi]);
+		}
+		// (-debug) the DWARF sections: discardable, named through the string table
+		var strtab = new Buf(4096);
+		strtab.u32(0);
+		var debug = [];
+		if (hasLines)
+			for (d in Dwarf.sections(objs, r -> r.sym.section != null && addr.exists(r.sym.section), r -> symAddr(r.sym) + imgLo, imgHi)) {
+				var name = "/" + strtab.len;
+				strtab.str("." + d.name);
+				strtab.u8(0);
+				out.align(FILE);
+				var at = out.len;
+				out.buf(d.data);
+				out.zeros(align(d.data.len, FILE) - d.data.len);
+				debug.push({name: name, rva: imageSize, size: d.data.len, raw: at, rawSize: align(d.data.len, FILE)});
+				imageSize += align(d.data.len, SECT);
+			}
+		// (`symbols`) the COFF symbol table of the code, then the string table
+		var symOff = 0, nsyms = 0;
+		if (symbols) {
+			var syms = new Buf(1 << 16);
+			for (o in objs)
+				for (sy in o.symbols) {
+					var sec = sy.section;
+					if (sec == null || sec.kind != Text || !addr.exists(sec) || sy.abs || sy.name.length == 0 || StringTools.startsWith(sy.name, ".L")) continue;
+					var n = Bytes.ofString(sy.name);
+					if (n.length <= 8) {
+						syms.bytes(n);
+						syms.zeros(8 - n.length);
+					} else {
+						syms.u32(0);
+						syms.u32(strtab.len);
+						strtab.bytes(n);
+						strtab.u8(0);
+					}
+					syms.u32(addr.get(sec) + sy.offset - BASE - starts[0]);
+					syms.u16(1); // .text, the first section
+					syms.u16(0x20); // a function
+					syms.u8(sy.global ? 2 : 3); // IMAGE_SYM_CLASS_EXTERNAL, _STATIC
+					syms.u8(0);
+					nsyms++;
+				}
+			symOff = out.len;
+			out.buf(syms);
+		}
+		if (symbols || debug.length > 0) {
+			strtab.set32(0, strtab.len);
+			if (!symbols) symOff = out.len;
+			out.buf(strtab);
 		}
 		// headers
 		var h = new Buf(headers);
@@ -350,10 +409,10 @@ class LinkPE {
 		h.u32(0x4550); // PE\0\0
 		h.u16(arm ? 0xaa64 : 0x8664);
 		var present = [for (gi in 0...groups.length) if (sizes[gi] > 0) gi];
-		h.u16(present.length);
+		h.u16(present.length + debug.length);
 		h.u32(0);
-		h.u32(0);
-		h.u32(0);
+		h.u32(symOff); // PointerToSymbolTable (the string table follows the symbols)
+		h.u32(nsyms);
 		h.u16(240);
 		h.u16(relocatable ? 0x0022 : 0x0023); // (RELOCS_STRIPPED |) EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
 		h.u16(0x20b); // PE32+
@@ -420,8 +479,69 @@ class LinkPE {
 			h.u16(0);
 			h.u32(g.chars);
 		}
+		for (d in debug) {
+			var nm = Bytes.alloc(8);
+			nm.fill(0, 8, 0);
+			nm.blit(0, Bytes.ofString(d.name), 0, d.name.length);
+			h.bytes(nm);
+			h.u32(d.size);
+			h.u32(d.rva);
+			h.u32(d.rawSize);
+			h.u32(d.raw);
+			h.zeros(12);
+			h.u32(0x42000040); // INITIALIZED_DATA | DISCARDABLE | READ
+		}
 		out.b.blit(0, h.b, 0, h.len);
 		return out.toBytes();
+	}
+
+	// the .pdata entries and .xdata of the generated functions (Unwind):
+	// x86-64 (begin, end, unwind info), arm64 (begin, .xdata); a function
+	// whose frame needs no description (a leaf leaving the stack alone) has
+	// none. Identical unwind information is shared.
+	function unwindInfo(extra:Obj) {
+		var pdata = new Section(".pdata$hxmc", RoData, 4);
+		var xdata = new Section(".xdata$hxmc", RoData, 4);
+		var xsym = new Symbol(".Lxdata");
+		xsym.global = false;
+		xsym.section = xdata;
+		var shared = new Map<String, Int>();
+		for (o in objs)
+			for (r in o.funcs) {
+				var u = arm ? Unwind.winA64(r.ops, r.sym.size) : Unwind.winX64(r.ops);
+				if (u == null) continue;
+				var key = u.toBytes().toHex();
+				var at = shared.get(key);
+				if (at == null) {
+					at = xdata.buf.len;
+					xdata.buf.buf(u);
+					shared.set(key, at);
+				}
+				pdata.relocs.push(new Reloc(pdata.buf.len, RImgRel32, r.sym, 0));
+				pdata.buf.u32(0);
+				if (!arm) {
+					pdata.relocs.push(new Reloc(pdata.buf.len, RImgRel32, r.sym, r.sym.size));
+					pdata.buf.u32(0);
+				}
+				pdata.relocs.push(new Reloc(pdata.buf.len, RImgRel32, xsym, at));
+				pdata.buf.u32(0);
+			}
+		if (pdata.buf.len == 0) return;
+		extra.sections.push(pdata);
+		extra.sections.push(xdata);
+	}
+
+	// the exception directory's entries in address order (each object's are,
+	// the whole is not: the runtime object's and the generated functions')
+	function sortPdata(out:Buf, at:Int, size:Int) {
+		var n = arm ? 8 : 12;
+		var entries = [for (k in 0...Std.int(size / n)) out.b.sub(at + k * n, n)];
+		entries.sort((a, b) -> {
+			var x = a.getInt32(0), y = b.getInt32(0);
+			x < y ? -1 : x > y ? 1 : 0;
+		});
+		for (k in 0...entries.length)
+			out.b.blit(at + k * n, entries[k], 0, n);
 	}
 
 	// the import directory, ILTs, IATs, hint/name entries and DLL names of

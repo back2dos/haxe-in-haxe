@@ -644,26 +644,40 @@ release binaries and lix ship per platform.
 Needed by Android and plugins: the relocation model, TLS model, output
 kind and segment alignment are already parameters in `Abi`/`Target`.
 
-### Windows unwind information
+### Debugging information (done: unwind tables, lines; what is left)
 
-Generated code has no `.pdata`/`.xdata`; nothing needs it while
-setjmp/longjmp do not unwind, but debuggers and SEH-based tools would.
+Done (2026-10-17; docs/hxmc.md, "Debugging"): frame pointers by default on
+x86-64; unwind tables always, from the emitters' frame records
+(`Unwind.hx`): ELF `.eh_frame` and `.eh_frame_hdr` (with the runtime
+object's C code), Mach-O `__eh_frame`, Windows `.pdata`/`.xdata` for x86-64
+and arm64; with `-debug`, DWARF 4 lines and subprograms from the typed AST's
+positions on ELF, Mach-O and PE, and a COFF symbol table on Windows. Checked
+by `UnwindTables` (the system unwinders against the frame-pointer chain) and
+`DebugCheck` (gdb/lldb, readelf, llvm-readobj, llvm-dwarfdump). Left:
 
-### Unwind tables on ELF and Mach-O
-
-Frame pointers are done (docs/hxmc.md, "Pipeline": `-D
-hxmc.frame-pointers` on x86-64, always on arm64; `perf record -g` works).
-Not done: `.eh_frame` CFI (or `__unwind_info` on macOS), which `perf
---call-graph dwarf`, gdb/lldb backtraces without frame-pointer heuristics
-and sampling profilers that do not walk frame pointers need. The prologues
-are regular (push rbp / pushes of the callee-saved registers / sub rsp;
-stp x29, x30 / sub sp / stores), so one CIE and an FDE per function with a
-few instructions each would do; the emitters know every offset. With frame
-pointers on, the FDEs reduce to "CFA = rbp + 16" after the prologue.
-Making frame pointers the default on Linux x86-64 (as Fedora and Ubuntu
-now build): measured 0.8% more code and no difference beyond noise in
-time (self-compile -0.5%, the tool's build of the port -1.1%, the
-benchmarks between -5% and +4% either way, code-layout noise).
+- Windows PDB (CodeView): the Visual Studio debugger and WinDbg read no
+  DWARF. A PDB is an MSF container of streams (PDB info, TPI/IPI type
+  records, DBI with a module per object, its symbols S_GPROC32 and its C13
+  line subsections, the public and global symbol hash tables, section
+  contributions) referenced by an RSDS debug directory entry; llvm's
+  `pdbutil`/`lld-link` are the references. Line tables and functions without
+  types would make breakpoints and backtraces work.
+- Mach-O `__unwind_info`: libunwind and lldb read `__eh_frame` (a linear
+  search without an index); compact unwind entries in DWARF mode (each
+  pointing to its FDE) would give the binary search table, ld64's form.
+  The frame-pointer encodings need the callee-saved pairs right below the
+  record, which the arm64 layout does not keep.
+- Variables: `DW_TAG_formal_parameter`/`variable` with locations (the
+  register allocator's intervals per value; the frame's slots; references in
+  shadow-stack slots), types (DW_TAG_base_type, structures for classes from
+  the layouts), and a language number: debuggers then print arguments and
+  locals. `DW_TAG_inlined_subroutine` for inlined calls (the inliner knows
+  the call site: Inline.run), columns (positions have them).
+- perf: `perf --call-graph dwarf` (not checked here: no usable perf in the
+  development container) and the JIT's frames (native macros: `Jit.hx`
+  could register its code's FDEs with `__register_frame`).
+- WebAssembly: DWARF in custom sections (`.debug_line` with code offsets)
+  for the browsers' and wasmtime's debuggers.
 
 ## Graphics
 

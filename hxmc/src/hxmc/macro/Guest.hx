@@ -54,7 +54,7 @@ class Guest {
 		if (main == null) throw "no entry class";
 		var o = Options.read(com);
 		var abi = Abi.get(o.target);
-		if (o.framePointers) abi.framePointers = true; // (as Driver)
+		abi.framePointers = abi.arm || o.framePointers; // (as Driver)
 		hxmc.ir.Lower.targetOs = abi.osCode();
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);

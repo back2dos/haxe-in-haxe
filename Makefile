@@ -157,7 +157,9 @@ help:
 ##             bin/npm/native/HOST/haxe; PORT=1 adds the port itself)
 ## corpus-stage  bin/corpus/<target>: hxmc's corpus cross-built for each of CORPUS_TARGETS, to run on
 ##             the target's machine (Check; CI's test and wasm jobs): wasm32-wasi-legacy with legacy
-##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck)
+##             exception handling, linux-*-glibc in the glibc mode (checked with readelf: ElfCheck);
+##             the native targets' debugging information checked and a -debug build staged in _debug/
+##             (DebugCheck: its --run on the target's machine runs gdb or lldb)
 ## test-node-libs  -lib from node_modules with the npm package's compiler for the host (hxmc/test/NodeLibs.hx)
 ## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube}[.exe]: packages/gfx's test programs (Linux: glibc mode)
 ## gfx-check   packages/gfx: the triangle and cube examples headless and in a window, against
@@ -487,7 +489,9 @@ corpus-stage: $(TOOL) $(STD) $(HOST_RT)
 		esac; \
 		rm -rf bin/corpus/$$t; \
 		$(SCRIPT) Corpus -v $$a --stage bin/corpus/$$t || exit 1; \
-		case $$t in *-glibc) $(SCRIPT) ElfCheck bin/corpus/$$t || exit 1 ;; esac; \
+		case $$t in *-glibc) $(SCRIPT) ElfCheck bin/corpus/$$t || exit 1 ;; \
+			wasm*) ;; \
+			*) $(SCRIPT) DebugCheck --target $$t --stage bin/corpus/$$t/_debug || exit 1 ;; esac; \
 	done
 
 # the os and gfx packages' sources (`-lib hxmc.gfx` once the launcher resolves packages/)

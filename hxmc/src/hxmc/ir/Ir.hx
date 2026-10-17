@@ -340,6 +340,10 @@ enum Stmt {
 	// allocation or array store: the references live across it are stored in
 	// the shadow stack only on that path (hxmc.Roots)
 	SCold(id:Int, s:Stmt);
+	// (-debug: Lower.lines) the code of the statements that follow comes from
+	// this line of the source (the typed AST's position); nothing else: every
+	// pass steps over it, so the code is the same as without it
+	SPos(file:String, line:Int);
 }
 
 class Program {

@@ -1,12 +1,11 @@
 // The frame chain (Abi.framePointers): with a frame record in every function
-// (arm64 always; x86-64 with -D hxmc.frame-pointers, which this case is
-// built with), a walk from Mem.frame() through the saved frame pointers
+// (arm64 always; x86-64 by default, unless -D hxmc.no-frame-pointers), a
+// walk from Mem.frame() through the saved frame pointers
 // passes every frame up to main's, as a profiler (perf record -g) or a
 // debugger unwinds: through recursion, closures, the runtime's Haxe code
 // calling back (Array.sort), a caught exception and collections. Where
 // functions keep no records (WebAssembly), Mem.frame() is null and the
 // checks are skipped (the output is the same).
-// define: hxmc.frame-pointers
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 

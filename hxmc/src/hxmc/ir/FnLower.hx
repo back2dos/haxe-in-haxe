@@ -523,10 +523,27 @@ class FnLower {
 
 	function stmt(e:TExpr) {
 		curExpr = e;
+		var at = Lower.lines ? pos(e) : -1;
 		if (!Lower.survey) stmt1(e) else try stmt1(e) catch (err:LowerError) {
 			l.record(err, fi.name);
 			out.push(SThrow(ENull(TRef(RAny))));
 		}
+		// (a statement that lowered to nothing leaves no position)
+		if (at >= 0 && out.length == at + 1) out.pop();
+	}
+
+	// (-debug) the position of a statement before its code: replaces a
+	// position that no code followed; the index of the SPos
+	function pos(e:TExpr):Int {
+		var p = e.epos;
+		if (p.pfile == null || p.pfile == "" || p.pfile == "?" || p.pmin < 0) return -1;
+		var s = SPos(p.pfile, syntax.Lexer.findPos(p).line);
+		if (out.length > 0 && out[out.length - 1].match(SPos(_))) {
+			out[out.length - 1] = s;
+			return out.length - 1;
+		}
+		out.push(s);
+		return out.length - 1;
 	}
 
 	// (init: the local's first value; a struct local holds a C function's

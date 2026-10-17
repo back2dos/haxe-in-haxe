@@ -73,7 +73,7 @@ class Abi {
 	public var versioned = false;
 	// every function keeps a frame record, linked through the frame pointer
 	// (rbp; x29): arm64 always (Apple's ABI requires it, and its prologue is
-	// the record), x86-64 with -D hxmc.frame-pointers (Options.framePointers)
+	// the record), x86-64 unless -D hxmc.no-frame-pointers (Options.framePointers)
 	public var framePointers = false;
 
 	function new(name, arm, os, size, prev, sp, align, setjmp, prefix) {

@@ -190,9 +190,13 @@ class Isel implements hxmc.Target.Selector {
 
 	var pending:Null<LIns>;
 
+	// (-debug) the source position of the Mir instruction being selected (LIns.pos)
+	var curPos = 0;
+
 	function emit(op:AOp):LIns {
 		flush();
 		pending = new LIns(op);
+		pending.pos = curPos;
 		return pending;
 	}
 
@@ -203,8 +207,10 @@ class Isel implements hxmc.Target.Selector {
 		}
 	}
 
-	function push(i:LIns)
+	function push(i:LIns) {
+		i.pos = curPos;
 		cur.ins.push(i);
+	}
 
 	inline function sz(t:MTy):Int
 		return t == I32 ? 4 : 8;
@@ -336,6 +342,7 @@ class Isel implements hxmc.Target.Selector {
 					pendingBase = false;
 					macTlsBase();
 				}
+				curPos = i.pos;
 				ins(i, b, next);
 			}
 			if (pendingBase) macTlsBase();
