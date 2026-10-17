@@ -14,6 +14,8 @@ and in which order: [ROADMAP.md](../../ROADMAP.md). What is built:
 | [graphics.md](graphics.md) | `@hxmc/os`, `@hxmc/gfx`, shaders, audio, UI pointers |
 | [ui.md](ui.md) | `@hxmc/ui`: native controls or a drawn UI, the survey, the design and what is built |
 | [theme.md](theme.md) | unstyled widgets, the rule engine and the shadcn-based `@hxmc/theme`: the contract and who builds what |
+| [document.md](document.md) | views rendered to PDF, SVG or pixels: the document platform and what today's Canvas must allow |
+| [native-or-drawn.md](native-or-drawn.md) | each widget native, drawn or auto: the defaults, platform views in a drawn tree, the browser's DOM renderer |
 | [view.md](view.md) | `@hxmc/view`: signals, markup and the renderer contract; what was looked at, chosen and rejected |
 | [web.md](web.md) | `@hxmc/view`'s renderers, `@hxmc/web`, the site |
 | [packaging.md](packaging.md) | npm, haxelib, verifying native builds |
