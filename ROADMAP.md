@@ -37,6 +37,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 ## Next
 
+- Native or drawn per widget: native text fields by default, platform views in drawn trees, a DOM renderer for the widgets in the browser ([native-or-drawn.md](docs/plans/native-or-drawn.md))
 - Unstyled widgets and one theme, `@hxmc/theme`, based on shadcn/ui: its tokens, slots, variants and class lists ([theme.md](docs/plans/theme.md))
 - Graphics programs in the playground ([graphics.md](docs/plans/graphics.md#graphics-in-the-playground))
 
