@@ -208,11 +208,37 @@ makes the build write nothing. The output is the same as
 without the cache (`make test-module-cache`; `make fixpoint`: the tool
 building itself with the cache cold, warm and off): the cache also keeps
 the modifiers of unbound monomorphs and what the sort of the types walks
-of each module before the filters, which HXB does not keep. Macros are
-trusted as the server trusts them: a macro whose result changes without
-its inputs changing (the date, randomness, a file not registered with
-`Context.registerModuleDependency`) keeps its earlier result until its
-module changes. Plans: [plans/compiler.md](plans/compiler.md)
+of each module before the filters, which HXB does not keep. What a macro's
+result depends on beyond the sources is learned from the macro std's
+natives (`EvalStdLib.volatileHook`, `fileHook`, `envHook`), for the module
+being typed when the macro runs (the one the static-variable tracking
+names). A call whose result changes from run to run (`Date.now`,
+`Sys.time`, `Sys.cpuTime`, `Timer.stamp`, `Math.random`, `Std.random`,
+sockets, `sys.net.Host`, `sys.Http`, `sys.ssl`, `Sys.command`,
+`sys.io.Process`, `Sys.getChar`, eval.luv's network, processes, signals,
+time, random, file system and system information) makes the module
+typed every build, its macros run again; its dependents stay restored
+through its interface as parsed, unless the call was where they copy the
+result (an inline or macro field, a field whose type is not written out,
+a build macro): then its interface counts as new every build. A file a
+macro reads (`File.getContent`, `getBytes`, `read`; `FileSystem.exists`,
+`isDirectory`, `stat`, `readDirectory`, `fullPath`) is a read of the module
+kept with what the macro saw (the content's hash, the listing, whether it
+exists, the status, the full path), as an environment variable it reads
+(`Sys.getEnv`, `Sys.environment`, eval.luv's `Env`) is with its value: the
+module is restored while they are the same (a file touched but not changed
+leaves it), its interface is its whole content (they may change it), and a
+variant per value is kept (`registerModuleDependency` keeps working, the
+file then both a dependency and a read). `@:hxmc.noCache` on a type, or
+`-D hxmc.no-cache=<package, module or library directory,...>` (read without
+entering the key), makes a module typed every build, its dependents with
+it; `HXMC_MODULE_CACHE_LOG=1` says why a module was typed (`Clock typed
+every build (macro called Date.now at src/Macros.hx:4)`, `Data dirty: ...
+(data.txt, read by a macro)`), `HXMC_STATS=1` counts the modules typed from
+source and those typed every build. A module whose types share a path
+(an abstract whose implementation class `@:native` renamed to it, processed
+in the macros' context: eval's `mbedtls.SslAuthmode`) is not kept: HXB names
+a type by its module and name. Plans: [plans/compiler.md](plans/compiler.md)
 
 ## Targets
 
