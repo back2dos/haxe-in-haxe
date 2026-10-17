@@ -728,6 +728,9 @@ jobs:
           # (text input through the window's text view: a key, a composition)
           npx haxe -lib hxmc.os -cp "$u/test" -main TextInputTest --custom-target hxmc=gfx/TextInputTest
           gfx/TextInputTest
+          # (the accessibility tree through NSAccessibility: VoiceOver's view of it)
+          npx haxe -lib hxmc.ui -cp "$u/test" -main MacAccessTest --custom-target hxmc=gfx/MacAccessTest
+          gfx/MacAccessTest
           # (hxmc.ui.native on AppKit's controls)
           npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
           gfx/NativeTest gfx/native-macos.png
