@@ -98,7 +98,7 @@ HTML, the programs the macro rejects), `make text-check` (the rasterizer,
 DejaVu Sans' tables and outlines, line layout, a text sample through the
 atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against
-`sample-cff.png`, when fonts-inter is installed, as in CI), `make ui-check` (the flexbox layout against
+`sample-cff.png`, when fonts-inter is installed, as in CI; Arabic, Hebrew and marks against Chromium's widths and ink, grapheme clusters against `Intl.Segmenter`), `make ui-check` (the flexbox layout against
 Chromium's on 60 cases, `packages/ui/test/layout-expected.json`, which
 `layout-ref.mjs` writes from `layout-cases.mjs`; text wrapping, events and
 focus; PNG files of every colour type, depth, filter and interlacing,
@@ -109,7 +109,8 @@ every kind the decoder reads, `packages/ui/test/jpeg/`, which
 and GIF files the same way (`gif/`, `gif-cases.mjs`);
 popups placed, hit and dismissed; then signals and markup rendered into
 nodes, the popup widgets driven by pointer and keys, a VirtualList of
-100000 rows scrolled). Natively: `make
+100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
+`GuideTest.hx`). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
 `todo.png` and `gallery.png`; Linux: llvmpipe, DejaVu

@@ -167,7 +167,7 @@ help:
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
-##             signals and markup rendered into nodes (ReactiveTest.hx)
+##             signals and markup rendered into nodes (ReactiveTest.hx); the guide's examples (GuideTest.hx)
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
@@ -496,6 +496,7 @@ text-check: $(TOOL)
 ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run GuideTest
 
 UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
