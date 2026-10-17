@@ -144,7 +144,8 @@ nodes, the popup widgets driven by pointer and keys, a VirtualList of
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
 `todo.png` and `gallery.png`; `BoxTest`, boxes with their own corners' radii
-and sides' borders, a clip to rounded corners, boxes turned, scaled, skewed
+and sides' borders, a clip to rounded corners, box shadows (blurred, a
+spread ring, inset, several), boxes turned, scaled, skewed
 and nested, against Chromium's `boxes.png` (`box-ref.mjs` from
 `boxes.json`), a text under `scale(2)` against the same text
 twice the size; `BLESS=1` writes the goldens again, uncompressed, and
