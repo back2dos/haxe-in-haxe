@@ -381,6 +381,31 @@ class Threads {
 		return id;
 	}
 
+	// the calling thread, which the runtime did not start (a system's thread
+	// that calls Haxe: Android's main thread), made one of its threads: a
+	// record and a shadow stack, safe until a @:hxmc.callback's wrapper leaves
+	// the safe region (it calls Haxe through such a callback from then on);
+	// kept until the process ends. False when it is one already.
+	@:hxmc.noGc static function attach():Bool {
+		if (!self.isNull()) return false;
+		var m = newRecord();
+		var sbase = Os.reserve(SSTACK_BYTES);
+		if (sbase.isNull()) Gc.dieC(Mem.cstr("cannot allocate the shadow stack of an attached thread\n"));
+		m.value.sbase = sbase;
+		m.value.base = sbase;
+		m.value.sp = sbase;
+		m.value.hw = sbase;
+		m.value.state = SAFE;
+		m.value.pk = newParker();
+		insert(m, null);
+		self = m;
+		Gc.hcur = Ptr.nil();
+		Os.lock(wl);
+		m.value.started = 1;
+		Os.unlock(wl);
+		return true;
+	}
+
 	// (no safepoint from the call to the insertion: job is a root from then on)
 	@:hxmc.noGc static function insert(m:Ptr<Mutator>, job:Dynamic):Int {
 		Os.lock(wl);

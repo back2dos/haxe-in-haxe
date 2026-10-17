@@ -6,7 +6,10 @@ import hxmc.android.Axml.el;
 // An Android app without the SDK (-D hxmc.target=android-arm64 or
 // android-x86_64 and an output ending in .apk): the program's shared
 // library (LinkDyn) as lib/<abi>/libmain.so, which NativeActivity loads
-// (the activity of the framework: hasCode="false", no classes.dex), and an
+// (the activity of the framework: hasCode="false", no classes.dex; with
+// Java's listeners Glue's classes.dex, and with views its org.hxmc.Activity,
+// a NativeActivity whose window draws views, in the system's DayNight
+// theme), and an
 // AndroidManifest.xml in binary XML (Axml) naming it; no resources.arsc
 // (the label is a plain string, the theme a framework resource). The zip
 // stores everything uncompressed, the library aligned to 16 KB (loaded in
@@ -37,24 +40,25 @@ class Apk {
 		return haxe.io.Path.withoutExtension(haxe.io.Path.withoutDirectory(out));
 
 	// (keyFile: the debug key's, made when missing)
-	public static function write(out:String, so:Bytes, abi:Abi, opts:Map<String, String>, keyFile:String) {
+	// (dex: Glue's classes.dex, when the program has listeners; views: org.hxmc.Activity)
+	public static function write(out:String, so:Bytes, dex:Null<Bytes>, views:Bool, abi:Abi, opts:Map<String, String>, keyFile:String) {
 		var abiDir = abi.arm ? "arm64-v8a" : "x86_64";
 		var name = baseName(out);
 		var pkg = opts.get("package") ?? "org.hxmc." + ~/[^a-z0-9_]/g.replace(name.toLowerCase(), "_");
 		if (!~/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.match(pkg)) throw "hxmc: APK: the package " + pkg + " is not an application id (a.b.c)";
 		var manifest = manifest(pkg, opts.get("label") ?? name, Std.parseInt(opts.get("version") ?? "1"), opts.get("version_name") ?? "1.0",
-			Std.parseInt(opts.get("min_sdk") ?? "29"), Std.parseInt(opts.get("target_sdk") ?? "35"));
-		var zip = zip([
-			{name: "AndroidManifest.xml", data: manifest, align: 4},
-			{name: "lib/" + abiDir + "/lib" + LIB + ".so", data: so, align: PAGE}
-		]);
+			Std.parseInt(opts.get("min_sdk") ?? "29"), Std.parseInt(opts.get("target_sdk") ?? "35"), dex != null, views);
+		var entries = [{name: "AndroidManifest.xml", data: manifest, align: 4}];
+		if (dex != null) entries.push({name: "classes.dex", data: dex, align: 4});
+		entries.push({name: "lib/" + abiDir + "/lib" + LIB + ".so", data: so, align: PAGE});
+		var zip = zip(entries);
 		var key = debugKey(keyFile);
 		sys.io.File.saveBytes(out, sign(zip, key.d, key.cert));
 	}
 
 	// ---- the manifest
 
-	public static function manifest(pkg:String, label:String, versionCode:Int, versionName:String, minSdk:Int, targetSdk:Int):Bytes {
+	public static function manifest(pkg:String, label:String, versionCode:Int, versionName:String, minSdk:Int, targetSdk:Int, code = false, views = false):Bytes {
 		inline function s(n:String, v:String):Axml.Attr
 			return {android: true, name: n, type: Axml.STRING, string: v};
 		inline function i(n:String, v:Int, hex = false):Axml.Attr
@@ -72,14 +76,15 @@ class Apk {
 		], [
 			el("uses-sdk", [i("minSdkVersion", minSdk), i("targetSdkVersion", targetSdk)]),
 			el("uses-feature", [i("glEsVersion", 0x30000, true), b("required", true)]),
-			el("application", [s("label", label), b("hasCode", false), b("debuggable", true), b("extractNativeLibs", false)], [
+			el("application", [s("label", label), b("hasCode", code), b("debuggable", true), b("extractNativeLibs", false)], [
 				el("activity", [
-					s("name", "android.app.NativeActivity"),
+					s("name", views ? Glue.ACTIVITY : "android.app.NativeActivity"),
 					s("label", label),
 					b("exported", true),
 					i("configChanges", configChanges, true),
-					// @android:style/Theme.NoTitleBar.Fullscreen
-					{android: true, name: "theme", type: Axml.REFERENCE, value: 0x01030007}
+					// @android:style/Theme.NoTitleBar.Fullscreen; with views
+					// Theme.DeviceDefault.DayNight (API 29: the system's look, light or dark)
+					{android: true, name: "theme", type: Axml.REFERENCE, value: views ? 0x010302e3 : 0x01030007}
 				], [
 					el("meta-data", [s("name", "android.app.lib_name"), s("value", LIB)]),
 					el("intent-filter", [], [

@@ -156,19 +156,37 @@ Order:
    (PKCS#12, v3 for key rotation), icons and a `resources.arsc`, the `.aab`
    for Google Play, `DT_RELR` (API 30+) or Android's packed relocations to
    shrink the RELATIVE table, RELRO for the data that holds addresses.
-2. Native controls: JNI bindings in Haxe (`JNIEnv` is a function table,
-   bound like COM's vtables), an Android backend for `hxmc.ui.native`'s
-   `NativeHost` (`android.widget.*` laid out by our flexbox). Callbacks
-   from Java (click listeners, text watchers, `Runnable`s for the UI
-   thread) need small classes with `native` methods registered with
-   `RegisterNatives`: a minimal DEX written by hxmc. Views live on the
-   Java main thread: `App.run` driven by `Choreographer` callbacks posted
-   there.
-3. Mixing, as on the desktop (the UI design, [ui.md](ui.md)): a
-   GPU view inside native controls (`SurfaceView`/`TextureView` giving an
-   `ANativeWindow`) is the supported direction; a native control inside a
-   drawn tree only for text input (a hidden or overlaid `EditText` for the
-   keyboard and IME).
+2. Native controls (done, [hxmc.md](../hxmc.md#android)): JNI bound in
+   Haxe (`JNIEnv` and `JavaVM` through `hxmc.os.VTable`, COM's macro),
+   a minimal DEX writer in hxmc (`Dex.hx`) for the glue (`org.hxmc.Glue`,
+   one listener class whose methods call a static native registered with
+   `RegisterNatives`; `org.hxmc.Activity`, a `NativeActivity` whose window
+   draws views), `hxmc.ui.native`'s Android backend (`android.widget`'s
+   button, label, field, checkbox, slider, progress bar in an
+   `AbsoluteLayout`, laid out by our flexbox). Views live on Java's main
+   thread: the runtime attaches it (`NativeThread.attach`), the program's
+   thread hands it work through its looper, and `NativeHost.run` is
+   driven by Choreographer's frames there (`AChoreographer`: no Java
+   `Runnable`s needed). CI: the form's checks on the emulator, taps,
+   text through the input method, uiautomator's accessibility dump. Left:
+   lists and scrolling (no backend of `hxmc.ui.native` has them yet),
+   edge-to-edge insets on Android 15 (the root fits the system bars), the
+   theme following a dark mode change while running (the activity keeps
+   `uiMode` changes).
+3. Mixing, as on the desktop (done, [hxmc.md](../hxmc.md#android); the UI
+   design, [ui.md](ui.md)): a GPU view inside native controls (a
+   `SurfaceView` giving an `ANativeWindow` to the GL back end:
+   `ChildSurface`, ui's `GpuView`); a native control inside a drawn tree
+   only for text input (a hidden `EditText` for the keyboard and the input
+   method: `Window.startTextInput`, `TextInput`). CI: the cube among views
+   through Home and back; the soft keyboard shown and hidden, a composition
+   and a commit through the field's `InputConnection`. Left: several GPU
+   views in one window (each frame does not make its context current),
+   a `TextureView` for a GPU view under other views or animated with them,
+   the input method's candidates placed at the caret (`CursorAnchorInfo`),
+   a drawn UI's text on Android checked in CI (`hxmc.text` does not look in
+   `/system/fonts` yet), `GpuView` on the desktop backends (a child
+   window or view where gfx draws).
 
 ## iOS
 
