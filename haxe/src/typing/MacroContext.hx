@@ -81,6 +81,12 @@ enum MacroArgType {
 }
 
 class MacroContext {
+	// port: hook (not upstream): whether a type's module was processed in an
+	// earlier compilation and comes back so (the tool's module cache restores
+	// the macros' modules as processed): its constructors are not patched
+	// again (SaveStacks.patchConstructors adds a call each time)
+	public static var processedTypeHook:Null<ModuleType->Bool> = null;
+
 	public static var macroInterpCache:Null<macros.eval.EvalContext.Context> = null;
 
 	// port: ExtString.String.nsplit; an empty string has no parts.
@@ -801,7 +807,7 @@ class MacroContext {
 			];
 			var typeFilters:Array<context.SafeCom.SafeContext->ModuleType->Void> = [
 				function(_, mt) filters.FiltersCommon.removeGenericBase(mt),
-				function(scom, mt) filters.exception.SaveStacks.patchConstructors(ectx, scom)(mt),
+				function(scom, mt) if (processedTypeHook == null || !processedTypeHook(mt)) filters.exception.SaveStacks.patchConstructors(ectx, scom)(mt),
 				function(_,
 						mt) filters.safe.AddFieldInits.addFieldInits(mctx.c.curclass.clPath,
 						filters.RenameVars.init(mctx.com.config, mctx.com.types), scom, mt),

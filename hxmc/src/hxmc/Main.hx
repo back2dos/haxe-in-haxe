@@ -69,10 +69,12 @@ class Main {
 		// a whole-program build keeps most of what it makes (the typed program,
 		// then every module's code until the link): a large nursery and a large
 		// first old-space limit spare it most collections (half the GC time of
-		// a cold build of the port). The runtime reads them at startup, so the
-		// tool runs itself again with them set (not under WASI: no processes).
+		// a cold build of the port; 3 GB: the port's cold build with the module
+		// cache's encoding promotes about 2 GB, just past 2 GB, which cost a
+		// major collection of a second). The runtime reads them at startup, so
+		// the tool runs itself again with them set (not under WASI: no processes).
 		if (Sys.getEnv("RT_OLD_MB") == null && Sys.getEnv("HXMC_GC_DEFAULTS") != "0" && Sys.systemName() != "Wasi") {
-			Sys.putEnv("RT_OLD_MB", "2048");
+			Sys.putEnv("RT_OLD_MB", "3072");
 			if (Sys.getEnv("RT_MINOR_KB") == null) Sys.putEnv("RT_MINOR_KB", "32768");
 			Sys.exit(Sys.command(Sys.programPath(), [out].concat(args)));
 		}
@@ -83,7 +85,6 @@ class Main {
 				failed = Std.string(e) + "\n" + haxe.CallStack.toString(haxe.CallStack.exceptionStack());
 			}
 		}
-		TypesCache.install();
 		ModuleCache.install();
 		hxmc.ir.CInterop.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));

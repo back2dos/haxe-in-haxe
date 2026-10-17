@@ -37,8 +37,11 @@ class UpToDate {
 		return Fingerprint.hash(tool + "\n" + args.join("\x00") + "\n" + dir);
 	}
 
-	static function keyFile(out:String):String
-		return out + ".hxmc/build.key";
+	// (in the store: ObjectStore; else next to the output)
+	static function keyFile(out:String):String {
+		var s = ObjectStore.open(out);
+		return s != null ? s.keyFile() : out + ".hxmc/build.key";
+	}
 
 	public static function check(key:Null<String>, out:String):Bool {
 		if (key == null) return false;
@@ -62,13 +65,14 @@ class UpToDate {
 
 	public static function record(key:Null<String>, out:String) {
 		if (key == null) return;
-		var d = out + ".hxmc";
+		var f = keyFile(out);
+		var d = haxe.io.Path.directory(f);
 		if (!sys.FileSystem.exists(d)) sys.FileSystem.createDirectory(d);
 		var b = new StringBuf();
 		b.add(key);
 		for (p in hxmc.ir.CInterop.LINKS)
 			b.add("\n" + p + "\t" + stamp(p));
-		sys.io.File.saveContent(keyFile(out), b.toString());
+		sys.io.File.saveContent(f, b.toString());
 	}
 
 	public static function forget(out:String) {

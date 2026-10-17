@@ -46,8 +46,11 @@ class Measure {
 		var toolArgs = ["-cp", "haxe/src", "-cp", "hxmc/src", "-main", "hxmc.Main", "-D", "disable-parallelism", "-D", "hih_no_generators", "-cp", "bin/hxmc/std", "--custom-target", "hxmc"];
 		if (only.contains("native-build")) {
 			rmrf("bin/test/measure/port.hxmc");
+			// (cold: the module cache and the objects in a store of their own, empty)
+			rmrf("bin/test/measure/cache");
 			var r = measure("native build (the port, cold)", "ours", [tool, "bin/test/measure/port", "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism",
-				"-cp", "bin/hxmc/std", "--custom-target", "hxmc"]);
+				"-cp", "bin/hxmc/std", "--custom-target", "hxmc"], ["HXMC_CACHE" => FileSystem.fullPath("bin/test/measure") + "/cache"]);
+			rmrf("bin/test/measure/cache");
 			if (r.peakMb > NATIVE_BUDGET_MB) failures.push('native build: peak ${r.peakMb} MB above $NATIVE_BUDGET_MB MB');
 			rmrf("bin/test/measure/port.hxmc");
 		}
