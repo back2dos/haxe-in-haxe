@@ -109,9 +109,111 @@ class Reloc {
 	}
 }
 
+// What unwinders and debuggers need of a generated function (Unwind, Dwarf):
+// what its prologue and epilogues do to the frame, as the emitter wrote
+// them, and with -debug its Haxe name and source lines. The linkers turn
+// them into the format's tables (.eh_frame, .pdata/.xdata, __eh_frame,
+// .debug_line).
+class FuncRec {
+	public var sym:Symbol;
+	// the frame operations, four numbers each: Unwind.OP_*, the offset in the
+	// function where the frame is as the operation leaves it (the end of its
+	// instruction), two operands
+	public var ops:Array<Int>;
+	public var name:Null<String> = null; // (-debug) the Haxe name, pack.Class.field
+	// (-debug) rows of three numbers: an offset in the function, a file
+	// (Obj.files), a line; each row holds until the next
+	public var lines:Null<Array<Int>> = null;
+
+	public function new(sym, ops) {
+		this.sym = sym;
+		this.ops = ops;
+	}
+
+	// an object's records (and source files) as a section for its file
+	// (ElfWriter): the files, then per function an 8-byte word relocated
+	// against it, its operations, name and lines (unsigned LEB128 numbers)
+	public static inline var SECTION = ".hxmc.funcs";
+
+	public static function section(o:Obj):Null<Section> {
+		if (o.funcs.length == 0) return null;
+		var s = new Section(SECTION, RoData, 8);
+		var b = s.buf;
+		b.uleb(o.files.length);
+		for (f in o.files)
+			str(b, f);
+		for (r in o.funcs) {
+			b.align(8);
+			s.relocs.push(new Reloc(b.len, RAbs64, r.sym, 0));
+			b.u64(0, 0);
+			b.uleb(r.ops.length);
+			for (v in r.ops)
+				b.uleb(v);
+			if (r.name == null) b.uleb(0) else {
+				b.uleb(1);
+				str(b, r.name);
+			}
+			if (r.lines == null) b.uleb(0) else {
+				b.uleb(r.lines.length + 1);
+				for (v in r.lines)
+					b.uleb(v);
+			}
+		}
+		return s;
+	}
+
+	static function str(b:Buf, s:String) {
+		var x = haxe.io.Bytes.ofString(s);
+		b.uleb(x.length);
+		b.bytes(x);
+	}
+
+	// the records of a section that section() wrote (its relocations read back)
+	public static function read(o:Obj, s:Section) {
+		var b = s.buf.b, at = 0;
+		var symAt = new Map<Int, Symbol>();
+		for (r in s.relocs)
+			symAt.set(r.offset, r.sym);
+		function uleb():Int {
+			var v = 0, shift = 0;
+			while (true) {
+				var c = b.get(at++);
+				v |= (c & 0x7f) << shift;
+				if (c < 0x80) return v;
+				shift += 7;
+			}
+		}
+		function str():String {
+			var n = uleb();
+			var x = b.getString(at, n);
+			at += n;
+			return x;
+		}
+		for (_ in 0...uleb())
+			o.files.push(str());
+		while (true) {
+			at = (at + 7) & ~7;
+			if (at >= s.buf.len) break;
+			var sym = symAt.get(at);
+			if (sym == null) throw "hxmc: a function record without its function";
+			at += 8;
+			var r = new FuncRec(sym, [for (_ in 0...uleb()) uleb()]);
+			if (uleb() != 0) r.name = str();
+			var n = uleb();
+			if (n != 0) r.lines = [for (_ in 0...n - 1) uleb()];
+			o.funcs.push(r);
+		}
+	}
+}
+
 class Obj {
 	public var sections:Array<Section> = [];
 	public var symbols:Array<Symbol> = [];
+	public var funcs:Array<FuncRec> = []; // the generated functions' (FuncRec)
+	// a C object's .eh_frame (the runtime object's: ElfReader), with its
+	// relocations; Link keeps the entries of the functions it keeps
+	public var ehFrame:Null<Section> = null;
+	public var files:Array<String> = []; // the source files FuncRec.lines name
 	var byName = new Map<String, Symbol>();
 
 	public function new() {}

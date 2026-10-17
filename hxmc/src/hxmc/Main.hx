@@ -11,8 +11,9 @@ package hxmc;
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
 //   -D hxmc.libc=glibc              Linux: dynamically linked against the system's glibc (default: musl, static)
-//   -D hxmc.frame-pointers          x86-64: a frame record in every function, for perf -g and debuggers
-//                                   (also -debug; HXMC_FRAME_POINTERS=1, =0 off; arm64 always)
+//   -D hxmc.no-frame-pointers       x86-64: no frame record in functions (the default keeps one, for
+//                                   perf -g and debuggers; HXMC_FRAME_POINTERS=0 off; arm64 always)
+//   -debug                          source lines for debuggers (DWARF on ELF and Mach-O), symbols
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
@@ -115,6 +116,7 @@ class Main {
 			throw "hxmc: a program for " + abi.name + " must be typed for it: -D hxmc.target=" + abi.name + " (also when writing its HXB)";
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
+		hxmc.ir.Lower.lines = opts.debugLines && !abi.wasm;
 		var t0 = haxe.Timer.stamp();
 		// resident: bodies of the fields the server kept are reused (LowerCache)
 		var useCache = Driver.resident && Sys.getEnv("HXMC_LOWER_CACHE") != "0";

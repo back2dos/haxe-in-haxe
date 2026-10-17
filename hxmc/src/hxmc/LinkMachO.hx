@@ -8,9 +8,11 @@ import hxmc.Abi;
 // MkRt.macho) -> a Mach-O executable (MH_EXECUTE, position-independent as
 // arm64 macOS requires) that loads /usr/lib/libSystem.B.dylib, written
 // without the SDK or ld64:
-//   __PAGEZERO (4 GB), __TEXT (headers, code, import stubs, read-only data),
-//   __DATA (import slots, data with pointers, thread-local descriptors and
-//   templates, zero-fill), __LINKEDIT (dyld's rebase and bind opcodes, an
+//   __PAGEZERO (4 GB), __TEXT (headers, code, import stubs, read-only data,
+//   the generated functions' unwind tables in __eh_frame: Unwind), __DATA
+//   (import slots, data with pointers, thread-local descriptors and
+//   templates, zero-fill), with -debug __DWARF (Dwarf; read-only, nothing
+//   reads it at run time), __LINKEDIT (dyld's rebase and bind opcodes, an
 //   export trie, the symbol table of the imports, the code signature).
 // Addresses are kept relative to the image (vm offset == file offset in
 // __TEXT and __DATA); absolute pointers get BASE added and a rebase entry.
@@ -214,6 +216,9 @@ class LinkMachO {
 				}
 			}
 		text.push(stubs);
+		// the unwind tables (the system's unwinder and lldb find __eh_frame by name)
+		var recs = [for (o in objs) for (r in o.funcs) if (r.sym.section != null) r];
+		var eh = recs.length > 0 ? Unwind.ehFrame(recs, arm, "__TEXT,__eh_frame").sec : null;
 		addr.set(header, 0);
 		var pos = HEADER_RESERVE;
 		function place(list:Array<Section>):{start:Int, end:Int} {
@@ -230,6 +235,7 @@ class LinkMachO {
 		pos = align(pos, 16);
 		var oText = place(text);
 		var oConst = place(ro);
+		var oEh = place(eh != null ? [eh] : []);
 		var textEnd = align(pos, PAGE);
 		// __DATA
 		pos = textEnd;
@@ -298,7 +304,7 @@ class LinkMachO {
 				rebases.push(gotAddr + at);
 			}
 		}
-		var all = text.concat(ro).concat(roData).concat(data).concat(init).concat(fini).concat(tlv).concat(tdata);
+		var all = text.concat(ro).concat(eh != null ? [eh] : []).concat(roData).concat(data).concat(init).concat(fini).concat(tlv).concat(tdata);
 		for (s in all) {
 			var base = addr.get(s);
 			var buf = s.buf;
@@ -470,9 +476,18 @@ class LinkMachO {
 		le.buf(strtab);
 		le.align(16);
 		var sigOffInLe = le.len;
+		// (-debug) the DWARF sections, between __DATA and __LINKEDIT in the file
+		var dwarf = Dwarf.sections(objs, r -> r.sym.section != null && addr.exists(r.sym.section), r -> symAddr(r.sym), BASE_HI);
+		var dwarfOff = dataFileEnd > dataStart ? align(dataFileEnd, PAGE) : dataStart;
+		var dwarfSize = 0;
+		for (d in dwarf)
+			dwarfSize += d.data.len;
 		// ---- the file
-		var leFileOff = dataFileEnd > dataStart ? align(dataFileEnd, PAGE) : dataStart;
-		var leVm = dataEnd;
+		var leFileOff = dwarf.length > 0 ? align(dwarfOff + dwarfSize, PAGE) : dwarfOff;
+		// (__DWARF, read-only, mapped between __DATA and __LINKEDIT: its sections
+		// have addresses, as dsymutil's)
+		var dwarfVm = dataEnd;
+		var leVm = dataEnd + align(dwarfSize, PAGE);
 		var cdIdent = "hxmc";
 		var nPages = (leFileOff + sigOffInLe + 4095) >> 12;
 		var cdHeader = 88;
@@ -481,8 +496,16 @@ class LinkMachO {
 		var fileSize = leFileOff + sigOffInLe + sigLen;
 		var out = new Buf(fileSize + 16);
 		out.zeros(fileSize);
-		for (s in text.concat(ro).concat(roData).concat(data).concat(init).concat(fini).concat(tlv).concat(tdata).concat([got]))
+		for (s in text.concat(ro).concat(eh != null ? [eh] : []).concat(roData).concat(data).concat(init).concat(fini).concat(tlv).concat(tdata).concat([got]))
 			out.b.blit(addr.get(s), s.buf.b, 0, s.buf.len);
+		var dsects = [], dwarfAddr = [];
+		var at = dwarfOff;
+		for (d in dwarf) {
+			out.b.blit(at, d.data.b, 0, d.data.len);
+			dsects.push({name: "__" + d.name, start: at, end: at + d.data.len, flags: 0x02000000, zerofill: false, align: 1}); // S_ATTR_DEBUG
+			dwarfAddr.push(dwarfVm + at - dwarfOff);
+			at += d.data.len;
+		}
 		out.b.blit(leFileOff, le.b, 0, le.len);
 		// load commands
 		var h = new Buf(HEADER_RESERVE);
@@ -506,6 +529,7 @@ class LinkMachO {
 			fixed(h, name, 16);
 			h.u64(vm, name == "__PAGEZERO" ? 0 : BASE_HI);
 			h.u64(vmsize, name == "__PAGEZERO" ? 1 : 0);
+			var k = 0;
 			h.u64(fileoff, 0);
 			h.u64(filesize, 0);
 			h.u32(prot);
@@ -515,7 +539,7 @@ class LinkMachO {
 			for (x in live) {
 				fixed(h, x.name, 16);
 				fixed(h, name, 16);
-				h.u64(x.start, BASE_HI);
+				h.u64(name == "__DWARF" ? dwarfAddr[k++] : x.start, BASE_HI);
 				h.u64(x.end - x.start, 0);
 				h.u32(x.zerofill ? 0 : x.start);
 				h.u32(log2(x.align));
@@ -532,7 +556,8 @@ class LinkMachO {
 		seg("__PAGEZERO", 0, 0, 0, 0, 0, []);
 		seg("__TEXT", 0, textEnd, 0, textEnd, 5, [
 			sec("__text", {start: oText.start, end: addr.get(stubs) + stubs.size()}, 0x80000400),
-			sec("__const", oConst, 0)
+			sec("__const", oConst, 0),
+			sec("__eh_frame", oEh, 0x6800000b, false, 8)
 		]);
 		seg("__DATA", dataStart, dataEnd - dataStart, dataStart, dataFileEnd - dataStart, 3, [
 			sec("__got", oGot, 0, false, 8),
@@ -545,6 +570,7 @@ class LinkMachO {
 			sec("__thread_bss", oTbss, 0x12, true),
 			sec("__bss", oBss, 1, true)
 		]);
+		if (dwarf.length > 0) seg("__DWARF", dwarfVm, leVm - dwarfVm, dwarfOff, dwarfSize, 1, dsects);
 		seg("__LINKEDIT", leVm, align(sigOffInLe + sigLen, PAGE), leFileOff, sigOffInLe + sigLen, 1, []);
 		// dyld info
 		ncmds++;

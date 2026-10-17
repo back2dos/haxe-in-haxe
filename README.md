@@ -105,8 +105,9 @@ commit (`make reference`).
 | [docs/testing.md](docs/testing.md) | the harnesses, hxmc's corpus, graphics tests, CI, benchmarks |
 | [docs/porting.md](docs/porting.md) | the rules for every change of the port |
 | [docs/hxmc.md](docs/hxmc.md) | hxmc's pipeline, runtime, targets |
-| [hxmc/LOWLEVEL.md](hxmc/LOWLEVEL.md) | C interop and low-level Haxe |
-| [hxmc/PLANS.md](hxmc/PLANS.md) | what comes next |
+| [ROADMAP.md](ROADMAP.md) | the goals and what comes next |
+| [docs/plans/](docs/plans/README.md) | design docs: open designs and decisions by area |
+| [docs/plans/lowlevel.md](docs/plans/lowlevel.md) | C interop and low-level Haxe (design, partly built) |
 
 ## License
 

@@ -75,6 +75,8 @@ class Lower {
 	// ---- survey mode (HXMC_SURVEY=file): record unsupported constructs, keep going
 
 	public static var survey = Sys.getEnv("HXMC_SURVEY") != null;
+	// -debug: statements carry their source lines (Stmt.SPos)
+	public static var lines = false;
 	public var errors = new Map<String, {count:Int, example:String}>();
 	public var natives = new Map<String, Int>(); // runtime functions called, with counts
 
@@ -293,6 +295,7 @@ class Lower {
 						}
 					]);
 				case SCold(id, x): SCold(id, st(x));
+				case SPos(_): s;
 			}
 		}
 		sts = ss -> [for (s in ss) st(s)];

@@ -1,12 +1,14 @@
 package hxmc.ir;
 
+import core.Ast.Binop;
+import core.Ast.Unop;
 import core.TType;
 import core.TFunctions;
 import hxmc.ir.Lower.LowerError;
 
 using core.TFunctions;
 
-// C interop (hxmc/LOWLEVEL.md, "C interop"): the C type of a Haxe type in
+// C interop (docs/plans/lowlevel.md, "C interop"): the C type of a Haxe type in
 // extern signatures, struct fields and pointer accesses, the C layout of
 // @:hxmc.struct classes, and what the program's C externs are (filled while
 // lowering, read by MirBuild and the linkers).
@@ -61,11 +63,25 @@ class CInterop {
 	// would change a). For hxmc, a @:hxmc.struct class's constructor is an
 	// ordinary function, set once typing is done, before the filters (Mir
 	// inlines it, and Sroa keeps the struct in registers).
+	//
+	// Haxe's inliner passes a local (or a field) argument of an inline
+	// function into the inlined body as itself; the analyzer replaces a
+	// variable initialized from another by that one (fusion, copy
+	// propagation). Both are right for references, wrong for struct values,
+	// whose copies are separate: where an inlined body writes through a
+	// struct parameter (a field, a compound assignment, the parameter passed
+	// on as an abstract's `this`), the argument is copied into a temporary
+	// first (Inline.copyArgumentHook), and a struct variable initialized
+	// from a place stays a copy (AnalyzerTexpr.keepCopyHook). Programs
+	// without struct values are compiled exactly as before.
 	public static function install() {
 		var prev = compiler.Compiler.beforeTypingHook;
 		compiler.Compiler.beforeTypingHook = function(com, actx) {
 			if (prev != null) prev(com, actx);
-			if (!com.platform.match(CustomTarget("hxmc"))) return;
+			var on = com.platform.match(CustomTarget("hxmc"));
+			optimization.Inline.copyArgumentHook = on ? copyArgument : null;
+			optimization.AnalyzerTexpr.keepCopyHook = on ? keepCopy : null;
+			if (!on) return;
 			com.callbacks.addAfterTyping(types -> {
 				for (t in types)
 					switch t {
@@ -76,6 +92,64 @@ class CInterop {
 			});
 		}
 	}
+
+	// a struct value: a @:hxmc.struct class, or an abstract over one (not
+	// Null<S>, a box)
+	public static function isStructValue(t:T):Bool {
+		for (_ in 0...16)
+			switch TFunctions.followWithoutNull(t) {
+				case TInst(c, _):
+					return isStruct(c);
+				case TAbstract(a, params) if (!core.Meta.has(CoreType, a.aMeta) && !core.Meta.has(MultiType, a.aMeta)):
+					t = TFunctions.applyParams(a.aParams, params, a.aThis);
+				case _:
+					return false;
+			}
+		return false;
+	}
+
+	static function strip(e:TExpr):TExpr
+		return switch e.eexpr {
+			case TParenthesis(e1) | TMeta(_, e1) | TCast(e1, null): strip(e1);
+			case _: e;
+		}
+
+	// a new value (a call's result, a constructed one): nothing to copy
+	static function fresh(e:TExpr):Bool
+		return switch strip(e).eexpr {
+			case TConst(TThis): false;
+			case TNew(_, _, _) | TCall(_, _) | TConst(_) | TObjectDecl(_): true;
+			case _: false;
+		}
+
+	// e is v or a field of it (of a field of it...)
+	static function placeOf(v:TVar, e:TExpr):Bool
+		return switch strip(e).eexpr {
+			case TLocal(w): w == v;
+			case TField(e1, _): placeOf(v, e1);
+			case _: false;
+		}
+
+	// does body write v or a field of it: an assignment, an increment, v
+	// passed as `this` to an inline abstract method still a call
+	public static function writesThrough(v:TVar, body:TExpr):Bool {
+		function loop(e:TExpr):Bool
+			return switch e.eexpr {
+				case TBinop(OpAssign | OpAssignOp(_), e1, _) | TUnop(Increment | Decrement, _, e1) if (placeOf(v, e1)):
+					true;
+				case TCall({eexpr: TField(_, FStatic({clKind: KAbstractImpl(_)}, cf))}, args) if (args.length > 0 && cf.cfKind.match(Method(MethInline))
+					&& TFunctions.hasClassFieldFlag(cf, CfImpl) && placeOf(v, args[0])):
+					true;
+				case _: core.Texpr.checkExpr(loop, e);
+			}
+		return loop(body);
+	}
+
+	static function copyArgument(v:TVar, arg:TExpr, body:TExpr):Bool
+		return isStructValue(v.vType) && !fresh(arg) && writesThrough(v, body);
+
+	static function keepCopy(t:T, e:TExpr):Bool
+		return isStructValue(t) && !fresh(e);
 
 	public static function isOpaque(c:TClass):Bool
 		return Lower.hasMeta(":hxmc.opaque", c.clMeta);

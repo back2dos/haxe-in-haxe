@@ -13,7 +13,7 @@
 | `hxmc/test/` | hxmc's corpus (`cases/`, golden outputs `expected/`, frozen fuzzer programs `fuzz-1000.zip`), the encoder tests (`encoder/`), the scripts that run them (`Corpus`, `Check`, `Crosshost`, `Selfcheck`, `Tiers`, `EncCheck`), `-lib` from node_modules (`NodeLibs`), the release smoke test (`smoke.sh`), the benchmarks (`Bench`, with the cases' check programs in `bench/`) |
 | `hxmc/web/` | the website and its playground (the port as a WebAssembly module in the browser) |
 | `hxmc/bootstrap/` | the committed stage0 (`stage0.wasm.br`), node's WASI runner (`wasi.mjs`), the runtime objects by hash (`rt.mjs`) |
-| `packages/` | everything published to npm, one folder per package, packed by `packages/pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball, with the launcher and `dist/haxe` for lix), `wasm`, `source` (with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`), and the source-only libraries `os` and `gfx` (hxmc/PLANS.md, "Graphics"); any other folder whose `package.json` has its own version is published as it is |
+| `packages/` | everything published to npm, one folder per package, packed by `packages/pack.mjs`: `cli` (`@hxmc/cli`, laid out as its tarball, with the launcher and `dist/haxe` for lix), `wasm`, `source` (with `hxmc-rebuild`), `platform` (the template of the six `@hxmc/<os>-<cpu>`), and the source-only libraries `os` and `gfx` (docs/plans/graphics.md); any other folder whose `package.json` has its own version is published as it is |
 | `tools/lix/` | lix (the lix client and haxeshim) ported to build with hxmc |
 
 ## Building

@@ -59,7 +59,7 @@ extern class Mem {
 	static function zero(p:Ptr, bytes:I64):Void;
 	// the calling function's frame record (Abi.framePointers): [frame] is the
 	// caller's record, [frame + 8] the return address; null where functions
-	// keep none (x86-64 without -D hxmc.frame-pointers, WebAssembly). A call
+	// keep none (x86-64 with -D hxmc.no-frame-pointers, WebAssembly). A call
 	// of the stub hxmc_frame. Not a GC point.
 	static function frame():Ptr;
 

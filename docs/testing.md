@@ -81,8 +81,9 @@ native tool (cached) with the WebAssembly one (never cached).
 ## Graphics
 
 `make gfx-check`: the examples of `packages/gfx`, the triangle and the cube
-(textured, lit, depth-tested, with a uniform block and a blended panel,
-turned by a fixed angle), rendered headless and in a window, compared with
+(textured, lit, depth-tested, with a uniform block, over a blended backdrop
+shaded by the fragment position and a soft shadow, turned by a fixed
+angle), rendered headless and in a window, compared with
 `packages/gfx/test/triangle.png` and `cube.png` (a pixel matches when no
 channel differs by more than 2, and at most 0.5% may differ by more), and
 in the window the input sent to it (a key's character, the wheel) checked

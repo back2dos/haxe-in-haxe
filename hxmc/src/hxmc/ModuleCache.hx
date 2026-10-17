@@ -14,7 +14,7 @@ import core.Message.CompilerMessageKind;
 import core.Message.WarningMode;
 import hxmc.ModuleStore;
 
-// The compilation server's module cache made durable (hxmc/PLANS.md, "Cached
+// The compilation server's module cache made durable (docs/plans/compiler.md, "Cached
 // modules"): a build writes the typed modules it ends with, as the server
 // keeps them in its HXB mode (each module's HXB chunks, its dependencies,
 // kind, file and check policy), into a store in the user's cache directory

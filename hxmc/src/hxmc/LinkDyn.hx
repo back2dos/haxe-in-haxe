@@ -3,6 +3,7 @@ package hxmc;
 import haxe.io.Bytes;
 import hxmc.Obj;
 import hxmc.Abi;
+import hxmc.Link.SecHdr;
 
 // hxmc's linker for dynamically linked Linux executables (-D hxmc.libc=glibc,
 // Abi.interp): what Link does for a static one (resolution, dead code, the
@@ -87,7 +88,7 @@ class LinkDyn extends Link {
 				b.u8(x);
 		inline function w(x:Int)
 			b.u32(x);
-		var start = 0, init = 0, fini = 0;
+		var start = 0, init = 0, fini = 0, initEnd = 0, finiEnd = 0;
 		if (arm) {
 			start = b.len;
 			for (x in [0xd280001d, 0xd280001e, 0xaa0003e5, 0xf94003e1, 0x910023e2, 0x910003e6]) w(x);
@@ -123,6 +124,7 @@ class LinkDyn extends Link {
 				w(0xd63f0200);
 			}
 			for (x in [0xf9401bf7, 0xa9425bf5, 0xa94153f3, 0xa8c47bfd, 0xd65f03c0]) w(x);
+			initEnd = b.len;
 			if (hasFini) {
 				fini = b.len;
 				for (x in [0xa9be7bfd, 0x910003fd, 0xa90153f3]) w(x);
@@ -139,6 +141,7 @@ class LinkDyn extends Link {
 				w(0x14000000 | (((loop - b.len) >> 2) & 0x3ffffff));
 				b.set32(bls, 0x54000009 | ((((b.len - bls) >> 2) & 0x7ffff) << 5));
 				for (x in [0xa94153f3, 0xa8c27bfd, 0xd65f03c0]) w(x);
+				finiEnd = b.len;
 			}
 		} else {
 			start = b.len;
@@ -163,6 +166,7 @@ class LinkDyn extends Link {
 				bytes([0x31, 0xF6, 0x31, 0xD2, 0xFF, 0x15]); rel(RGotPcRel32, "__cxa_atexit", -4); w(0);
 			}
 			bytes([0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5B, 0xC3]);
+			initEnd = b.len;
 			if (hasFini) {
 				b.align(16, 0xCC);
 				fini = b.len;
@@ -176,12 +180,43 @@ class LinkDyn extends Link {
 				b.u8((loop - (b.len + 1)) & 0xff);
 				b.set8(jbe - 1, b.len - jbe);
 				bytes([0x41, 0x5E, 0x41, 0x5F, 0x5B, 0xC3]);
+				finiEnd = b.len;
 			}
 		}
 		o.sections.push(t);
-		o.define("_start", t, start, init - start);
-		o.define("hxmc_init", t, init, 0, false);
-		if (hasFini) o.define("hxmc_fini", t, fini, 0, false);
+		// (and what their prologues and epilogues do: Unwind; _start is the outermost frame)
+		o.funcs.push(new FuncRec(o.define("_start", t, start, init - start), [Unwind.ENTRY, 0, 0, 0]));
+		var U = Unwind;
+		var initOps = [], finiOps = [];
+		function op(ops:Array<Int>, kind:Int, at:Int, x = 0, y = 0) {
+			ops.push(kind);
+			ops.push(at);
+			ops.push(x);
+			ops.push(y);
+		}
+		if (arm) {
+			var e = initEnd - init - 20;
+			for (x in [[U.SAVEFPLR, 4, 64, 0], [U.SETFP, 8, 0, 0], [U.SAVE, 12, 19, 16], [U.SAVE, 12, 20, 24], [U.SAVE, 16, 21, 32], [U.SAVE, 16, 22, 40],
+				[U.SAVE, 20, 23, 48], [U.ENDPROLOGUE, 20, 0, 0], [U.EPILOGUE, e, 0, 0], [U.RESTOREFPLR, e + 16, 64, 0], [U.RET, e + 20, 0, 0]])
+				op(initOps, x[0], x[1], x[2], x[3]);
+			var e = finiEnd - fini - 12;
+			for (x in [[U.SAVEFPLR, 4, 32, 0], [U.SETFP, 8, 0, 0], [U.SAVE, 12, 19, 16], [U.SAVE, 12, 20, 24], [U.ENDPROLOGUE, 12, 0, 0], [U.EPILOGUE, e, 0, 0],
+				[U.RESTOREFPLR, e + 8, 32, 0], [U.RET, e + 12, 0, 0]])
+				op(finiOps, x[0], x[1], x[2], x[3]);
+		} else {
+			// push rbx, r12, r13, r14, r15; pop them, ret
+			var e = initEnd - init - 10;
+			for (x in [[U.PUSH, 1, 3], [U.PUSH, 3, 12], [U.PUSH, 5, 13], [U.PUSH, 7, 14], [U.PUSH, 9, 15], [U.ENDPROLOGUE, 9, 0], [U.EPILOGUE, e, 0],
+				[U.POP, e + 2, 15], [U.POP, e + 4, 14], [U.POP, e + 6, 13], [U.POP, e + 8, 12], [U.POP, e + 9, 3], [U.RET, e + 10, 0]])
+				op(initOps, x[0], x[1], x[2]);
+			// push rbx, r15, r14; pop r14, r15, rbx, ret
+			var e = finiEnd - fini - 6;
+			for (x in [[U.PUSH, 1, 3], [U.PUSH, 3, 15], [U.PUSH, 5, 14], [U.ENDPROLOGUE, 5, 0], [U.EPILOGUE, e, 0], [U.POP, e + 2, 14], [U.POP, e + 4, 15],
+				[U.POP, e + 5, 3], [U.RET, e + 6, 0]])
+				op(finiOps, x[0], x[1], x[2]);
+		}
+		o.funcs.push(new FuncRec(o.define("hxmc_init", t, init, initEnd - init, false), initOps));
+		if (hasFini) o.funcs.push(new FuncRec(o.define("hxmc_fini", t, fini, finiEnd - fini, false), finiOps));
 		// (atexit, libc_nonshared's, passes its value to __cxa_atexit)
 		var d = new Section(".data.hxmc.dso_handle", Data, 8);
 		d.buf.u64(0, 0);
@@ -272,6 +307,7 @@ class LinkDyn extends Link {
 			live.set(copies, true);
 		}
 		makeGot();
+		unwindObj();
 		// GLOB_DAT relocations: the slots of functions
 		var gotImports = 0;
 		if (got != null)
@@ -381,7 +417,7 @@ class LinkDyn extends Link {
 		var fini = [for (s in all) if (s.kind == FiniArray) s];
 		var data = [for (s in all) if (s.kind == Data && s != dynSec && s != got) s].concat([for (s in all) if (moved.exists(s)) s]);
 		var bss = [for (s in all) if (s.kind == Bss) s];
-		var nph = 8; // PHDR, INTERP, LOAD r, LOAD rx, LOAD rw, DYNAMIC, TLS, GNU_STACK
+		var nph = ehFrame != null ? 9 : 8; // PHDR, INTERP, LOAD r, LOAD rx, LOAD rw, DYNAMIC, TLS, GNU_STACK, GNU_EH_FRAME
 		var BASE = Link.BASE;
 		var headers = 64 + 56 * nph;
 		var pos = BASE + headers;
@@ -479,6 +515,7 @@ class LinkDyn extends Link {
 		for (s in all)
 			if (s.kind != Bss && s.kind != Tbss && o(dynObj, s) == false) apply(s);
 		if (relaAt != rela.buf.len) throw "hxmc: link: " + Std.int(relaAt / 24) + " dynSec relocations for " + nrela;
+		fillUnwind();
 		// .dynsym, .hash, .gnu.version, .gnu.version_r
 		var buckets = [for (_ in 0...nbucket) 0];
 		var chains = [for (_ in 0...nsym) 0];
@@ -579,8 +616,9 @@ class LinkDyn extends Link {
 		sec(".got", 1, 3, gotStart, gotEnd - gotStart, 0, 0, 8, 8); // 14
 		sec(".bss", 8, 3, fileEnd, dataEnd - fileEnd, 0, 0, 16); // 15 (bssIndex)
 		sec(".data", 1, 3, gotEnd, fileEnd - gotEnd, 0, 0, 16); // 16
+		unwindHeaders(secs);
 		// (the .tbss header takes no file room: its offset is that of .tdata's end)
-		var shoff = sectionHeaders(out, secs, all, textStart, textEnd);
+		var shoff = sectionHeaders(out, secs, 9);
 		// ELF header
 		var h = new Buf(64 + 56 * nph);
 		h.u32(0x464c457f);
@@ -618,6 +656,7 @@ class LinkDyn extends Link {
 		ph(1, 6, dataStart - BASE, dataStart, fileEnd - dataStart, dataEnd - dataStart, PAGE);
 		ph(2, 6, addr.get(dynSec) - BASE, addr.get(dynSec), dynSec.size(), dynSec.size(), 8); // PT_DYNAMIC
 		ph(7, 4, tlsStart - BASE, tlsStart, tdataEnd - tlsStart, tlsSize, tlsAlign);
+		if (ehFrameHdr != null) ph(0x6474e550, 4, addr.get(ehFrameHdr) - BASE, addr.get(ehFrameHdr), ehFrameHdr.size(), ehFrameHdr.size(), 4);
 		ph(0x6474e551, 6, 0, 0, 0, 0, 16);
 		out.b.blit(0, h.b, 0, h.len);
 		return out.toBytes();
@@ -641,78 +680,6 @@ class LinkDyn extends Link {
 		}
 		return h;
 	}
-
-	// appends (with `symbols`) .symtab and .strtab of the code, .shstrtab and
-	// the section headers after the image; returns their offset
-	function sectionHeaders(out:Buf, secs:Array<SecHdr>, all:Array<Section>, textStart:Int, textEnd:Int):Int {
-		if (symbols) {
-			var strtab = new Buf(1 << 16);
-			strtab.u8(0);
-			var symtab = new Buf(1 << 16);
-			symtab.zeros(24);
-			var locals = new Buf(1 << 16), globals = new Buf(1 << 16);
-			var nlocal = 1;
-			for (o in objs)
-				for (s in o.symbols) {
-					var sec = s.section;
-					if (sec == null || sec.kind != Text || !addr.exists(sec) || s.abs || s.name.length == 0 || StringTools.startsWith(s.name, ".L")) continue;
-					var b = s.global ? globals : locals;
-					if (!s.global) nlocal++;
-					b.u32(strtab.len);
-					strtab.str(s.name);
-					strtab.u8(0);
-					b.u8((s.global ? 0x10 : 0) | 2);
-					b.u8(0);
-					b.u16(9); // .text
-					b.i64(addr.get(sec) + s.offset);
-					b.i64(s.size);
-				}
-			symtab.buf(locals);
-			symtab.buf(globals);
-			out.align(8);
-			var symOff = out.len;
-			out.buf(symtab);
-			var strOff = out.len;
-			out.buf(strtab);
-			var n = secs.length + 1;
-			secs.push({name: ".symtab", type: 2, flags: 0, addr: 0, off: symOff - 0, size: symtab.len, link: n + 1, info: nlocal, align: 8, entsize: 24});
-			secs.push({name: ".strtab", type: 3, flags: 0, addr: 0, off: strOff, size: strtab.len, link: 0, info: 0, align: 1, entsize: 0});
-		}
-		var shstr = new Buf(256);
-		shstr.u8(0);
-		var names = [];
-		for (s in secs) {
-			names.push(shstr.len);
-			shstr.str(s.name);
-			shstr.u8(0);
-		}
-		var shName = shstr.len;
-		shstr.str(".shstrtab");
-		shstr.u8(0);
-		var shstrOff = out.len;
-		out.buf(shstr);
-		out.align(8);
-		var shoff = out.len;
-		function sh(name:Int, type:Int, flags:Int, a:Int, off:Int, size:Int, link:Int, info:Int, al:Int, entsize:Int) {
-			out.u32(name);
-			out.u32(type);
-			out.i64(flags);
-			out.i64(a);
-			out.i64(off);
-			out.i64(size);
-			out.u32(link);
-			out.u32(info);
-			out.i64(al);
-			out.i64(entsize);
-		}
-		sh(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-		for (k in 0...secs.length) {
-			var s = secs[k];
-			sh(names[k], s.type, s.flags, s.addr, s.off, s.size, s.link, s.info, s.align, s.entsize);
-		}
-		sh(shName, 3, 0, 0, shstrOff, shstr.len, 0, 0, 1, 0);
-		return shoff;
-	}
 }
 
 typedef Imp = {
@@ -730,4 +697,3 @@ typedef Imp = {
 	alias:Bool // another name of a copied variable
 }
 
-typedef SecHdr = {name:String, type:Int, flags:Int, addr:Int, off:Int, size:Int, link:Int, info:Int, align:Int, entsize:Int}

@@ -1,10 +1,10 @@
-# hxmc: low-level Haxe (design; the runtime's part built)
+# Low-level Haxe and C interop (design; partly built)
 
 C interop, native memory with lifetimes, and an opt-in manual-memory
 dialect, as one design. hxmc-only: these APIs exist only in hxmc builds
 (native and WebAssembly); no portable fallback for other Haxe targets is
-planned. Current state of hxmc is in [README.md](README.md), other
-directions in [PLANS.md](PLANS.md).
+planned. What is built is in [docs/hxmc.md](../hxmc.md); the other plans
+are in [ROADMAP.md](../../ROADMAP.md) and [docs/plans/](README.md).
 
 The three layers build on each other:
 
@@ -20,6 +20,15 @@ The names below are illustrative, except in the last sections: the
 runtime's internal subset (`hxmc.unsafe`, the `@:hxmc.*` metadata) is
 built, and the runtime uses it to contain no C of hxmc's own ("The runtime
 without C of our own").
+
+Status: built are the runtime's internal subset, the first milestone
+(externs on the six ABIs and WebAssembly, `Arena`, the checked
+`@:hxmc.noGc` rule and the raw-address check), structs by value in C
+calls on every ABI ("Calls and linking") and struct values in the
+language ("Struct values": locals, parameters, results, inline fields,
+statics, `Slice`, scalar replacement). Next: instance methods on structs,
+specialized generics for containers of structs (`ArrayList<Particle>`),
+value enums, the `Allocator` family.
 
 ## 1. How other languages do C interop
 
@@ -103,7 +112,7 @@ extern class SDL {
   hxmc.libc=glibc`: glibc's loader, `LinkDyn.hx`; `@:hxmc.lib("m")` or
   `@:hxmc.lib("libm.so.6")`, a plain name being `lib<name>.so` next to the
   executable); static musl executables cannot load glibc libraries (GPU
-  drivers, see PLANS.md "Graphics"), and an import there is a compile
+  drivers, see [graphics.md](graphics.md)), and an import there is a compile
   error that names the mode.
 - WebAssembly: C functions become module imports (WASI or JavaScript):
   the module `@:hxmc.lib` names ("env" by default), pointers as i32.
@@ -283,8 +292,7 @@ function onFrame() {
 - GC code calls manual code freely; manual code reaches GC objects only
   through `Handle.get` and `pin`.
 - A `Ptr` derived from a GC object cannot be live across a GC point (the
-  check in PLANS.md, "A compiler check for raw addresses across GC
-  points", becomes part of this).
+  raw-address check, `Facts.checkRawAddresses`, built and part of this).
 - Allocators are passed explicitly, as in Zig (not an implicit context as
   in Odin or Jai); an optional default (`Malloc.instance`) for
   convenience.
@@ -371,11 +379,24 @@ s[3].y = 2;                                  // in place
   inline constructors (a filter that turns objects into locals shared by
   the variables they are assigned to) are kept off struct classes: their
   constructors are ordinary functions for hxmc (`CInterop.install`), which
-  Mir inlining and `Sroa` make as cheap. A known gap: Haxe's inliner
-  passes a local argument of an inline function as itself, so assigning a
-  struct parameter's fields in an inline function changes the caller's
-  variable (copy the parameter into a local first). All seven targets
-  (WebAssembly too). Corpus: `StructValues`, `reject/Struct*`.
+  Mir inlining and `Sroa` make as cheap.
+- Inline functions: a struct argument is the function's own copy, as for
+  a call. Haxe's inliner passes a local (or field) argument into the
+  inlined body as itself; where the body writes through a struct parameter
+  (a field, a compound assignment, an increment, the parameter passed on as
+  an abstract's `this`), hxmc's hook (`Inline.copyArgumentHook`, set by
+  `CInterop.install`) has it copied into a temporary first, so `bump(a)`
+  with `inline function bump(v:V) v.x += 1` leaves `a` as it was, and so
+  does a mutating inline method of an abstract over a struct (assigning
+  `this` itself still changes the caller's variable, as Haxe's inline
+  abstracts do). Reading only, the argument is used in place: no copy (the
+  shader math types are immutable, never copied). The analyzer keeps
+  copies copies (`AnalyzerTexpr.keepCopyHook`): a struct variable
+  initialized from a place is neither fused into its use nor replaced by
+  its source (copy propagation), and `a.b.x += 1` does not bind `a.b` to a
+  temporary. Programs without struct values compile exactly as before. All
+  seven targets (WebAssembly too). Corpus: `StructValues`, `StructInline`
+  (and `StructInlineOpt`, with `@:analyzer(optimize)`), `reject/Struct*`.
 - Left: instance methods on structs, value enums, `@:generic`
   specialization for containers of structs (boxes cost an allocation per
   element), GC references inside structs, struct locals captured by
@@ -507,7 +528,7 @@ Included:
 2. Externs with direct calls for scalars and pointers on the six ABIs;
    static linking of prebuilt objects; user DLLs (PE) and dylibs (Mach-O)
    by generalizing the runtime's existing system imports.
-3. `@:hxmc.noGc` complete, plus the raw-address check (PLANS.md): the tool
+3. `@:hxmc.noGc` complete, plus the raw-address check (built): the tool
    for rewriting std hot paths, already the runtime's style (`Mem`
    intrinsics in non-collecting functions), made a checked rule.
 4. Minimal temporary memory: `Arena.scoped(a -> ...)`, a malloc-backed

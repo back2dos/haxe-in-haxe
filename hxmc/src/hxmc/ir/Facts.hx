@@ -397,7 +397,7 @@ class Facts {
 					fs(x);
 			case SCold(_, x):
 				fs(x);
-			case SBreak | SContinue:
+			case SBreak | SContinue | SPos(_):
 			case SSwitch(e, cases, def):
 				fe(e);
 				for (c in cases)
@@ -568,7 +568,7 @@ class Facts {
 		return why != null ? why : "a callee reaches one";
 	}
 
-	// The raw-address check (PLANS.md): the address of a heap object
+	// The raw-address check (docs/hxmc.md, "Runtime in Haxe"): the address of a heap object
 	// (Mem.addr, and arithmetic on it) is valid until the next GC point, where
 	// the collector may move the object. Outside @:hxmc.noGc functions,
 	// none may be live across a GC point, nor be passed to a call that is one.

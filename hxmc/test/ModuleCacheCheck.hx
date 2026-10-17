@@ -5,7 +5,7 @@ import sys.io.File;
 using StringTools;
 
 // The gate of the persistent module cache (hxmc/src/hxmc/ModuleCache.hx,
-// hxmc/PLANS.md "Cached modules"): every build with the cache writes the same
+// docs/plans/compiler.md, "Cached modules"): every build with the cache writes the same
 // output, byte for byte, as the same build without it, through a cold run
 // (an empty cache), a warm run, a run after a file's date changes (the same
 // content), after an edit of one module, after an edit of a std override,

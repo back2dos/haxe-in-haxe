@@ -509,7 +509,17 @@ private class FunctionGraphBuilder {
 			case FClosure(ct, _) if (ct != null): isStackAllocated(ct.cls);
 			case _: false;
 		};
-		var r1:BlockValue = keep ? {bb: bb, value: e1} : bindToTemp(bb, e1);
+		// port: hxmc's struct values (AnalyzerTexpr.keepCopyHook): a struct base copied into a temporary would take
+		// ... the assignment, so it stays a place, with its reference base (if any) bound to a temporary instead
+		var hook = AnalyzerTexpr.keepCopyHook;
+		function structBase(bb:BasicBlockData, e:TExpr):BlockValue return switch e.eexpr {
+			case TField({eexpr: TTypeExpr(_)}, _): {bb: bb, value: e};
+			case TField(e0, fa):
+				var r = hook(e0.etype, e0) ? structBase(bb, e0) : bindToTemp(bb, e0);
+				{bb: r.bb, value: withExpr(e, TField(r.value, fa))};
+			case _: {bb: bb, value: e};
+		};
+		var r1:BlockValue = keep ? {bb: bb, value: e1} : hook != null && hook(e1.etype, e1) ? structBase(bb, e1) : bindToTemp(bb, e1);
 		ef = withExpr(ef, TField(r1.value, fa));
 		var r3 = bindToTemp(r1.bb, ef);
 		var r2 = bindToTemp(r3.bb, e2);
