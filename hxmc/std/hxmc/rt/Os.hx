@@ -265,10 +265,15 @@ class Os {
 
 	// ---- the end of the program
 
-	// (Android: _exit, as PosixSys.exit)
+	// (Android: _exit, as PosixSys.exit; a moment first for what was
+	// written to stderr to reach logcat, through hxmc.os's pipe)
 	@:hxmc.noGc public static function exit(code:Int) {
 		if (Mem.target() >= 9) {
 			C.fflush(Ptr.nil());
+			var ts = Mem.stack(16);
+			Mem.setI64(ts, 0, 0);
+			Mem.setI64(ts, 8, 200000000);
+			C.nanosleep(ts, Ptr.nil());
 			C._exit(code);
 		} else C.exit(code);
 	}
