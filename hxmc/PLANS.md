@@ -408,7 +408,7 @@ user's code are all modules alike.
   `--macro` do not use the cache. Build macros and `Context` dependencies
   are recorded as the server records them (module dependencies, files
   registered with `registerModuleDependency`, cache-bound resources and
-  messages replayed); nondeterministic macros are trusted as by the server.
+  messages replayed). Nondeterministic macros: see below.
   A macro registering `onGenerate`, `onAfterTyping` or `onAfterGenerate`
   while typing makes the build write nothing (a restored module would not
   register it again).
@@ -435,6 +435,27 @@ user's code are all modules alike.
   std (per target, per define, again for the macro context), the sources
   have to ship anyway, init macros cannot change pre-typed modules, and an
   edited compiler (`hxmc-rebuild`) invalidates it.
+- Nondeterministic macros, before the cache is on by default (the server
+  trusts them: a macro embedding `Date.now()` keeps its value until its
+  module changes; on by default, plain builds would inherit that). The
+  macro std's natives are ours, so they decide per module:
+  - Volatile: date and time (`Date.now`, `Sys.time`, `Timer.stamp`),
+    randomness, the network (`Http`, sockets), processes (`Sys.command`,
+    `sys.io.Process`) mark the module being typed as not cacheable; it is
+    typed again every build (its macros run), its dependents stay cached
+    unless its interface changes.
+  - Dependencies instead of volatility: a file a macro reads becomes a
+    dependency by content hash (stricter than upstream, where only
+    `registerModuleDependency` does it); an environment variable read goes
+    into the key with its value.
+  - Escape hatches: `@:hxmc.noCache` on a class or module,
+    `-D hxmc.no-cache=<lib>`, `HXMC_MODULE_CACHE=0`; `HXMC_MODULE_CACHE_LOG=1`
+    says why a module was not cached (the call and its position).
+  - `--wait` keeps upstream's behaviour (compatibility); the rule is the
+    disk cache's.
+  - Gate cases: a macro using `Date.now` runs every build, one reading a
+    file only when the file changes, one reading an environment variable
+    when its value changes.
 - Then: on by default (replacing the types cache), the `npm` postinstall
   warming the std's modules, builds with init macros, `-lib` HXB archives
   as one more source of modules.
