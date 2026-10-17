@@ -80,6 +80,7 @@ npm i -D @hxmc/gfx
 | `@hxmc/view` | signals and JSX-like markup for Haxe on every target: fine-grained reactivity as Solid has it, markup compiled to direct calls on a renderer chosen at compile time; components are type-checked calls |
 | `@hxmc/web` | `@hxmc/view` on the web: a DOM renderer (JavaScript), static HTML rendered at build time, hydration, islands in JavaScript or WebAssembly with a small loader, typed calls from JavaScript into wasm32-wasi modules |
 | `@hxmc/ui` | a UI toolkit: a node tree with flexbox layout (checked against Chromium's), events and focus, drawn with the GPU on gfx or as the platform's controls, written in view's markup, widgets; see `packages/ui/examples/Todo.hx` |
+| `@hxmc/theme` | the look of ui's unstyled widgets, after shadcn/ui: its tokens, light and dark, and its components' Tailwind class lists, made rules at compile time |
 
 ## Building from source
 

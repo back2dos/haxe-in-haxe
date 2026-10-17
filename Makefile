@@ -110,7 +110,7 @@ endef
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-draw-check ui-web-check portcheck measure site-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check theme-check theme-fidelity-check ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
 help:
@@ -196,6 +196,10 @@ help:
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
 ##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx)
+## theme-check  packages/theme on Eval: Tailwind's classes read as rules, Tw's rules made at compile time,
+##             shadcn's sheet compiled, the classes it rejects (packages/theme/test/ThemeTest.hx)
+## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
+##             (packages/theme/test/ref, from ref.mjs; skipped until hxmc.ui has the rule engine)
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,BoxTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
@@ -621,6 +625,15 @@ ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run MarkupTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run GuideTest
+
+# (test/stub: the rule engine's types until they are on main)
+theme-check: $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test/stub -cp packages/theme/test --run ThemeTest $(TOOL)
+
+# (skipped until hxmc.ui has the rule engine: its StyleSheet)
+theme-fidelity-check: $(TOOL) $(STD) $(HOST_RT)
+	$(if $(wildcard packages/ui/src/hxmc/ui/StyleSheet.hx),$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/src -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS)),@echo "theme-fidelity-check: skipped, no rule engine in hxmc.ui yet")
+	$(if $(wildcard packages/ui/src/hxmc/ui/StyleSheet.hx),mkdir -p bin/theme/out && LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/theme/$(GFX_TARGET)/FidelityTest packages/theme/test/ref bin/theme/out)
 
 UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
