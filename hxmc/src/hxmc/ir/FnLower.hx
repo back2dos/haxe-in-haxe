@@ -614,9 +614,48 @@ class FnLower {
 	static function dynElem(elem:Ty):Bool
 		return elem.match(TRef(RAny));
 
-	function nativeGet(elem:Ty, a:Ex, i:Ex):Ex {
-		if (dynElem(elem)) return temp(TRef(RAny), ECallHost("hxmc_narray_dget", [a, i], TRef(RAny)));
-		return ECallHost("hxmc_narray_get_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [a, i], elem);
+	// element i of NativeArray a (both locals or constants, as they are read
+	// again by the test of the index), the access at p: tested as -D
+	// hxmc.native-array-outofbounds says (Lower.bounds); no p: not tested (the
+	// std's own loops)
+	function nativeRead(elem:Ty, a:Ex, i:Ex, ?p:core.Globals.Pos):Ex {
+		var get = ECallHost(dynElem(elem) ? "hxmc_narray_dget" : "hxmc_narray_get_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [a, i], elem);
+		switch p == null ? Lower.BOUNDS_UNCHECKED : Lower.bounds {
+			case Lower.BOUNDS_SILENT:
+				var r = newLocal("e", elem);
+				// (seen as Dynamic: the default of the storage's kind)
+				var none = dynElem(elem) ? ECallHost(l.native("hx_narray_default"), [a], elem) : nullOf(elem);
+				out.push(SIf(inBounds(a, i), [SSet(r, get)], [SSet(r, none)]));
+				return ELocal(r);
+			case Lower.BOUNDS_THROWS:
+				out.push(SIf(inBounds(a, i), [], [SThrow(outOfBounds(a, i, p))]));
+			case _:
+		}
+		return dynElem(elem) ? temp(elem, get) : get;
+	}
+
+	// a[i] = x (x: a local or constant), as nativeRead
+	function nativeWrite(elem:Ty, a:Ex, i:Ex, x:Ex, ?p:core.Globals.Pos) {
+		var set = SExpr(ECallHost(dynElem(elem) ? "hxmc_narray_dset" : "hxmc_narray_set_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [a, i, x], TVoid));
+		out.push(switch p == null ? Lower.BOUNDS_UNCHECKED : Lower.bounds {
+			case Lower.BOUNDS_SILENT: SIf(inBounds(a, i), [set], []);
+			case Lower.BOUNDS_THROWS: SIf(inBounds(a, i), [set], [SThrow(outOfBounds(a, i, p))]);
+			case _: set;
+		});
+	}
+
+	// (one unsigned comparison: negative indices too; the length of a
+	// wrapper is its storage's)
+	static function inBounds(a:Ex, i:Ex):Ex
+		return ECallHost("hxmc_unsafe_Mem_ult", [i, ECallHost("hxmc_narray_length", [a], TI32)], TBool);
+
+	// the exception, with the position of the access (thrown at once: the
+	// call is the throw statement's own)
+	function outOfBounds(a:Ex, i:Ex, p:core.Globals.Pos):Ex {
+		var d = fi.display != null ? fi.display : fi.name;
+		var dot = d.lastIndexOf(".");
+		var pos = [EStr(p.pfile), EInt(CInterop.lineOf(p.pfile, p.pmin)), EStr(dot < 0 ? "" : d.substr(0, dot)), EStr(d.substr(dot + 1))];
+		return ECallHost(l.native("hx_narray_oob"), [i, ECallHost("hxmc_narray_length", [a], TI32)].concat(pos), TRef(RAny));
 	}
 
 	// a value converted to String (for concatenation)
@@ -1098,7 +1137,8 @@ class FnLower {
 				switch tyOf(a) {
 					case TRef(RNativeArr(elem)):
 						var xs = operands([a, i]);
-						coerce(nativeGet(elem, xs[0], coerce(xs[1], tyOf(i), TI32)), elem, tyOf(e));
+						var al = ELocal(asLocal(xs[0], tyOf(a)));
+						coerce(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elem, tyOf(e));
 					case TRef(RArr(elem)):
 						var xs = operands([a, i]);
 						var ix = coerce(xs[1], tyOf(i), TI32);
@@ -1719,9 +1759,8 @@ class FnLower {
 					case TRef(RNativeArr(elem)):
 						var al = asLocal(value(a), tyOf(a));
 						var ix = ELocal(asLocal(coerce(value(i), tyOf(i), TI32), TI32));
-						var x = pure(compute(() -> nativeGet(elem, ELocal(al), ix), elem, elem), elem);
-						if (dynElem(elem)) out.push(SExpr(ECallHost("hxmc_narray_dset", [ELocal(al), ix, x], TVoid)));
-						else out.push(SExpr(ECallHost("hxmc_narray_set_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], [ELocal(al), ix, x], TVoid)));
+						var x = pure(compute(() -> nativeRead(elem, ELocal(al), ix, lhs.epos), elem, elem), elem);
+						nativeWrite(elem, ELocal(al), ix, x, lhs.epos);
 						return coerce(x, elem, et);
 					case TRef(RArr(elem)):
 						var al = asLocal(value(a), tyOf(a));
@@ -1778,6 +1817,18 @@ class FnLower {
 	function call(f:TExpr, cargs:Array<TExpr>, e:TExpr):Ex {
 		var rt = tyOf(e);
 		switch strip(f).eexpr {
+			// (the std's own loops, over indices they keep in bounds: not
+			// tested, whatever -D hxmc.native-array-outofbounds says)
+			case TField(obj, FInstance(c, _, cf)) if (Lower.isNativeArray(c) && (cf.cfName == "unsafeGet" || cf.cfName == "unsafeSet")):
+				var elem = switch tyOf(obj) {
+					case TRef(RNativeArr(t)): t;
+					case _: return fail("NativeArray." + cf.cfName + " of another type", e);
+				};
+				var xs = operands([obj].concat(cargs));
+				var a = ELocal(asLocal(xs[0], tyOf(obj))), i = coerce(xs[1], tyOf(cargs[0]), TI32);
+				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elem, rt);
+				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elem), elem)));
+				return EInt(0);
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);
 			case TField(_, FStatic(c, cf)) if (c.hasClassFlag(CExtern) || cf.cfExpr == null):

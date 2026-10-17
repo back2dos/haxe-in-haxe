@@ -17,7 +17,9 @@ package hxmc;
 //   -D hxmc.no-frame-pointers       x86-64: no frame record in functions (the default keeps one, for
 //                                   perf -g and debuggers; HXMC_FRAME_POINTERS=0 off; arm64 always)
 //   -debug                          source lines for debuggers (DWARF on ELF and Mach-O), symbols
-//   -D hxmc.check-vector-access     bounds checks for Vector indexing and blit ranges (default: off)
+//   -D hxmc.native-array-outofbounds=throws|silent
+//                                   NativeArray/Vector accesses out of bounds throw, or read the
+//                                   default and write nothing (default: not tested)
 //   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
@@ -116,6 +118,7 @@ class Main {
 		abi.setLibc(opts.libc);
 		hxmc.ir.Lower.targetOs = abi.osCode();
 		hxmc.ir.Lower.wasmGc = opts.wasmGc;
+		hxmc.ir.Lower.bounds = opts.bounds;
 		// WebAssembly's runtime is typed with the program only for that target
 		if (abi.wasm && !Lambda.exists(com.types, t -> switch t {
 			case TClassDecl(c): c.clPath.pack.join(".") == "hxmc.rt.wasm" && c.clPath.name == "Gc";

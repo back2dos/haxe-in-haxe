@@ -237,17 +237,20 @@ original over an Array, its reads unchecked (`EArrGetU`). `make bench-arrays`
 compares Array, NativeArray and Vector
 ([measurement notes](../hxmc/test/bench/README.md)).
 
-`-D hxmc.check-vector-access` enables bounds checks in the Vector override
-(off by default, including with `-debug`). An unsigned index/length
-comparison rejects both negative and too-large indices, throwing
-`haxe.exceptions.ArgumentException`. The optimizer removes repeated checks
-on the same index and length: the tested scalar read, write, compound
-assignment (`v[i] *= x`) and repeated read (`v[i] + v[i]`) each emit one
-bounds branch. `blit` checks the two ranges once, before copying, with
-overflow-safe subtraction; internal loops whose bounds are known use native
-storage directly. Plain NativeArray indexing stays unchecked. The define is
-registered for `haxe --help-defines` by `hxmc.Defines`, leaving `haxe/src`
-unchanged.
+`-D hxmc.native-array-outofbounds` decides what an index out of bounds
+does, at code generation (`Lower.bounds`, `FnLower.nativeRead`): not
+defined, nothing is tested (the result is unspecified, as Haxe leaves it);
+`throws`, an access tests its index (one unsigned comparison, negative
+indices too) and throws `haxe.exceptions.ArgumentException` with the
+position of the access; `silent`, a read out of bounds gives the element
+type's default (0, false, null) and a write does nothing. The test is IR,
+so the collector's roots account for the throw, and the optimizer drops a
+test a dominating one decides (`v[i] += x` tests once with `throws`).
+The std's own loops use `unsafeGet`/`unsafeSet`, which are never tested;
+`blit` copies so when both ranges are in bounds, else element by element
+with the define's accesses. Dynamic indexing follows the define too
+(`Dyn.dynAget`, an error when it is not defined). The define is registered
+for `haxe --help-defines` by `hxmc.Defines`, leaving `haxe/src` unchanged.
 
 ## Module cache
 

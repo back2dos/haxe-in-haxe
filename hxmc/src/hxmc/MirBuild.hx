@@ -1208,7 +1208,7 @@ class MirBuild {
 		cur = done;
 	}
 
-	// an element of a NativeArray seen as Dynamic (FnLower.nativeGet): of
+	// an element of a NativeArray seen as Dynamic (FnLower.nativeRead): of
 	// reference storage directly, else through the runtime (rt/NArray's
 	// hx_narray_get_slow, hx_narray_set_slow: the other kinds, wrappers). A
 	// wrapper's kind changes, but never to AK_PTR, so the test may be shared

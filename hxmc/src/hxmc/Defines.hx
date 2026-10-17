@@ -9,9 +9,9 @@ class Defines {
 		if (installed) return;
 		installed = true;
 		core.DefineRegistry.all.push({
-			key: "hxmc.check_vector_access",
-			doc: "Check haxe.ds.Vector reads and writes on hxmc; throw haxe.exceptions.ArgumentException for an invalid index. Off by default.",
-			flags: []
+			key: "hxmc.native_array_outofbounds",
+			doc: "What an access of an hxmc.NativeArray or haxe.ds.Vector out of bounds does on hxmc: throws (haxe.exceptions.ArgumentException), or silent (a read gives the default value, a write does nothing). Not defined: not tested (unspecified).",
+			flags: [core.DefineRegistry.DefineParameter.HasParam("throws | silent")]
 		});
 	}
 }

@@ -32,8 +32,9 @@ private typedef VectorData<T> = hxmc.NativeArray<T>;
 	A fixed-size vector backed by specialized native storage on hxmc.
 
 	Int, Float, Int64 and Bool elements are unboxed. Indices must be in
-	0...length; out-of-bounds access is unchecked unless compiled with
-	`-D hxmc.check-vector-access`, which throws ArgumentException.
+	0...length; out of bounds, `-D hxmc.native-array-outofbounds` decides:
+	not tested when not defined, `throws` (haxe.exceptions.ArgumentException),
+	`silent` (a read gives the default value, a write does nothing).
 	Vector<Dynamic> (and Vector<Any>) sees any vector; a vector taken as a
 	typed one from Dynamic or from generic code must have that element type,
 	or an error is thrown there (as on HL and the JVM). A vector made in
@@ -52,29 +53,13 @@ abstract Vector<T>(VectorData<T>) {
 		this.fill(defaultValue);
 	}
 
-	/** Returns the element at `index`; out-of-bounds access is unspecified. **/
-	@:op([]) public inline function get(index:Int):T {
-		#if hxmc.check_vector_access
-		checkIndex(index);
-		#end
+	/** Returns the element at `index`; out of bounds: `-D hxmc.native-array-outofbounds`. **/
+	@:op([]) public inline function get(index:Int):T
 		return this[index];
-	}
 
-	/** Sets the element at `index`; out-of-bounds access is unspecified. **/
-	@:op([]) public inline function set(index:Int, val:T):T {
-		#if hxmc.check_vector_access
-		checkIndex(index);
-		#end
+	/** Sets the element at `index`; out of bounds: `-D hxmc.native-array-outofbounds`. **/
+	@:op([]) public inline function set(index:Int, val:T):T
 		return this[index] = val;
-	}
-
-	#if hxmc.check_vector_access
-	inline function checkIndex(index:Int):Void {
-		// One unsigned comparison rejects both negative and too-large indices.
-		if (!hxmc.unsafe.Mem.ult(index, this.length))
-			throw new haxe.exceptions.ArgumentException("index", "Vector index out of bounds");
-	}
-	#end
 
 	public var length(get, never):Int;
 	inline function get_length():Int return this.length;
@@ -83,15 +68,9 @@ abstract Vector<T>(VectorData<T>) {
 	public inline function fill(value:T):Void
 		this.fill(value);
 
-	/** Copies `len` elements, supporting overlapping ranges. **/
-	public static inline function blit<T>(src:Vector<T>, srcPos:Int, dest:Vector<T>, destPos:Int, len:Int):Void {
-		#if hxmc.check_vector_access
-		// Check each range once, avoiding overflow in start + length.
-		if ((srcPos | destPos | len) < 0 || len > src.length - srcPos || len > dest.length - destPos)
-			throw new haxe.exceptions.ArgumentException("range", "Vector blit out of bounds");
-		#end
+	/** Copies `len` elements, supporting overlapping ranges (hxmc.NativeArray.blit). **/
+	public static inline function blit<T>(src:Vector<T>, srcPos:Int, dest:Vector<T>, destPos:Int, len:Int):Void
 		hxmc.NativeArray.blit(src.toData(), srcPos, dest.toData(), destPos, len);
-	}
 
 	/** Returns a shallow Array copy; it does not share this vector's storage. **/
 	public inline function toArray():Array<T>
@@ -116,7 +95,7 @@ abstract Vector<T>(VectorData<T>) {
 	public inline function join(sep:String):String {
 		var b = new StringBuf();
 		for (i in 0...length) {
-			b.add(Std.string(this[i]));
+			b.add(Std.string(this.unsafeGet(i)));
 			if (i < length - 1) b.add(sep);
 		}
 		return b.toString();
@@ -125,7 +104,7 @@ abstract Vector<T>(VectorData<T>) {
 	/** Creates a vector by applying `f` to each element in order. **/
 	extern public inline function map<S>(f:T->S):Vector<S> {
 		var result = new hxmc.NativeArray<S>(length);
-		for (i in 0...length) result[i] = f(this[i]);
+		for (i in 0...length) result.unsafeSet(i, f(this.unsafeGet(i)));
 		return fromData(result);
 	}
 
@@ -133,6 +112,6 @@ abstract Vector<T>(VectorData<T>) {
 	public inline function sort(f:T->T->Int):Void {
 		var array = this.toArray();
 		array.sort(f);
-		for (i in 0...length) this[i] = array[i];
+		for (i in 0...length) this.unsafeSet(i, array[i]);
 	}
 }

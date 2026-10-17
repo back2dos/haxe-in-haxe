@@ -81,6 +81,28 @@ class NArray {
 	@:hxmc.export("hx_narray_bad_length") static function badLength():Void
 		throw "Invalid NativeArray length";
 
+	// the error of index i of an array of length n, at the position of the
+	// access (FnLower.outOfBounds: -D hxmc.native-array-outofbounds=throws);
+	// no file: unknown (Dynamic access)
+	@:hxmc.host("hx_narray_oob") public static function outOfBounds(i:Int, n:Int, file:Null<String>, line:Int, cls:Null<String>, method:Null<String>):Dynamic {
+		var pos:haxe.PosInfos = file == null ? null : {fileName: file, lineNumber: line, className: cls, methodName: method};
+		return new haxe.exceptions.ArgumentException("index", 'Index $i out of bounds for length $n', null, pos);
+	}
+
+	// the default of a's elements, by its storage's kind, as a read out of
+	// bounds gives it through a Dynamic-typed view (FnLower.nativeRead, Dyn:
+	// -D hxmc.native-array-outofbounds=silent; HL's nullValue)
+	@:hxmc.host("hx_narray_default") public static function defaultOf(a:Dynamic):Dynamic {
+		var zero:I64 = 0;
+		return switch kindOf(storage(a)) {
+			case AK_BOOL: (false : Dynamic);
+			case AK_I32: (0 : Dynamic);
+			case AK_F64: (0.0 : Dynamic);
+			case AK_I64: (zero : Dynamic);
+			case _: null;
+		}
+	}
+
 	// a (a NativeArray, or a Dynamic) taken by a typed view of kind k
 	@:hxmc.host("hx_narray_view") static function view(a:Dynamic, k:Int):Dynamic {
 		if (a == null) return null;

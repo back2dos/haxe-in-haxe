@@ -201,7 +201,7 @@ class Corpus {
 		// (`// target: <target>`: the target the case is about, whatever the host)
 		var own = [for (l in src.split("\n")) if (l.trim().startsWith("// target: ")) l.trim().substr(11)];
 		if (own.length > 0) cmd = cmd.concat(["-D", "hxmc.target=" + own[0]]) else if (target != null) cmd = cmd.concat(["-D", "hxmc.target=" + target]);
-		var r = exec(cmd);
+		var r = exec(cmd.concat(caseDefines(c.cps[0] + "/" + c.main + ".hx")));
 		var out = r.out + r.err;
 		if (r.code == 0) return {name: c.name, status: "differs", detail: "compiled, but must be rejected"};
 		for (w in want)

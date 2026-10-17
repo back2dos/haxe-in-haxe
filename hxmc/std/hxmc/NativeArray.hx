@@ -5,8 +5,10 @@ package hxmc;
 
 	Bool uses 8-bit elements, Int uses 32 bits, Float and Int64 use 64 bits,
 	and other types use references (including boxed nullable numbers).
-	Elements start at zero, false or null. Indices must be in 0...length;
-	out-of-bounds access is unchecked, as are casts between storage types.
+	Elements start at zero, false or null. Out of bounds, `-D
+	hxmc.native-array-outofbounds` decides: not tested when not defined,
+	`throws`, `silent` (as haxe.ds.Vector). Casts between storage types are
+	not checked.
 	Seen as NativeArray<Dynamic> (or Any, or an erased type parameter), any
 	storage is read and written by its kind. Taken as a typed NativeArray
 	(from those, or from a Dynamic), the storage must be of that type: an
@@ -20,8 +22,17 @@ package hxmc;
 	public var length(default, never):Int;
 	public function new(length:Int):Void;
 
+	/**
+		Element `i`, without the test of the index
+		`-D hxmc.native-array-outofbounds` asks for: `i` must be in bounds.
+	**/
+	@:noCompletion public function unsafeGet(i:Int):T;
+
+	/** Sets element `i` as unsafeGet reads it. **/
+	@:noCompletion public function unsafeSet(i:Int, value:T):Void;
+
 	public inline function fill(value:T):Void {
-		for (i in 0...length) this[i] = value;
+		for (i in 0...length) unsafeSet(i, value);
 	}
 
 	// Preserve the runtime element layout even when T is erased.
@@ -30,23 +41,37 @@ package hxmc;
 	public inline function toArray():Array<T> {
 		var result:Array<T> = [];
 		result.resize(length);
-		for (i in 0...length) result[i] = this[i];
+		for (i in 0...length) result[i] = unsafeGet(i);
 		return result;
 	}
 
 	public static inline function fromArray<T>(array:Array<T>):NativeArray<T> {
 		var result = new NativeArray<T>(array.length);
-		for (i in 0...array.length) result[i] = array[i];
+		for (i in 0...array.length) result.unsafeSet(i, array[i]);
 		return result;
 	}
 
+	/**
+		Copies `length` elements, overlapping ranges too. Ranges out of
+		bounds are copied element by element, each access as
+		`-D hxmc.native-array-outofbounds` says.
+	**/
 	public static inline function blit<T>(src:NativeArray<T>, srcPos:Int, dest:NativeArray<T>, destPos:Int, length:Int):Void {
+		var inBounds = (srcPos | destPos | length) >= 0 && length <= src.length - srcPos && length <= dest.length - destPos;
 		if (src == dest && srcPos < destPos) {
 			var i = length;
-			while (i > 0) {
-				i--;
-				dest[destPos + i] = src[srcPos + i];
-			}
+			if (inBounds)
+				while (i > 0) {
+					i--;
+					dest.unsafeSet(destPos + i, src.unsafeGet(srcPos + i));
+				}
+			else
+				while (i > 0) {
+					i--;
+					dest[destPos + i] = src[srcPos + i];
+				}
+		} else if (inBounds) {
+			for (i in 0...length) dest.unsafeSet(destPos + i, src.unsafeGet(srcPos + i));
 		} else {
 			for (i in 0...length) dest[destPos + i] = src[srcPos + i];
 		}
@@ -60,5 +85,5 @@ package hxmc;
 	var index = 0;
 	public inline function new(array:NativeArray<T>) this.array = array;
 	public inline function hasNext():Bool return index < array.length;
-	public inline function next():T return array[index++];
+	public inline function next():T return array.unsafeGet(index++);
 }

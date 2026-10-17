@@ -181,6 +181,12 @@ class Lower {
 	public static var targetPlatform = -1; // (Mem.platform: Abi.platformCode)
 	// -D hxmc.wasm-gc (hxmc.wasmgc): the runtime's Haxe implementations are those of @:hxmc.wasmgc classes
 	public static var wasmGc = false;
+	// -D hxmc.native-array-outofbounds: what an access of a NativeArray
+	// (haxe.ds.Vector) at an index out of bounds does (FnLower.nativeRead)
+	public static var bounds = BOUNDS_UNCHECKED;
+	public static inline var BOUNDS_UNCHECKED = 0; // not tested (unspecified)
+	public static inline var BOUNDS_THROWS = 1; // haxe.exceptions.ArgumentException (rt/NArray.outOfBounds)
+	public static inline var BOUNDS_SILENT = 2; // a read gives the element type's default, a write does nothing
 
 	// a condition on the target (Mem.os, Mem.arm, Mem.target compared with
 	// constants) as a constant (EInt), when it is one: FnLower lowers only

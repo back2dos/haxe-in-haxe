@@ -50,3 +50,9 @@ element:
 | Null<Int> | 2.021 / 1.781 / 1.991 | 2.769 / 0.653 / 0.653 | 3.897 / 1.935 / 2.178 | 1.326 / 0.891 / 0.889 |
 
 Dependent-sum reads (`read`) are mostly tied with Array.
+
+With `-D hxmc.native-array-outofbounds=throws` or `silent` (each access
+tests its index), these loops take 10–50% longer than unchecked, the
+dependent reads (`read`) none: Int write 0.29 → 0.43 (throws) / 0.33 ns
+(silent), update 0.44 → 0.60 / 0.65 ns, still faster than Array's 0.55 and
+0.95 ns (2026-10-17; build the benchmark with the define to compare).

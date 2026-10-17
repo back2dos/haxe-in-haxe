@@ -527,9 +527,21 @@ class Dyn {
 		return dynCall(f, args);
 	}
 
+	// a NativeArray's index out of bounds by Dynamic access: as -D
+	// hxmc.native-array-outofbounds says for typed access (FnLower.nativeRead;
+	// silent: the default of the storage's kind), an error when it is not defined
 	@:hxmc.host("hx_dyn_aget") static function dynAget(a:Dynamic, i:Int):Dynamic {
 		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
-			if (!Mem.ult(i, Mem.getI32(Mem.addr(a), 0))) Rt.rt_throw("Invalid NativeArray index");
+			var n = Mem.getI32(Mem.addr(a), 0);
+			if (!Mem.ult(i, n)) {
+				#if (hxmc.native_array_outofbounds == "silent")
+				return NArray.defaultOf(a);
+				#elseif (hxmc.native_array_outofbounds == "throws")
+				throw NArray.outOfBounds(i, n, null, 0, null, null);
+				#else
+				Rt.rt_throw("Invalid NativeArray index");
+				#end
+			}
 			return NArray.get(a, i);
 		}
 		if (Str.isNull(a) || tindex(a) != T_ARRAY) return null;
@@ -538,7 +550,16 @@ class Dyn {
 
 	@:hxmc.host("hx_dyn_aset") static function dynAset(a:Dynamic, i:Int, v:Dynamic):Void {
 		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
-			if (!Mem.ult(i, Mem.getI32(Mem.addr(a), 0))) Rt.rt_throw("Invalid NativeArray index");
+			var n = Mem.getI32(Mem.addr(a), 0);
+			if (!Mem.ult(i, n)) {
+				#if (hxmc.native_array_outofbounds == "silent")
+				return;
+				#elseif (hxmc.native_array_outofbounds == "throws")
+				throw NArray.outOfBounds(i, n, null, 0, null, null);
+				#else
+				Rt.rt_throw("Invalid NativeArray index");
+				#end
+			}
 			NArray.set(a, i, v);
 			return;
 		}
