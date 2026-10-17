@@ -15,6 +15,7 @@ The short version is in the [README](../README.md). This covers the npm packages
 | `-D hxmc.wasm-eh=legacy` | wasm: the legacy exception-handling instructions (`try`/`catch_all`/`rethrow`: Chrome 95+, Firefox 100+, Safari 15.2+) instead of `exnref` (Chrome 137+, Firefox 131+, Safari 18.4+) |
 | `HXMC_STATS=1` | what the build did and how long it took |
 | `HXMC_CACHE=<dir>` | the cache directory (default `~/.cache/hxmc`, macOS `~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; "hxmc" below) |
+| `HXMC_CACHE_SIZE=<bytes>[K\|M\|G]` | the most the module cache's store keeps (default `1G`; beyond it the least recently used goes, older builds of the tool first) |
 | `HXMC_MODULE_CACHE=0`, `-D hxmc.no-module-cache` | no module cache: every build types its modules from source (the cache keeps typed modules between builds; see "Macros and the module cache") |
 
 ## The npm packages

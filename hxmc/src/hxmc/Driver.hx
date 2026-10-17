@@ -346,6 +346,8 @@ class Driver {
 		});
 		if (store != null) {
 			if (!abi.wasm) store.record([for (p in paths) haxe.io.Path.withoutDirectory(p)]);
+			// (a server build has no end where ModuleCache.finish settles it)
+			if (resident) CacheDir.settle();
 		} else
 			sys.io.File.saveContent(indexPath, newIndex.toString());
 		// (LinkPE drops sections from the objects it links: not kept)

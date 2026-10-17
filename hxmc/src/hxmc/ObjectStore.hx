@@ -9,8 +9,8 @@ import sys.io.File;
 // (Fingerprint), so every output and project that compiles the same code
 // for the same target shares the object. Per output (by its absolute path)
 // <out-hash>.objs names the objects its last build used (what the trim keeps:
-// an object no .objs names goes after a day; the .objs files go with their
-// last use, as the indexes do) and <out-hash>.key is UpToDate's record. Not
+// an object goes with the last .objs naming it, one none names after an
+// hour; the .objs files go with their last use, as the indexes do) and <out-hash>.key is UpToDate's record. Not
 // used under WASI, nor where the cache directory cannot be written: then the
 // objects are kept next to the output, in <out>.hxmc/, as before.
 class ObjectStore {
@@ -35,10 +35,7 @@ class ObjectStore {
 		}
 		if (!FileSystem.exists(dir + "o")) return null;
 		if (!FileSystem.exists(dir + "used") || CacheDir.now() - CacheDir.mtime(dir + "used") > CacheDir.USED_REFRESH) CacheDir.touch(dir + "used");
-		CacheDir.trim(root + "modules/", dir, d -> {
-			ModuleStore.sweep(d);
-			sweep(d);
-		});
+		CacheDir.trim(root + "modules/", dir);
 		return new ObjectStore(dir, out);
 	}
 
@@ -54,7 +51,7 @@ class ObjectStore {
 		var tmp = path + "." + CacheDir.nonce() + ".tmp";
 		try {
 			File.saveBytes(tmp, b);
-			CacheDir.replace(tmp, path);
+			if (CacheDir.replace(tmp, path)) CacheDir.wrote(b.length);
 		} catch (_:Dynamic) {
 			try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
 		}
@@ -73,23 +70,14 @@ class ObjectStore {
 		var tmp = p + "." + CacheDir.nonce() + ".tmp";
 		try {
 			File.saveContent(tmp, text);
-			CacheDir.replace(tmp, p);
+			if (CacheDir.replace(tmp, p)) CacheDir.wrote(text.length - (old == null ? 0 : old.length));
 		} catch (_:Dynamic) {
 			try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
 		}
 	}
 
-	// the objects no .objs of dir names, written before a day ago, removed
-	// (CacheDir.trim's sweep, with ModuleStore.sweep)
-	public static function sweep(dir:String) {
-		var keep = new Map<String, Bool>();
-		for (n in try FileSystem.readDirectory(dir) catch (_:Dynamic) [])
-			if (StringTools.endsWith(n, ".objs"))
-				for (l in try File.getContent(dir + n).split("\n") catch (_:Dynamic) [])
-					keep.set(l, true);
-		var t = CacheDir.now();
-		var o = dir + "o/";
-		for (f in try FileSystem.readDirectory(o) catch (_:Dynamic) [])
-			if (!keep.exists(f) && t - CacheDir.mtime(o + f) > 86400) try FileSystem.deleteFile(o + f) catch (_:Dynamic) {}
-	}
+	// the objects an object list names (CacheDir.trim: removed with the last
+	// list naming them)
+	public static function objectsOf(file:String):Array<String>
+		return [for (l in File.getContent(file).split("\n")) if (l != "") "o/" + l];
 }
