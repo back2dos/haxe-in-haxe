@@ -140,6 +140,10 @@ class Basics {
 		var d:Dynamic = 5;
 		var e:Dynamic = "five";
 		Sys.println(Std.string(d) + " " + Std.string(e) + " " + Std.string(null) + " " + Std.string(2.25) + " " + Std.string(true));
+		// Bool arrays, printed and through Dynamic
+		var flags = [true, false, true];
+		var df:Dynamic = flags;
+		Sys.println(flags + " " + Std.string(df) + " " + (df[1] == false));
 		Sys.println("done");
 	}
 }
