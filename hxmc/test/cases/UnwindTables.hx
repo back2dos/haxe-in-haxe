@@ -26,7 +26,7 @@ import hxmc.unsafe.Ptr;
 
 @:hxmc.c extern class LibUnwind {
 	static function _Unwind_Backtrace(fn:Ptr, arg:Ptr):Int;
-	static function _Unwind_GetIP(ctx:Ptr):Ptr;
+	@:hxmc.fast static function _Unwind_GetIP(ctx:Ptr):Ptr;
 }
 
 class UnwindTables {
