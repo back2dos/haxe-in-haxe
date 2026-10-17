@@ -97,13 +97,18 @@ On Eval: `make esx-check` (markup literals: templates, values, components,
 HTML, the programs the macro rejects), `make text-check` (the rasterizer,
 DejaVu Sans' tables and outlines, line layout, a text sample through the
 atlas against `packages/text/test/sample.png`: the same pixels on every
-machine with that font), `make ui-check` (the flexbox layout against
+machine with that font; Inter's CFF outlines and GPOS kerning against
+`sample-cff.png`, when fonts-inter is installed, as in CI), `make ui-check` (the flexbox layout against
 Chromium's on 60 cases, `packages/ui/test/layout-expected.json`, which
 `layout-ref.mjs` writes from `layout-cases.mjs`; text wrapping, events and
 focus; PNG files of every colour type, depth, filter and interlacing,
 `packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
-expected, checked against Chromium's decoder when written; then signals and
-markup rendered into nodes). Natively: `make
+expected, checked against Chromium's decoder when written; JPEG files of
+every kind the decoder reads, `packages/ui/test/jpeg/`, which
+`jpeg-cases.mjs` writes with the pixels Chromium decodes, matched exactly;
+popups placed, hit and dismissed; then signals and markup rendered into
+nodes, the popup widgets driven by pointer and keys, a VirtualList of
+100000 rows scrolled). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
 the last two driven through their Ui, drawn headless against `draw.png`,
 `todo.png` and `gallery.png`; Linux: llvmpipe, DejaVu
@@ -113,7 +118,12 @@ mounting, layout, frames, a change to one row, a scroll; `ClipboardTest`,
 the clipboard between two windows under Xvfb, through X11's selection
 protocol; also on Windows and macOS in CI; `TextInputTest`, key presses
 typed through X11's input method under Xvfb, keys given other symbols: a
-Cyrillic letter, a dead key composed with the next). In the browser: `make ui-web-check` (the native form on the DOM's own
+Cyrillic letter, a dead key composed with the next; on macOS in CI
+`TextInputTest` types through the window's text view and composes in it,
+`MacAccessTest` reads the accessibility tree through NSAccessibility and
+performs its actions; on Windows `WinAccessTest` calls the UI Automation
+providers through their COM interfaces and asks UI Automation for the
+window's element). In the browser: `make ui-web-check` (the native form on the DOM's own
 controls, `native-web.mjs`; the todo example for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, an input method's composition through the DevTools
