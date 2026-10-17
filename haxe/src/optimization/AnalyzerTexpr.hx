@@ -34,6 +34,12 @@ import context.PurityState;
 import optimization.AnalyzerConfig;
 
 class AnalyzerTexpr {
+	// port: hxmc's struct values (@:hxmc.struct, hxmc/src/hxmc/ir/CInterop.hx) are copied on assignment: true
+	// ... here when a variable of type t initialized from e is such a copy, which fusion (of a variable not
+	// ... VGenerated: the compiler's own temporaries stand for their expression) and copy propagation must keep
+	// ... (replacing the variable by e would make its field writes reach e); always null in the compiler itself.
+	public static var keepCopyHook:Null<(t:T, e:TExpr) -> Bool> = null;
+
 	public static function sExprPretty(e:TExpr):String return core.TPrinting.sExprPretty(false, "", false,
 		core.TPrinting.sType.bind(core.TPrinting.printContext()), e);
 
@@ -821,6 +827,8 @@ class Fusion {
 				&& writes == 0
 				&& asValue
 				&& !(variableSemantics && variableExpr)
+				// port: hxmc's struct values (AnalyzerTexpr.keepCopyHook)
+				&& (generated || AnalyzerTexpr.keepCopyHook == null || !AnalyzerTexpr.keepCopyHook(v.vType, e))
 				&& (generated || config.optimize && config.fusion && config.userVarFusion && !typeParams && !impureExtern);
 			if (config.fusionDebug) {
 				Sys.println('\nFUSION: $b\n\tvar ${v.vName}<${v.vId}> = ' + AnalyzerTexpr.sExprPretty(e));

@@ -535,6 +535,25 @@ Android App Bundle (`.aab`: protobuf manifest/resources). Java glue
 (permissions, billing) would need a DEX writer (the port has a JVM
 generator) or Google's `d8`.
 
+Order:
+
+1. GPU only: `NativeActivity` (`hasCode="false"`), EGL and the GLES back
+   end on its `ANativeWindow`, the cube; the APK writer (binary XML,
+   zip, v2 signing with a generated debug key through mbedtls); `adb` only
+   to install. CI: an x86-64 emulator with KVM on a Linux runner.
+2. Native controls: JNI bindings in Haxe (`JNIEnv` is a function table,
+   bound like COM's vtables), an Android backend for `hxmc.ui.native`'s
+   `NativeHost` (`android.widget.*` laid out by our flexbox). Callbacks
+   from Java (click listeners, text watchers, `Runnable`s for the UI
+   thread) need small classes with `native` methods registered with
+   `RegisterNatives`: a minimal DEX written by hxmc. Views live on the
+   Java main thread: `App.run` driven by `Choreographer` callbacks posted
+   there.
+3. Mixing, as on the desktop (hxmc/UI.md): a GPU view inside native
+   controls (`SurfaceView`/`TextureView` giving an `ANativeWindow`) is the
+   supported direction; a native control inside a drawn tree only for text
+   input (a hidden or overlaid `EditText` for the keyboard and IME).
+
 ### iOS
 
 ARM64 Mach-O like macOS arm64 with the iOS platform tag (and the
@@ -852,9 +871,9 @@ benchmarks between -5% and +4% either way, code-layout noise).
   SPIR-V, caching emitted code across compilations (the compilation
   server).
 - Usable for a real program (done, 2026-10-16): `examples/Cube.hx`, a
-  textured, lit, depth-tested cube turning under a translucent panel, on
-  every back end and on the site (in place of the triangle, which stays the
-  package's simplest example). Uniforms at draw time
+  textured, lit, depth-tested cube turning over a blended backdrop and a
+  soft shadow, on every back end and on the site (in place of the
+  triangle, which stays the package's simplest example). Uniforms at draw time
   (`Encoder.setUniforms(slot, bytes)`, the bytes from the shader class's
   `write<Block>`): a per-frame ring of 256-byte aligned blocks
   (`UNIFORM_RING`, 256 KB): GL two buffers (frames in flight) bound by
