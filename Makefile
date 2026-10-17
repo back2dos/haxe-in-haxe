@@ -519,7 +519,7 @@ ui-draw-check: ui-programs
 	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/ClipboardTest
 	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/TextInputTest
 	# (AT-SPI: the window's tree read by another process through libatspi, in a D-Bus session)
-	LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 640x480x24" dbus-run-session -- sh -c 'bin/ui/$(GFX_TARGET)/LinuxAccessTest & p=$!; bin/ui/$(GFX_TARGET)/AtspiProbe; s=$?; wait $p && exit $s'
+	LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 640x480x24" dbus-run-session -- sh -c 'bin/ui/$(GFX_TARGET)/LinuxAccessTest & p=$$!; bin/ui/$(GFX_TARGET)/AtspiProbe; s=$$?; wait $$p && exit $$s'
 	xvfb-run -a -s "-screen 0 640x480x24" bin/ui/$(GFX_TARGET)/NativeTest bin/ui/$(GFX_TARGET)/native.png
 
 ui-web-check: $(TOOL) $(STD)
