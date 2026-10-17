@@ -68,7 +68,6 @@ STD_SRC := $(shell find hxmc/std -type f)
 RT_SRC := $(wildcard hxmc/deps/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
 FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx) haxe/test/HlcNames.hx
-WEB_SRC := $(wildcard hxmc/web/src/*.hx hxmc/web/*.html hxmc/web/*.css hxmc/web/*.mjs hxmc/web/data/*) $(shell find packages/os packages/gfx/src packages/gfx/examples packages/gfx/imports.mjs -name '*.hx' -o -name '*.mjs')
 
 TOOL := bin/hxmc/hxmc
 STAGE0 := hxmc/bootstrap/stage0.wasm.br
@@ -108,7 +107,7 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean
 
 help:
@@ -137,8 +136,12 @@ help:
 ## npm         bin/npm/*.tgz: the npm packages of packages/ (packages/pack.mjs): @hxmc/cli, its six
 ##             platform packages @hxmc/<os>-<cpu>, @hxmc/wasm and @hxmc/source (NPM_VERSION), and
 ##             in bin/npm/packages/ the others with a version of their own (sources only)
-## site        bin/site: the website (hxmc/web; LIX_DIR's lix binaries under tools/, BENCH_DATA's
-##             benchmark history under bench/)
+## site        bin/site: the website (site/: pages rendered by site/src with @hxmc/web, the packages'
+##             examples built for the browser, the API read by the compiler; LIX_DIR's lix binaries
+##             under tools/, BENCH_DATA's benchmark history under bench/)
+## site-check  bin/site in headless browsers: every page rendered, islands hydrated, examples
+##             drawing, the playground compiling, no console errors, no broken links
+##             (site/tools/browser-test.mjs; Playwright; BROWSERS="chromium firefox webkit")
 ## fuzz        bin/fuzz/fuzz: the differential fuzzer, built by hxmc
 ## lix         bin/lix/lix (+ haxe, haxelib, neko links): lix (tools/lix) for the host
 ## lix-release bin/release/TARGET/lix[.exe]: lix cross-built for TARGET
@@ -362,45 +365,49 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 	$(NODE) packages/pack.mjs $(NPM_VERSION) bin/npm/native bin/npm
 	@ls -l bin/npm/*.tgz
 
-# --- The website (hxmc/web) ---
+# --- The website (site/) ---
 
-# the pages, their scripts (hxmc/web/src, compiled by the port), the std
-# subset the playground's compiler reads (hxmc/web/MkBundle.hx), the measured
-# results (hxmc/web/data), the Graphics section's cube (gfx/: the example
-# built for wasm32-wasi with legacy exception handling, which every browser
-# with WebGPU has and those with WebGL2 since 2021, with packages/os's
-# browser.mjs and the packages' imports.mjs; hxmc/web/cube.mjs) and the
-# build facts
+# The pages, rendered by site/src (on the tool's Eval, with @hxmc/web's static
+# renderer), which also builds each package example for wasm32-wasi (legacy
+# exception handling: every browser with WebGPU has it, those with WebGL2
+# since 2021), reads the packages' API with the tool, measures the hxmc
+# page's sizes and build times, and copies the packages' browser modules;
+# then the playground's compiler (bin/wasm), the pages' JavaScript
+# (site/client and site/islands, compiled by the port: site/build.hxml), the
+# std subset the playground's compiler reads (site/tools/MkBundle.hx), the
+# measured results (site/data), lix under tools/ (LIX_DIR), the benchmark
+# history (BENCH_DATA) and the build facts. Needs the DejaVu Sans fonts (the
+# ui examples'; fonts-dejavu-core). The site's build in the addresses of the
+# files its pages fetch (Version.hx, Site.asset): a deploy reaches browsers at once.
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
-# the site's build in the addresses of the files its pages fetch (Version.hx)
 SITE_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
-site: wasm $(PORT_BIN) $(WEB_SRC)
-	mkdir -p bin/site
-	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm hxmc/web/index.html hxmc/web/story.html hxmc/web/style.css bin/site/
-	$(PORT_BIN) -D site_version=$(SITE_VERSION) hxmc/web/build.hxml
-	$(call hxmc,bin/gfx/cube.wasm,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-eh=legacy)
-	mkdir -p bin/site/gfx
-	cp bin/gfx/cube.wasm packages/os/browser.mjs bin/site/gfx/
-	cp packages/os/imports.mjs bin/site/gfx/os.mjs
-	cp packages/gfx/imports.mjs bin/site/gfx/gfx.mjs
-	cp hxmc/web/cube.mjs bin/site/
-	sed -i -e 's/\(src\|href\)="\(playground\.js\|tables\.js\|cube\.mjs\|style\.css\)"/\1="\2?v=$(SITE_VERSION)"/g' bin/site/index.html bin/site/story.html
-	$(RUN) -cp hxmc/web --run MkBundle $(HAXE_STD_PATH) bin/site/std.bundle
-	cp hxmc/web/data/*.json bin/site/
-	rm -rf bin/site/examples && cp -r hxmc/web/examples bin/site/examples
-	rm -rf bin/site/tools
+SITE_CP := -cp packages/view/src -cp packages/web/src -cp packages/web/examples -cp site/islands -cp site/src -D hxmc.view.renderer.html=hxmc.web.StaticRenderer
+site: wasm $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
+	rm -rf bin/site && mkdir -p bin/site
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SITE_CP) --run Site --out bin/site --build bin/site-build --tool $(TOOL) --version $(SITE_VERSION) --jobs $(JOBS)
+	cp bin/wasm/hih.wasm bin/wasm/hih-legacy.wasm bin/site/
+	$(PORT_BIN) -D site_version=$(SITE_VERSION) site/build.hxml
+	$(RUN) -cp site/tools --run MkBundle $(HAXE_STD_PATH) bin/site/std.bundle
+	cp site/data/*.json bin/site/
+	cp -r site/playground bin/site/playground
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
-	rm -rf bin/site/bench
 	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/history.json bin/site/bench/ && { cp $(BENCH_DATA)/latest.json bin/site/bench/ 2>/dev/null || true; }; fi
-	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s",\n\t"cubeSize": "%s"\n}\n' \
+	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
 		"$$(gzip -9c bin/site/hih.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/hih-legacy.wasm | wc -c | $(mb))" \
 		"$$(gzip -9c bin/site/std.bundle | wc -c | $(mb))" \
-		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" \
-		"$$(wc -c < bin/site/gfx/cube.wasm | awk '{printf "%d KB", $$1 / 1024}')" > bin/site/build-info.json
+		"$$(if [ -f bin/site/tools/lix-linux-x86_64 ]; then wc -c < bin/site/tools/lix-linux-x86_64 | $(mb); else echo -; fi)" > bin/site/build-info.json
 	cat bin/site/build-info.json
+	rm -rf bin/site-build
+	$(NODE) site/tools/weights.mjs bin/site
+
+# the site's checks in headless browsers (Playwright, with its browsers):
+# every page in Chromium, the key pages in Firefox and WebKit too
+# (site/tools/browser-test.mjs)
+site-check:
+	$(NODE) site/tools/browser-test.mjs bin/site $(or $(BROWSERS),chromium firefox webkit)
 
 # --- Other programs ---
 
@@ -642,7 +649,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/lix-dist bin/site bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/site-build bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean
