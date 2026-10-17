@@ -725,6 +725,9 @@ jobs:
           # (the clipboard between two windows: NSPasteboard)
           npx haxe -lib hxmc.os -cp "$u/test" -main ClipboardTest --custom-target hxmc=gfx/ClipboardTest
           gfx/ClipboardTest
+          # (text input through the window's text view: a key, a composition)
+          npx haxe -lib hxmc.os -cp "$u/test" -main TextInputTest --custom-target hxmc=gfx/TextInputTest
+          gfx/TextInputTest
           # (hxmc.ui.native on AppKit's controls)
           npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
           gfx/NativeTest gfx/native-macos.png
