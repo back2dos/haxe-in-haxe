@@ -30,6 +30,7 @@ using StringTools;
 // repository's. In bin/hxmc-t/module-cache (removed when every check passes):
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run ModuleCacheCheck [--port] [--haxe <haxe>]
 // --port adds the port itself (haxe/src: a large program) for the hxmc target;
+// --nondet runs only the cases of macros whose results change from run to run;
 // --haxe names `haxe` with hxmc built in (default: bin/npm/native/<host>/haxe).
 class ModuleCacheCheck {
 	static var dir:String;
@@ -172,8 +173,12 @@ class ModuleCacheCheck {
 		];
 	}
 
-	static function env(cache:Bool):Map<String, Null<String>>
-		return [
+	// environment variables the macros of the nondeterministic programs read,
+	// and HXMC_MODULE_CACHE_LOG for their builds with the cache
+	static var extraEnv = new Map<String, Null<String>>();
+
+	static function env(cache:Bool):Map<String, Null<String>> {
+		var e:Map<String, Null<String>> = [
 			// (the builds without the cache keep their objects apart)
 			"HXMC_CACHE" => dir + (cache ? "/cache" : "/refcache"),
 			"HXMC_MODULE_CACHE" => cache ? "1" : "0",
@@ -182,10 +187,14 @@ class ModuleCacheCheck {
 			"HXMC_RT_DIR" => FileSystem.fullPath("bin/hxmc/rt"),
 			"HAXE_STD_PATH" => dir + "/upstream-std"
 		];
+		for (k => v in extraEnv)
+			e.set(k, k == "HXMC_MODULE_CACHE_LOG" && !cache ? null : v);
+		return e;
+	}
 
 	// a build: its output's bytes (null: failed), the modules it read from
 	// the store and encoded
-	static function build(target:String, pdir:String, args:Array<String>, cache:Bool):{out:Null<haxe.io.Bytes>, read:Int, encoded:Int, log:String} {
+	static function build(target:String, pdir:String, args:Array<String>, cache:Bool):{out:Null<haxe.io.Bytes>, read:Int, encoded:Int, typed:Int, log:String} {
 		builds++;
 		var out = pdir + "/out." + target;
 		for (f in [out, out + ".hxmc"])
@@ -197,27 +206,29 @@ class ModuleCacheCheck {
 			case _: [tool, out].concat(args).concat(["-cp", dir + "/std", "--custom-target", "hxmc"]);
 		}
 		var r = exec(cmd, {cwd: pdir, env: env(cache), merge: true});
-		var read = 0, encoded = -1;
+		var read = 0, encoded = -1, typed = -1;
 		var re = ~/module cache: (\d+) modules of \d+ variants read/;
 		if (re.match(r.out)) read = Std.parseInt(re.matched(1));
 		var re2 = ~/module cache: \d+ checked \(\d+ ms\), (\d+) modules encoded/;
 		if (re2.match(r.out)) encoded = Std.parseInt(re2.matched(1));
 		else if (cache && r.code == 0) Sys.println("(no module cache summary in the build's output)\n" + tail(r.out, 3000));
+		var re3 = ~/module cache: .*, (\d+) typed from source/;
+		if (re3.match(r.out)) typed = Std.parseInt(re3.matched(1));
 		// (--interp: what the program prints)
 		if (target == "interp" && r.code == 0)
 			File.saveContent(out, [for (l in r.out.split("\n")) if (!l.startsWith("hxmc:")) l].join("\n"));
 		if (r.code != 0 || !FileSystem.exists(out)) {
 			Sys.println(tail(r.out, 2000));
-			return {out: null, read: read, encoded: encoded, log: r.out};
+			return {out: null, read: read, encoded: encoded, typed: typed, log: r.out};
 		}
-		return {out: File.getBytes(out), read: read, encoded: encoded, log: r.out};
+		return {out: File.getBytes(out), read: read, encoded: encoded, typed: typed, log: r.out};
 	}
 
 	static function same(a:Null<haxe.io.Bytes>, b:Null<haxe.io.Bytes>):Bool
 		return a != null && b != null && a.compare(b) == 0;
 
 	// the build with the cache against the build without it
-	static function gate(what:String, target:String, pdir:String, args:Array<String>, ?expectEncoded:Int):{read:Int, encoded:Int, log:String} {
+	static function gate(what:String, target:String, pdir:String, args:Array<String>, ?expectEncoded:Int, ?expectTyped:Int):{read:Int, encoded:Int, typed:Int, log:String} {
 		var ref = build(target, pdir, args, false);
 		var got = build(target, pdir, args, true);
 		var ok = same(ref.out, got.out);
@@ -226,12 +237,121 @@ class ModuleCacheCheck {
 			ok = false;
 			extra += ' expected $expectEncoded encoded';
 		}
+		if (expectTyped != null) {
+			extra += ' (${got.typed} typed)';
+			if (got.typed != expectTyped) {
+				ok = false;
+				extra += ' expected $expectTyped typed';
+			}
+		}
 		check('$target: $what: the same output$extra', ok);
-		return {read: got.read, encoded: got.encoded, log: got.log};
+		return {read: got.read, encoded: got.encoded, typed: got.typed, log: got.log};
 	}
 
 	static function edit(path:String, f:String->String)
 		File.saveContent(path, f(File.getContent(path)));
+
+	// macros whose results change from run to run (docs/hxmc.md, "Module
+	// cache"): a module whose macro calls Date.now or runs a process is typed
+	// every build, its dependents restored (Clock: User restored) unless the
+	// result is where they copy it (Stamp's inline variable: Main typed with
+	// it); a file a macro reads is a dependency by content (Data: typed again
+	// when data.txt changes, not when only its date does); an environment
+	// variable a macro reads is in the module's key (Env); @:hxmc.noCache
+	// (Plain) and -D hxmc.no-cache=lib (lib.Thing) type a module every build;
+	// HXMC_MODULE_CACHE_LOG says why. A macro making an HTTP request (to a
+	// closed port: no network needed) types its module every build (Net).
+	static function nondeterministic(target:String) {
+		var files = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\ttrace(User.use());\n\t\ttrace(Data.text());\n\t\ttrace(Env.greeting());\n\t\ttrace(Proc.out());\n\t\ttrace(Stamp.YEAR > 2000);\n\t\ttrace(Plain.x() + lib.Thing.y() + Stable.z());\n\t}\n}\n",
+			"src/User.hx" => "class User {\n\tpublic static function use():String return \"clock \" + Clock.stamp();\n}\n",
+			"src/Clock.hx" => "class Clock {\n\tpublic static function stamp():Bool return Macros.now();\n}\n",
+			"src/Stamp.hx" => "class Stamp {\n\tpublic static inline final YEAR:Int = Macros.year();\n}\n",
+			"src/Data.hx" => "class Data {\n\tpublic static function text():String return Macros.read(\"data.txt\");\n}\n",
+			"src/Env.hx" => "class Env {\n\tpublic static function greeting():String return Macros.env(\"GATE_GREETING\");\n}\n",
+			"src/Proc.hx" => "class Proc {\n\tpublic static function out():Int return Macros.proc();\n}\n",
+			"src/Plain.hx" => "@:hxmc.noCache\nclass Plain {\n\tpublic static function x():Int return 1;\n}\n",
+			"src/lib/Thing.hx" => "package lib;\n\nclass Thing {\n\tpublic static function y():Int return 2;\n}\n",
+			"src/Stable.hx" => "class Stable {\n\tpublic static function z():Int return 3;\n}\n",
+			"src/Macros.hx" => [
+				"import haxe.macro.Expr;",
+				"class Macros {",
+				"\tpublic static macro function now():Expr {",
+				"\t\tvar d = Date.now();",
+				"\t\tSys.println(\"clock macro ran\");",
+				"\t\treturn macro $v{d.getFullYear() > 2000};",
+				"\t}",
+				"\tpublic static macro function year():Expr {",
+				"\t\treturn macro $v{Date.now().getFullYear()};",
+				"\t}",
+				"\tpublic static macro function read(path:String):Expr {",
+				"\t\treturn macro $v{sys.io.File.getContent(path)};",
+				"\t}",
+				"\tpublic static macro function env(name:String):Expr {",
+				"\t\treturn macro $v{Sys.getEnv(name)};",
+				"\t}",
+				"\tpublic static macro function proc():Expr {",
+				"\t\tvar p = new sys.io.Process(\"node\", [\"-e\", \"process.stdout.write('7')\"]);",
+				"\t\tvar o = p.stdout.readAll().toString();",
+				"\t\tp.close();",
+				"\t\treturn macro $v{Std.parseInt(o)};",
+				"\t}",
+				"}"
+			].join("\n") + "\n",
+			"data.txt" => "data one"
+		];
+		var pdir = dir + "/" + target + "-nondet";
+		for (f => c in files)
+			write(pdir + "/" + f, c);
+		var args = ["-cp", "src", "-main", "Main", "-D", "hxmc.no-cache=lib"];
+		extraEnv = ["GATE_GREETING" => "hello", "HXMC_MODULE_CACHE_LOG" => "1"];
+		rmrf(dir + "/cache");
+		gate("nondet cold", target, pdir, args);
+		// every build: Clock (Date.now), Proc (a process), Stamp (Date.now in
+		// an inline variable) and Main with it, Plain, lib.Thing; User, Data,
+		// Env and Stable restored
+		var w = gate("nondet warm", target, pdir, args, null, 6);
+		check('$target: nondet warm: the clock macro ran again', w.log.indexOf("clock macro ran") >= 0);
+		check('$target: nondet warm: User restored (Clock typed again, its interface the same)', w.log.indexOf("User dirty") < 0 && w.log.indexOf("Stable dirty") < 0);
+		for (l in [
+			"Clock typed every build (macro called Date.now at src/Macros.hx:4)",
+			"Stamp typed every build (macro called Date.now at src/Macros.hx:9, its dependents with it)",
+			"Proc typed every build (macro called sys.io.Process at src/Macros.hx:18)",
+			"Plain typed every build (@:hxmc.noCache, its dependents with it)",
+			"lib.Thing typed every build (-D hxmc.no-cache)"
+		])
+			check('$target: nondet warm: the log says "$l"', w.log.indexOf(l) >= 0);
+		// the file the macro reads: a new date, the same content, then edited
+		exec(["touch", "-d", "1 hour ago", pdir + "/data.txt"]);
+		gate("nondet, data.txt with a new date", target, pdir, args, null, 6);
+		File.saveContent(pdir + "/data.txt", "data two");
+		var d = gate("nondet, data.txt edited", target, pdir, args, null, 7);
+		check('$target: nondet, data.txt edited: the log names it', d.log.indexOf("data.txt, read by a macro") >= 0);
+		gate("nondet, data.txt edited, warm", target, pdir, args, null, 6);
+		// the environment variable the macro reads
+		extraEnv.set("GATE_GREETING", "bonjour");
+		var e = gate("nondet, GATE_GREETING changed", target, pdir, args, null, 7);
+		check('$target: nondet, GATE_GREETING changed: the log names it', e.log.indexOf("environment variable GATE_GREETING, read by a macro") >= 0);
+		gate("nondet, GATE_GREETING changed, warm", target, pdir, args, null, 6);
+		extraEnv.set("GATE_GREETING", "hello");
+		gate("nondet, GATE_GREETING back", target, pdir, args, null, 6);
+		// an HTTP request: Net typed every build (the request fails: no network)
+		var net = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\ttrace(Net.status());\n\t\ttrace(Other.v());\n\t}\n}\n",
+			"src/Other.hx" => "class Other {\n\tpublic static function v():Int return 5;\n}\n",
+			"src/Net.hx" => "class Net {\n\tpublic static function status():String return NetMacro.request();\n}\n",
+			"src/NetMacro.hx" => "class NetMacro {\n\tpublic static macro function request():haxe.macro.Expr {\n\t\tvar h = new haxe.Http(\"http://127.0.0.1:1/\");\n\t\tvar r = \"none\";\n\t\th.onError = e -> r = \"error\";\n\t\th.request();\n\t\treturn macro $v{r};\n\t}\n}\n"
+		];
+		var ndir = dir + "/" + target + "-nethttp";
+		for (f => c in net)
+			write(ndir + "/" + f, c);
+		var nargs = ["-cp", "src", "-main", "Main"];
+		gate("nethttp cold", target, ndir, nargs);
+		var n = gate("nethttp warm", target, ndir, nargs);
+		check('$target: nethttp warm: Net typed every build, Other restored',
+			n.log.indexOf("Net typed every build (macro called sys.net.Socket") >= 0 && n.log.indexOf("Other dirty") < 0);
+		extraEnv = new Map();
+	}
 
 	static function main() {
 		var withPort = Sys.args().contains("--port");
@@ -250,8 +370,11 @@ class ModuleCacheCheck {
 		mkdirs(dir);
 		copyTree("bin/hxmc/std", dir + "/std");
 		copyTree("haxe/upstream/std", dir + "/upstream-std");
+		// (--nondet: only the nondeterministic macros' cases)
+		var only = Sys.args().contains("--nondet");
 		for (target in ["hxmc", "js", "interp", "haxe-hxmc"]) {
 			for (p in programs()) {
+				if (only) continue;
 				// (through haxe for hxmc: the hello program)
 				if (target == "haxe-hxmc" && p.name != "hello") continue;
 				var pdir = dir + "/" + target + "-" + p.name;
@@ -358,8 +481,10 @@ class ModuleCacheCheck {
 				}
 			}
 		}
+		for (target in ["hxmc", "js", "interp"])
+			nondeterministic(target);
 		// the cache off by HXMC_MODULE_CACHE=0 although the define asks for it
-		{
+		if (!only) {
 			var pdir = dir + "/hxmc-hello";
 			var r = exec([tool, pdir + "/out.off", "-cp", "src", "-main", "Main", "-D", "hxmc.module-cache", "-cp", dir + "/std", "--custom-target", "hxmc"],
 				{cwd: pdir, env: env(false), merge: true});

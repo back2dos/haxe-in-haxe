@@ -980,6 +980,10 @@ class FnLower {
 						var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_aget"), [coerce(xs[0], tyOf(a), TRef(RAny)), coerce(xs[1], tyOf(i), TI32)], TRef(RAny)));
 						coerce(r, TRef(RAny), tyOf(e));
 				}
+			case TBinop(op = OpBoolAnd | OpBoolOr | OpEq | OpNotEq | OpLt | OpLte | OpGt | OpGte, a, b) if (tyOf(e) != TBool):
+				// a Bool typed as something else (the optimizer's `c && x` for
+				// `c ? x : false`, typed as the conditional was: Dynamic, a box)
+				coerce(binop(op, a, b, e), TBool, tyOf(e));
 			case TBinop(op, a, b): binop(op, a, b, e);
 			case TUnop(op, flag, e1): unop(op, flag, e1, e);
 			case TCall(f, cargs): call(f, cargs, e);

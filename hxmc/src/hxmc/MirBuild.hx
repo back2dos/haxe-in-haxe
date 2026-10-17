@@ -1282,7 +1282,8 @@ class MirBuild {
 
 	static function arrKind(t:Ty):Int
 		return switch t {
-			case TI32 | TBool: Abi.AK_I32;
+			case TI32: Abi.AK_I32;
+			case TBool: Abi.AK_BOOL;
 			case TF64: Abi.AK_F64;
 			case TI64: Abi.AK_I64;
 			case _: Abi.AK_PTR;
@@ -1372,7 +1373,7 @@ class MirBuild {
 		cur = c2;
 		var len = loadM(Opt.MHdr, I32, 4, av, 0);
 		var cap = op2(And, I32, loadM(Opt.MHdr, I32, 4, d, -8), iconst(0x0FFFFFFF));
-		if (k == Abi.AK_I32) cap = op2(Shl, I32, cap, iconst(1));
+		if (k == Abi.AK_I32 || k == Abi.AK_BOOL) cap = op2(Shl, I32, cap, iconst(1));
 		br(cmp(CULt, len, cap), fast, slow);
 		seal(fast);
 		seal(slow);
@@ -1425,7 +1426,7 @@ class MirBuild {
 		jmp(join);
 		cur = slow;
 		var name = switch k {
-			case Abi.AK_I32: "hx_aget_i_slow";
+			case Abi.AK_I32 | Abi.AK_BOOL: "hx_aget_i_slow";
 			case Abi.AK_F64: "hx_aget_f_slow";
 			case Abi.AK_I64: "hx_aget_l_slow";
 			case _: "hx_aget_p_slow";

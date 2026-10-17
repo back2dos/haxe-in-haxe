@@ -140,6 +140,8 @@ class Lower {
 					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
 					// @:hxmc.native: the runtime of the native targets only (over C libraries)
 					if (hasMeta(":hxmc.native", c.clMeta) && targetOs == 3) continue;
+					// @:hxmc.wasmgc: the runtime of -D hxmc.wasm-gc only, which has no other
+					if (hasMeta(":hxmc.wasmgc", c.clMeta) != wasmGc) continue;
 					// @:hxmc.os("windows"): the runtime of one system only
 					var os = metaString(":hxmc.os", c.clMeta);
 					if (os != null && targetOs >= 0 && ["linux", "macos", "windows", "wasm"].indexOf(os) != targetOs) continue;
@@ -173,6 +175,8 @@ class Lower {
 	public static var targetOs = -1;
 	public static var targetArm = -1;
 	public static var targetCode = -1;
+	// -D hxmc.wasm-gc (hxmc.wasmgc): the runtime's Haxe implementations are those of @:hxmc.wasmgc classes
+	public static var wasmGc = false;
 
 	// a condition on the target (Mem.os, Mem.arm, Mem.target compared with
 	// constants) as a constant (EInt), when it is one: FnLower lowers only
