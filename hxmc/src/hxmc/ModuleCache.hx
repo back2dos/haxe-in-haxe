@@ -356,7 +356,10 @@ class ModuleCache {
 		var used = dir + "used";
 		if (!FileSystem.exists(used) || CacheDir.now() - CacheDir.mtime(used) > CacheDir.USED_REFRESH)
 			if (!CacheDir.touch(used)) return null;
-		CacheDir.trim(modules, dir, ModuleStore.sweep);
+		CacheDir.trim(modules, dir, d -> {
+			ModuleStore.sweep(d);
+			ObjectStore.sweep(d);
+		});
 		var key = Fingerprint.hash(["hxmc-modules", Sys.getCwd(), Sys.getEnv("HAXE_STD_PATH"), com.classPaths.asStringList().join("\n")].join("\x00"));
 		var s = new ModuleCacheState(dir, dir + key + ".idx", com);
 		s.signs[0] = context.CommonCache.getCacheSign(com);

@@ -124,7 +124,16 @@ class CacheDir {
 			var names = try FileSystem.readDirectory(d) catch (_:Dynamic) [];
 			if (d == mine) {
 				for (f in names) {
-					if (FileSystem.isDirectory(d + f)) continue;
+					// (the blobs and objects: in the total, removed by sweep)
+					if (FileSystem.isDirectory(d + f)) {
+						for (g in try FileSystem.readDirectory(d + f) catch (_:Dynamic) [])
+							if (FileSystem.isDirectory(d + f + "/" + g)) {
+								for (h in try FileSystem.readDirectory(d + f + "/" + g) catch (_:Dynamic) [])
+									total += size(d + f + "/" + g + "/" + h);
+							} else
+								total += size(d + f + "/" + g);
+						continue;
+					}
 					var sz = size(d + f);
 					total += sz;
 					// (the leftovers of runs that did not finish)

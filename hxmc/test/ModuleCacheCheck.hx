@@ -136,7 +136,8 @@ class ModuleCacheCheck {
 
 	static function env(cache:Bool):Map<String, Null<String>>
 		return [
-			"HXMC_CACHE" => dir + "/cache",
+			// (the builds without the cache keep their objects apart)
+			"HXMC_CACHE" => dir + (cache ? "/cache" : "/refcache"),
 			"HXMC_MODULE_CACHE" => cache ? "1" : "0",
 			"HXMC_MODULE_CACHE_LOG" => null,
 			"HXMC_STATS" => "1",
@@ -274,6 +275,16 @@ class ModuleCacheCheck {
 					gate('cutoff, a body of Ping edited (a cycle with Pong)', target, pdir, p.args, 1);
 					File.saveContent(ping, p0);
 					gate('cutoff, Ping back', target, pdir, p.args);
+				}
+				if (name == "multi" && target == "hxmc") {
+					// a second output of the same program: every object from the store
+					var o2 = pdir + "/out2.hxmc";
+					rmrf(o2);
+					var r = exec([tool, o2].concat(p.args).concat(["-cp", dir + "/std", "--custom-target", "hxmc"]), {cwd: pdir, env: env(true), merge: true});
+					var re = ~/hxmc: modules (\d+): (\d+) cached, (\d+) compiled/;
+					var shared = r.code == 0 && re.match(r.out) && re.matched(3) == "0" && re.matched(1) == re.matched(2);
+					var first = build(target, pdir, p.args, true);
+					check('hxmc: multi, a second output shares the objects (${re.matched(0)})', shared && same(first.out, File.getBytes(o2)));
 				}
 				if (name == "multi") {
 					// a new file shadows a module (src2, given last, comes first)

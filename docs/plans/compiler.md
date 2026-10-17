@@ -55,7 +55,7 @@ archives, without it.
   reads); a dependency with such marks is restored only together with its
   cycle, so its marks stay those of its users.
 - Measured (one 4-core VM shared with other builds; time to the start of
-  lowering, then the whole build with the objects cached in `<out>.hxmc/`,
+  lowering, then the whole build with the objects cached,
   and the modules typed or processed again; before: the signature-keyed
   packs of the previous step):
 
@@ -123,9 +123,9 @@ Open:
   `onAfterTyping` or `onAfterGenerate`, or defining something, while
   typing makes the build write nothing (a restored module would not do it
   again).
-- **Back half**: per-module objects move to the same central store, keyed
-  by the hash of the lowered IR (`Fingerprint`), shared by every output
-  and target ("Central object cache" below). DCE is whole-program: move it
+- **Back half**: the per-module objects are in the same store, keyed by
+  the hash of the lowered IR (`Fingerprint`), shared by every output
+  ("Central object cache" below). Next: DCE is whole-program: move it
   to link time (reachability over symbols with Haxe's rules: `@:keep`,
   implemented interfaces, overrides of reachable fields, reflection roots;
   reflection tables generated from the live set), so a module's object
@@ -150,14 +150,17 @@ Open:
 
 ## Central object cache and quieter builds
 
-Today every executable gets `<out>.hxmc/` next to it (per-module objects
-keyed by code, tool and target, plus `build.key` for the up-to-date check;
-`Driver.hx`, `UpToDate.hx`), and the Makefile's build rule writes
-`<out>.log` (shown only on failure). Plan: one cache directory instead, the
-user cache directory where the typed modules already live (same trim),
-overridable with `-D hxmc.cache=<dir>`, keyed by the hash of the lowered IR
-so different outputs and targets share it; logs only on request. Keeps
-users' output directories and `bin/` clean.
+Done for the objects (2026-10-17, `ObjectStore.hx`): the per-module
+objects live in the module cache's store (`<cache>/modules/<tool>/o/`),
+named by the hash of their lowered IR with the tool and the target
+(`Fingerprint`) and the module, so every output and project compiling the
+same code for the same target shares them; per output, `<hash>.objs` names
+the objects its last build used (the trim removes the objects no `.objs`
+names after a day, the `.objs` with their last use) and `<hash>.key` is the
+up-to-date record (`UpToDate.hx`). `<out>.hxmc/` remains only where the
+cache directory cannot be written (and under WASI). Left: logs only on
+request (the Makefile's build rule still writes `<out>.log`, shown on
+failure); `-D hxmc.cache=<dir>` beside `HXMC_CACHE`.
 
 ## Faster rebuilds, smaller outputs
 

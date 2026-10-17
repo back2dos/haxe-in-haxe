@@ -111,8 +111,9 @@ whichever it linked last (both orders occur), so use lix's shim with the
 
 ## Fast rebuilds
 
-Fast rebuilds: executables keep a `<out>.hxmc/` directory of compiled modules
-(only changed modules are compiled again), and the compilation server keeps
+Fast rebuilds: the typed modules and the compiled objects of every build are
+kept in the user cache directory (`HXMC_CACHE` overrides; only what changed
+is typed and compiled again, and outputs share objects), and the compilation server keeps
 typed modules, lowered bodies and compiled objects in memory:
 `haxe --wait 6000`, then `haxe --connect 6000 build.hxml` (a no-change rebuild
 of a small program in about 0.4 s).

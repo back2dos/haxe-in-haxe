@@ -8,8 +8,9 @@
 #   make quick|check|full     the tiered checks (hxmc/test/Tiers.hx)
 #   make release TARGET=macos-arm64   bin/release/<TARGET>/haxe[.exe]
 #
-# Outputs go to bin/ (ignored by Git). hxmc keeps an object per module next to
-# each output (<out>.hxmc/) and recompiles only the modules that changed.
+# Outputs go to bin/ (ignored by Git). hxmc keeps the typed modules and an
+# object per module in the user cache directory (HXMC_CACHE overrides) and
+# types and compiles again only what changed.
 
 # --- Variables (override on the command line: make release TARGET=windows-arm64) ---
 

@@ -102,10 +102,16 @@ class CacheCheck {
 		File.saveContent(orphan, "orphan");
 		backdate(orphan, "3 days ago");
 		var blobs = [for (d in FileSystem.readDirectory(ta[0] + "/b")) for (f in FileSystem.readDirectory(ta[0] + "/b/" + d)) f].length;
+		// (and an object no output's list names)
+		var orphanObj = ta[0] + "/o/0000000000000000-Orphan.o";
+		File.saveContent(orphanObj, "orphan");
+		backdate(orphanObj, "3 days ago");
+		var objects = FileSystem.readDirectory(ta[0] + "/o").length;
 		File.saveContent(cache + "/modules/trim.txt", "0");
 		check("a build after a day trims", build(a, std, cache));
 		check("a blob no index names is gone, the others stay", !FileSystem.exists(orphan)
 			&& [for (d in FileSystem.readDirectory(ta[0] + "/b")) for (f in FileSystem.readDirectory(ta[0] + "/b/" + d)) f].length == blobs - 1);
+		check("an object no output names is gone, the others stay", !FileSystem.exists(orphanObj) && FileSystem.readDirectory(ta[0] + "/o").length == objects - 1);
 		check("an index unused for a month is gone, the build's stays", !FileSystem.exists(stale) && packs(ta[0]).length > 0);
 		check("the unused tool directory is gone, the recent one stays", tools(cache).join(",") == ta[0] && packs(ta[0]).length > 0);
 		check("its last use refreshed", Date.now().getTime() - mtime(ta[0] + "/used") < 600000);

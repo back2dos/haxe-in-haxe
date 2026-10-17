@@ -166,10 +166,14 @@ cache directory (`$XDG_CACHE_HOME/hxmc` or `~/.cache/hxmc`, macOS
 `~/Library/Caches/hxmc`, Windows `%LOCALAPPDATA%\hxmc\cache`; `HXMC_CACHE`
 overrides; one that cannot be written is not used), in `modules/<tool>/`
 for each build of the tool: an index per working directory, class paths
-and std (`<key>.idx`) and the modules' HXB in blobs (`b/`), read only for
-the modules a build restores; once a day a build removes the tool
-directories and indexes unused for 14 days, the least recently used beyond
-1 GB, and the blobs no index names (`CacheDir.hx`, checked by
+and std (`<key>.idx`), the modules' HXB in blobs (`b/`), read only for the
+modules a build restores, and the compiled objects (`o/`, `ObjectStore.hx`:
+named by the hash of their lowered IR, shared by every output; per output
+the list of objects its last build used and its up-to-date record; the
+objects stay next to the output, in `<out>.hxmc/`, only where the cache
+directory cannot be written); once a day a build removes the tool
+directories, indexes and object lists unused for 14 days, the least
+recently used beyond 1 GB, and the blobs and objects nothing names (`CacheDir.hx`, checked by
 `hxmc/test/CacheCheck.hx`). An index keeps variants of each module, each
 with the defines it read (its file's conditions, its macros'
 `Context.defined`, and those the compiler read in the build that typed
