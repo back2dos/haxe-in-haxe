@@ -601,35 +601,19 @@ class ModuleStore {
 					off += v.blobSize;
 				}
 			o.close();
-			return CacheDir.replace(tmp, p);
+			if (!CacheDir.replace(tmp, p)) return false;
+			CacheDir.wrote(off);
+			return true;
 		} catch (_:Dynamic) {
 			try FileSystem.deleteFile(tmp) catch (_:Dynamic) {}
 			return false;
 		}
 	}
 
-	// the packs no index of dir names, written before a day ago, removed
-	// (CacheDir.trim's sweep)
-	public static function sweep(dir:String) {
-		var keep = new Map<String, Bool>();
-		for (n in try FileSystem.readDirectory(dir) catch (_:Dynamic) [])
-			if (StringTools.endsWith(n, ".idx")) {
-				var ix = readIndex(dir + n);
-				if (ix == null) continue;
-				for (v in ix.variants)
-					keep.set(v.blob + ".pk", true);
-			}
-		var t = CacheDir.now();
-		var b = dir + "b/";
-		for (f in try FileSystem.readDirectory(b) catch (_:Dynamic) []) {
-			var p = b + f;
-			if (FileSystem.isDirectory(p)) {
-				// (a directory of single blobs, as earlier tools kept them)
-				for (x in try FileSystem.readDirectory(p) catch (_:Dynamic) [])
-					if (t - CacheDir.mtime(p + "/" + x) > 86400) try FileSystem.deleteFile(p + "/" + x) catch (_:Dynamic) {}
-				try FileSystem.deleteDirectory(p) catch (_:Dynamic) {}
-			} else if (!keep.exists(f) && t - CacheDir.mtime(p) > 86400)
-				try FileSystem.deleteFile(p) catch (_:Dynamic) {}
-		}
+	// the packs an index names (CacheDir.trim: removed with the last index
+	// naming them)
+	public static function packsOf(file:String):Array<String> {
+		var ix = readIndex(file);
+		return ix == null ? [] : [for (v in ix.variants) "b/" + v.blob + ".pk"];
 	}
 }

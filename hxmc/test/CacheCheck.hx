@@ -9,8 +9,8 @@ using StringTools;
 // the tool, written and then read, two builds of the tool side by side, the
 // trim of a tool directory and of an index unused for a month while the
 // recent ones stay, of a pack of blobs no index names (and of the single
-// blobs earlier tools wrote),
-// and a cache that cannot be written (a build without it). Unix (touch -d
+// blobs earlier tools wrote), a cap held as builds write past it
+// (HXMC_CACHE_SIZE), and a cache that cannot be written (a build without it). Unix (touch -d
 // backdates files).
 //   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run CacheCheck
 class CacheCheck {
@@ -22,12 +22,14 @@ class CacheCheck {
 		if (!ok) failures++;
 	}
 
-	// a build of the hello program by tool with the class path std, the cache in
-	// cache; whether it built and runs
-	static function build(tool:String, std:String, cache:String):Bool {
-		var r = exec([tool, dir + "/hello/m", "-cp", dir + "/hello", "-main", "Main", "-cp", std, "--custom-target", "hxmc"], {
+	// a build of the hello program (or another of dir's, prog) by tool with
+	// the class path std, the cache in cache (its cap: size); whether it
+	// built and runs
+	static function build(tool:String, std:String, cache:String, prog = "hello", ?size:String):Bool {
+		var r = exec([tool, dir + "/" + prog + "/m", "-cp", dir + "/" + prog, "-main", "Main", "-cp", std, "--custom-target", "hxmc"], {
 			env: [
 				"HXMC_CACHE" => cache,
+				"HXMC_CACHE_SIZE" => size,
 				"HXMC_MODULE_CACHE" => null,
 				"HXMC_STATS" => null,
 				"HXMC_RT_DIR" => FileSystem.fullPath("bin/hxmc/rt")
@@ -38,7 +40,15 @@ class CacheCheck {
 			Sys.println(tail(r.out, 600));
 			return false;
 		}
-		return exec([dir + "/hello/m"]).out == "hi\n";
+		return exec([dir + "/" + prog + "/m"]).out == "hi\n";
+	}
+
+	// the bytes of the files under d
+	static function du(d:String):Float {
+		var n = 0.0;
+		for (f in FileSystem.readDirectory(d))
+			n += FileSystem.isDirectory(d + "/" + f) ? du(d + "/" + f) : FileSystem.stat(d + "/" + f).size;
+		return n;
 	}
 
 	// <cache>/modules/<tool>/ directories
@@ -123,6 +133,36 @@ class CacheCheck {
 		check("its last use refreshed", Date.now().getTime() - mtime(ta[0] + "/used") < 600000);
 		check("the trim stamp renewed", Std.parseFloat(File.getContent(cache + "/modules/trim.txt")) > 1e9);
 		check("the other tool writes its store again", build(b, std, cache) && tools(cache).length == 2);
+
+		// a cap of 3 MB (HXMC_CACHE_SIZE; a hello program's store is about 2 MB)
+		// held as builds write past it: the other tool's directory goes first,
+		// then the least recently used indexes with their packs; the builds
+		// still work, and a warm one finds its store
+		var capped = dir + "/capped", cap = 3 * 1024 * 1024;
+		for (i in 0...4) {
+			mkdirs(dir + "/p" + i);
+			File.saveContent(dir + "/p" + i + "/Main.hx", 'class Main { static function main() { var a = [$i]; Sys.println("hi"); } }\n');
+		}
+		check("capped: a build by another tool", build(b, std, capped, "hello", "3M"));
+		var ok = true, under = true;
+		for (i in 0...4) {
+			ok = ok && build(a, std, capped, "p" + i, "3M");
+			under = under && du(capped + "/modules") <= cap;
+		}
+		check("capped: four programs build past the cap", ok);
+		check("capped: the store stays below the cap after each", under);
+		var left = tools(capped);
+		check("capped: the other tool's directory went first", left.length == 1 && left[0].endsWith(ta[0].substr(ta[0].lastIndexOf("/")))
+			&& packs(left[0]).length > 0 && packs(left[0]).length < 4);
+		check("capped: the size kept is the store's", {
+			var n = 0.0;
+			for (l in (try File.getContent(capped + "/modules/size.txt") catch (_:Dynamic) "").split("\n"))
+				if (l != "") n += Std.parseFloat(l);
+			Math.abs(n - du(capped + "/modules")) < 4096;
+		});
+		check("capped: a warm build works and keeps its index", build(a, std, capped, "p3", "3M") && packs(left[0]).length > 0
+			&& du(capped + "/modules") <= cap);
+		check("capped: a removed program builds again", build(a, std, capped, "p0", "3M") && du(capped + "/modules") <= cap);
 
 		// a cache that cannot be written: the build types everything
 		File.saveContent(dir + "/file", "");

@@ -173,8 +173,15 @@ named by the hash of their lowered IR, shared by every output; per output
 the list of objects its last build used and its up-to-date record; the
 objects stay next to the output, in `<out>.hxmc/`, only where the cache
 directory cannot be written); once a day a build removes the tool
-directories, indexes and object lists unused for 14 days, the least
-recently used beyond 1 GB, and the packs and objects nothing names (`CacheDir.hx`, checked by
+directories, indexes and object lists unused for 14 days and the packs and
+objects nothing names. The cap (1 GB, `HXMC_CACHE_SIZE`) holds as builds
+write: a build that wrote adds its bytes to `modules/size.txt` (one line
+appended; one that wrote nothing reads nothing), and when the sum passes
+the cap it trims at once, down to 80%: the other tools' directories first,
+then indexes and object lists least recently used first, each pack or
+object with the last one naming it. Removals tolerate builds running
+beside (a tool directory is renamed before it is removed; a pack or object
+found missing is typed or compiled again) (`CacheDir.hx`, checked by
 `hxmc/test/CacheCheck.hx`). An index keeps variants of each module, each
 with the defines it read (its file's conditions, its macros'
 `Context.defined`, and those the compiler read in the build that typed
