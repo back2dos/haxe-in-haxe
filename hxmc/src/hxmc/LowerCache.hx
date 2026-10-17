@@ -116,12 +116,13 @@ enum LCall {
 	CStaticClos(f:FuncInfo, r:LambdaInfo);
 	CHostClos(name:String, sig:SigInfo, self:Null<Ty>, r:LambdaInfo);
 	CCtorClos(ci:CtorInfo, sig:SigInfo, r:LambdaInfo);
-	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo}>, owner:FuncInfo, r:LambdaInfo);
+	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
 	CAdapter(from:SigInfo, to:SigInfo, r:LambdaInfo);
 	CLambda(sig:SigInfo, captures:Array<Local>, name:String, module:String, r:LambdaInfo);
 	CSelector(name:String, sig:SigInfo, r:Int);
 	CNeedsDispatch(c:TClass, name:String, r:Bool);
 	CLookup(c:TClass, name:String, r:Null<{cls:TClass, field:TClassField}>);
+	CImplementors(c:TClass, name:String, r:Array<{cls:TClass, field:TClassField}>);
 	CRootDecl(c:TClass, name:String, r:Null<TClassField>);
 	CSuperOf(ci:ClassInfo, r:Null<TClass>);
 	CRoot(r:ClassInfo);
@@ -388,7 +389,7 @@ class CachedLower extends Lower {
 		return r;
 	}
 
-	override public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo}>, owner:FuncInfo):LambdaInfo {
+	override public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo):LambdaInfo {
 		depth++;
 		var r = super.boundClosure(f, dispatch, owner);
 		depth--;
@@ -436,6 +437,14 @@ class CachedLower extends Lower {
 		var r = super.lookupMethod(c, name);
 		depth--;
 		log(CLookup(c, name, r));
+		return r;
+	}
+
+	override public function implementors(c:TClass, name:String):Array<{cls:TClass, field:TClassField}> {
+		depth++;
+		var r = super.implementors(c, name);
+		depth--;
+		log(CImplementors(c, name, r));
 		return r;
 	}
 
@@ -498,7 +507,7 @@ class CachedLower extends Lower {
 			case CCtorClos(ci, s, r):
 				bindLambda(r, ctorClosure(obj(ci), obj(s)));
 			case CBoundClos(f, d, owner, r):
-				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig)}, obj(owner)));
+				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), cls: d.cls}, obj(owner)));
 			case CAdapter(from, to, r):
 				bindLambda(r, adapter(obj(from), obj(to)));
 			case CLambda(s, caps, name, module, r):
@@ -515,6 +524,11 @@ class CachedLower extends Lower {
 			case CLookup(k, name, r):
 				var n = lookupMethod(k, name);
 				if ((n == null) != (r == null) || n != null && (n.cls != r.cls || n.field != r.field)) mismatch("method " + name + " changed");
+			case CImplementors(k, name, r):
+				var n = implementors(k, name);
+				if (n.length != r.length) mismatch("implementations of " + name + " changed");
+				for (i in 0...n.length)
+					if (n[i].cls != r[i].cls || n[i].field != r[i].field) mismatch("implementations of " + name + " changed");
 			case CRootDecl(k, name, r):
 				if (rootDecl(k, name) != r) mismatch("declaration of " + name + " changed");
 			case CSuperOf(ci, r):

@@ -109,6 +109,7 @@ class Gen {
 			// operand evaluation order is unspecified: Eval and JS differ on `f() + (++x)`
 			feats.set("sideeffects", false);
 		}
+		Types.intAsFloat = !portable; // (the same for every program of a run)
 	}
 
 	inline function on(f:String):Bool
@@ -1184,7 +1185,8 @@ class Gen {
 				var a = expr(r.chance(70) ? TFloat : TInt, ctx, d - 1);
 				var b = expr(r.chance(70) ? TFloat : TInt, ctx, d - 1);
 				e(TFloat, [S("("), N(a), S(" " + op + " "), N(b), S(")")]);
-			case 2: e(TFloat, [N(expr(TInt, ctx, d - 1))]);
+			// (portable: converted, Types.intAsFloat)
+			case 2: portable ? e(TFloat, [S("("), N(expr(TInt, ctx, d - 1)), S(" + 0.0)")]) : e(TFloat, [N(expr(TInt, ctx, d - 1))]);
 			case 3:
 				var f = r.pick(["Math.sqrt(Math.abs(", "Math.abs(", "Math.ffloor(", "Math.fceil("]);
 				var close = f.indexOf("sqrt") >= 0 ? "))" : ")";

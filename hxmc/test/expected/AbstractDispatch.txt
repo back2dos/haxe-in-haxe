@@ -1,0 +1,4 @@
+exit 0
+no instance
+42
+21
