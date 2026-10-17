@@ -42,16 +42,18 @@ class LowerCache {
 	public function new() {}
 
 	var target = -1; // the target the bodies were lowered for (they fold its tests)
+	var platform = -1; // (and its Apple platform: Mem.platform)
 	var lines = false; // and whether they have their positions (Lower.lines)
 
 	public function lower(main:TClass, types:Array<ModuleType>, basic:BasicTypes):Program {
 		hits = misses = 0;
 		why = null;
 		build++;
-		if (Lower.targetCode != target || Lower.lines != lines) {
+		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
 			target = Lower.targetCode;
+			platform = Lower.targetPlatform;
 			lines = Lower.lines;
 		}
 		var l = new CachedLower(this, true);

@@ -36,6 +36,10 @@ extern class Mem {
 	// 8 linux-arm64 with glibc (-D hxmc.libc=glibc), 9 android-x86_64, 10
 	// android-arm64 (Bionic, os() Linux's: `Mem.target() >= 9` is Android)
 	static function target():Int;
+	// the Apple platform where os() is 1: 0 macOS, 1 iOS, 2 the iOS simulator
+	// (target() 3 for both: macos-arm64's libSystem and layouts; packages
+	// only, not the runtime: the committed stage0 does not know it)
+	static function platform():Int;
 	// a frame area of `bytes` (a constant), 16-byte aligned, valid while the function runs
 	static function stack(bytes:Int):Ptr;
 	// unsigned comparison

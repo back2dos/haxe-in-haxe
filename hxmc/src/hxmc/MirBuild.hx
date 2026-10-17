@@ -2463,6 +2463,7 @@ class MirBuild {
 			case "os": iconst(abi.osCode());
 			case "arm": iconst(abi.arm ? 1 : 0);
 			case "target": iconst(targetCode(abi));
+			case "platform": iconst(abi.platformCode());
 			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
 			// (a struct value's memory: FnLower.newSlot)
 			case "structSlot": stackAddr(f.slot((intLiteral(args[0], "a struct slot") + 7) & ~7, intLiteral(args[1], "a struct slot")));

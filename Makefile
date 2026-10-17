@@ -39,6 +39,8 @@ GFX_TARGET ?= $(HOST)
 AUDIO_TARGET ?= $(HOST)
 # `make android-programs`, `android-check`, `android-device-check`: android-x86_64 or android-arm64
 ANDROID_TARGET ?= android-x86_64
+# `make ios-programs`, `ios-check`: ios-sim-arm64 or ios-arm64 (`ios-sim-check`: the simulator's, on a Mac)
+IOS_TARGET ?= ios-sim-arm64
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -109,7 +111,7 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
-	android-programs android-check android-device-check shared-check \
+	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz theme-check theme-fidelity-check ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
@@ -172,6 +174,9 @@ help:
 ## android-programs  bin/android/ANDROID_TARGET/*.apk: APKs written by hxmc (android-x86_64, android-arm64)
 ## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature, classes.dex)
 ## android-device-check  the Android tests on the device or emulator adb reaches (android.sh, android-native.sh, android-mix.sh)
+## ios-programs  bin/ios/IOS_TARGET/*.app, Cube.ipa: iOS apps written by hxmc (ios-sim-arm64, ios-arm64); bin/ios/SimTap (macOS)
+## ios-check   their structure (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature)
+## ios-sim-check  IosTest on an iPhone simulator (a Mac with Xcode: packages/gfx/test/ios.sh)
 ## shared-check  shared libraries of the glibc mode (-D hxmc.shared), loaded by an hxmc program (hxmc/test/SharedCheck.hx)
 ## gfx-check   packages/gfx: the examples (triangle, cube, instances, targets, mips, formats) headless and in a window, against
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
@@ -568,6 +573,23 @@ android-device-check: android-programs
 	sh packages/gfx/test/android.sh bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)
 	sh packages/ui/test/android-native.sh bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk bin/android/$(ANDROID_TARGET)
 	sh packages/ui/test/android-mix.sh bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk bin/android/$(ANDROID_TARGET)
+
+# iOS: app bundles written by hxmc (hxmc/src/hxmc/ios/Bundle.hx), IosTest
+# (packages/gfx/test/IosTest.hx) and the cube example (also as an .ipa);
+# SimTap (packages/gfx/test/SimTap.hx), a macOS program that taps the
+# simulator for ios.sh
+ios-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/IosTest.app,$(GFX_CP) -main IosTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.gfxtest)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.app,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.ipa,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
+	$(call hxmc,bin/ios/SimTap,-cp packages/os/src -cp packages/gfx/test -main SimTap $(HXMC_ARGS) -D hxmc.target=macos-arm64)
+# their structure without a Mac (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature; llvm-objdump when there)
+ios-check: ios-programs
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run IosCheck $(foreach a,IosTest.app Cube.app Cube.ipa,bin/ios/$(IOS_TARGET)/$(a))
+# IosTest on an iPhone simulator (packages/gfx/test/ios.sh: a Mac with Xcode)
+ios-sim-check:
+	$(MAKE) --no-print-directory ios-programs IOS_TARGET=ios-sim-arm64
+	sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)

@@ -158,6 +158,20 @@ against `cube.png` by the rule above, frames in the activity's window, a tap
 and a key as events, Home and back as Suspend and Resume, Back; a screenshot
 and the log). CI's `android` job runs them, the last on an x86-64 emulator
 with KVM (not a required check yet).
+`make ios-check IOS_TARGET=ios-arm64|ios-sim-arm64`: the app bundles of
+`IosTest` and the cube, and the cube's `.ipa` (`hxmc/test/IosCheck.hx`: the
+bundle's files, `Info.plist` read back, the Mach-O's header, build version,
+dylibs and signature's place, the code signature's CodeDirectory: its
+identifier, page hashes and special slots recomputed against the
+`Info.plist`, requirements and `CodeResources`; `llvm-objdump` where
+installed); `make ios-sim-check` on a Mac with Xcode: IosTest on a new
+iPhone simulator (`packages/gfx/test/ios.sh`: `codesign --verify` and
+`plutil -lint` first, the cube headless on the simulator's Metal against
+`cube.png`, frames in the window, its pixels lit, a tap on the Simulator's
+window (`SimTap.hx`) as MouseDown and MouseUp, Settings and back as Suspend
+and Resume; the screenshot, stdout and the system log). CI's `ios` job runs
+the first on Linux, `ios-simulator` the second on a macOS runner (not
+required checks yet).
 `gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
 writes, R8 and RGBA8 textures, blending, scissor) against
 `packages/gfx/test/features.png`.

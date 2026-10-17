@@ -39,6 +39,9 @@
 #     AndroidMixTest (a GPU view among views) and AndroidTextTest (the input
 #     method in a drawn window) on an x86-64 emulator (not required yet:
 #     continue-on-error).
+#   - ios: the app bundles for ios-arm64 and ios-sim-arm64 checked, then
+#     (ios-simulator, on a macOS runner) IosTest on an iPhone simulator (not
+#     required yet: continue-on-error).
 # - conformance: the port against the reference: HXB of the upstream suites
 #   and macro cases, display requests, the compilation server and its
 #   JSON-RPC methods, upstream's target suites compiled by both and compared
@@ -750,6 +753,70 @@ jobs:
             bin/android/android-x86_64/*.txt
             bin/android/android-x86_64/*.xml
             bin/android/*/*.apk
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # iOS (docs/hxmc.md, "iOS"): the app bundles hxmc writes for ios-sim-arm64
+  # and ios-arm64 (and the cube's .ipa), checked without a Mac (make
+  # ios-check: Info.plist, Mach-O, the code signature; llvm-objdump), then
+  # IosTest.app on an iPhone simulator of a macOS runner (ios-simulator:
+  # ios.sh, codesign --verify, the cube headless against cube.png, frames in
+  # the window, a tap, Settings and back; the screenshot, stdout and the
+  # system log as an artifact). Not required checks yet (continue-on-error),
+  # as android.
+  ios:
+    needs: [changes, rt]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.libs == 'true') }}
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.rt_hit != 'true'
+        with: {name: rt, path: bin/hxmc/rt}
+      - name: The app bundles and their checks
+        run: |
+          set -ex
+          make rt && touch bin/hxmc/rt/*/*.o
+          make ios-check IOS_TARGET=ios-arm64
+          make ios-check IOS_TARGET=ios-sim-arm64
+          du -sh bin/ios/*/*.app bin/ios/*/*.ipa
+          tar czf bin/ios.tar.gz -C bin ios
+      - uses: actions/upload-artifact@v7
+        with: {name: ios, path: bin/ios.tar.gz, retention-days: 7}
+
+  ios-simulator:
+    needs: [changes, ios]
+    if: ${{ !cancelled() && needs.ios.result == 'success' }}
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            packages/gfx/test
+      - uses: actions/download-artifact@v8
+        with: {name: ios, path: dl}
+      - name: IosTest on an iPhone simulator
+        run: |
+          set -ex
+          mkdir -p bin && tar xzf dl/ios.tar.gz -C bin
+          xcodebuild -version
+          sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ios-simulator
+          path: |
+            bin/ios/ios-sim-arm64/*.png
+            bin/ios/ios-sim-arm64/*.txt
           retention-days: 7
           if-no-files-found: ignore
 
