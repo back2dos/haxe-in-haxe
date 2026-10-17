@@ -238,8 +238,8 @@ class Census {
 			} else if (t == Types.T_ARRAY && k == K_OBJ) {
 				var len = Mem.getI32(o, 0), kind = Mem.getI32(o, 4);
 				var d = Mem.getPtr(o, 8);
-				var cap = d.isNull() ? 0 : (nslotsOf(d) << (kind == Types.AK_I32 ? 1 : 0));
-				var es = kind == Types.AK_I32 ? 4 : 8;
+				var cap = d.isNull() ? 0 : (nslotsOf(d) << (Types.ak4(kind) ? 1 : 0));
+				var es = Types.ak4(kind) ? 4 : 8;
 				aN++;
 				aHdr += b;
 				if (d.isNull()) aNodata++;

@@ -1,0 +1,69 @@
+exit 0
+BoolValues.hx:61: [true,false]
+[true,false]
+[true,false]
+true|false
+[true,false]
+[true,false] false
+[true,false] true TBool
+a[0]: true TBool bool=true int=false ==true:true ==1:false
+a[1]: false TBool bool=true int=false ==true:false ==1:false
+dd: true TBool bool=true int=false ==true:true ==1:false
+d[1]: false TBool bool=true int=false ==true:false ==1:false
+first: true TBool bool=true int=false ==true:true ==1:false
+true:TBool,false:TBool
+[true,false] TBool true true
+[true,false] true true TBool
+[true,false] {"a":[true,false]}{"b":true}{"i":1}
+[true,false,1] TBool
+[true,false] TBool
+true TBool
+1 true 0
+iter: true TBool bool=true int=false ==true:true ==1:false
+iter: false TBool bool=true int=false ==true:false ==1:false
+0=true
+1=false
+[true,false] [true,false,false,false] [false] [true] [false,true] [1,0]
+[false,false,true,true] [false,true] [false,true]
+true false [] TNull
+[true,false,true] 3 [true,false,true,false] [false,true,false]
+[] 0
+[true,true]
+[true,false] [1,2]
+[[true],[false,true]] TBool
+[true,null,false] TBool TNull
+[false,false,true,true]
+[1,0] TInt false [1,0]
+[true,0] TBool TInt
+[false,7,s] TBool TInt
+[true,1,1.5,null,false] TBool,TInt,TFloat,TNull,TBool
+[true,false,true] TBool false
+vector: true TBool bool=true int=false ==true:true ==1:false
+true TBool [false,true]
+true false TBool [true,false]
+true TBool
+true [x => true] TBool
+[3 => false] false
+TBool
+A(true) B(false,1,[true,false]) [true] [false,1,[true,false]] TBool TInt
+enum arg: false TBool bool=true int=false ==true:false ==1:false
+[true,false]
+true TBool false TBool [false]
+true TBool true TInt
+a=[false] b=true f=false i=1
+false TBool
+true
+true TBool [false,true] TBool [false,true]
+true TBool [false,true]
+closure: true TBool bool=true int=false ==true:true ==1:false
+null bool: false TBool bool=true int=false ==true:false ==1:false
+dyn call: true TBool bool=true int=false ==true:true ==1:false
+c && x: true TBool bool=true int=false ==true:true ==1:false
+!c && x: false TBool bool=true int=false ==true:false ==1:false
+c || x: true TBool bool=true int=false ==true:true ==1:false
+!c || x: true TBool bool=true int=false ==true:true ==1:false
+contains: false TBool bool=true int=false ==true:false ==1:false
+null: true TBool bool=true int=false ==true:true ==1:false
+dyn: true TBool bool=true int=false ==true:true ==1:false
+[true,true] TBool
+334 [true,false,false,true,false,false,true] TBool 2000
