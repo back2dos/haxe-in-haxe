@@ -1632,7 +1632,8 @@ class MirBuild {
 				var c = ex(clos);
 				var xs = [for (a in args) ex(a)];
 				var fp = load(I64, 8, c, 0);
-				callInd(fp, [c].concat(xs), mty(s.ret), [I64].concat([for (t in s.args) mty(t)]));
+				// (a struct result: the address of the caller's memory, last)
+				callInd(fp, [c].concat(xs), mty(s.ret), [I64].concat([for (t in s.args) mty(t)]).concat(s.ret.match(TStruct(_)) ? [I64] : []));
 			case ECallAnon(name, s, obj, args): callAnon(name, s, obj, args);
 			case ECallHost(name, args, ret): host(name, args, ret);
 			case ENewObj(c): alloc(c.nslots < 1 ? 1 : c.nslots, c.tindex, Abi.K_OBJ, true);

@@ -124,6 +124,7 @@ class FnLower {
 			out.push(SSet(lo, ECapture(lambda, i, clos)));
 			if (c.id == -1) thisLocal = lo else locals.set(c.id, lo);
 		}
+		if (fi.sret) sretLocal = fi.args[fi.args.length - 1];
 		bindArgs(tf, 1);
 		stmt(tf.tfExpr);
 	}
@@ -163,6 +164,12 @@ class FnLower {
 			args.unshift(ELocal(s));
 		}
 		var call = dispatch != null ? ECallDispatch(dispatch.sel, dispatch.sig, args) : ECall(f, args);
+		if (fi.sret) {
+			// (the closure's result address is the function's: its last argument)
+			out.push(SExpr(call));
+			out.push(SReturn(ELocal(fi.args[fi.args.length - 1])));
+			return;
+		}
 		if (fi.ret == TVoid) {
 			out.push(SExpr(call));
 			out.push(SReturn(null));
@@ -307,7 +314,7 @@ class FnLower {
 				// which differ for a type read from HXB, and ty numbers the types it meets)
 				var names = [for (k in an.aFields.keys()) k];
 				names.sort(Reflect.compare);
-				var fs = [for (k in names) {name: k, ty: ty(an.aFields.get(k).cfType)}];
+				var fs = [for (k in names) {name: k, ty: l.boxed(ty(an.aFields.get(k).cfType))}];
 				var sh = l.getProgram().shape(fs);
 				var i = sh.slot(name);
 				return i > 0 && Ir.repr(sh.fields[i - 1].ty) == Ir.repr(rt) ? sh : null;
@@ -404,7 +411,7 @@ class FnLower {
 			case TI64: EConv(I2L, EInt(0));
 			case TVoid: EInt(0);
 			case TRef(_): ENull(t);
-			case TStruct(n, _): structFail('the struct $n is never null (a value: zero its fields)');
+			case TStruct(n, _): structFail('the struct $n is never null (a value: zero its fields; Null<S> may be null)');
 		}
 
 	// ---- conversions
@@ -420,13 +427,22 @@ class FnLower {
 			// (its address: Ptr casts and the intrinsics)
 			case [TStruct(_), TI64] | [TI64, TStruct(_)]:
 				return x;
+			case [TStruct(n, _), TRef(RClos(_))] | [TRef(RClos(_)), TStruct(n, _)]:
+				structFail('the struct $n converted to or from a function');
+			case [TStruct(n, _), TRef(_)]:
+				return coerce(box(x, n), l.boxed(from), to);
+			case [TRef(_), TStruct(n, _)]:
+				return unbox(x, from, n);
 			case [TStruct(n, _), _] | [_, TStruct(n, _)]:
-				structFail('the struct $n converted to or from ' + (Ir.isRef(from) || Ir.isRef(to) ? "a reference (Dynamic, a type parameter, Null<T>, an interface, a structural type)" : "another type") + ': struct values are never boxed (copy the fields into an object)');
+				structFail('the struct $n converted to or from a number');
+			case [TRef(RClos(a)), TRef(r)] if (!r.match(RClos(_)) && hasStruct(a)):
+				structFail('a function taking or returning a struct value cannot become ' + (r == RAny ? "Dynamic" : "another type") + ' (call it directly)');
 			case _:
 		}
 		switch [from, to] {
 			case [TRef(RClos(a)), TRef(RClos(b))] if (a != b):
 				if (x.match(ENull(_))) return ENull(to);
+				if (hasStruct(a) || hasStruct(b)) structFail('a function taking or returning a struct value cannot become a function of another type');
 				var li = l.adapter(a, b);
 				var c = asLocal(x, from);
 				var r = newLocal("adapted", to);
@@ -465,7 +481,7 @@ class FnLower {
 			case TF64: temp(TRef(RStr), ECallHost(l.native("hx_str_of_float"), [x], TRef(RStr)));
 			case TI64: temp(TRef(RStr), ECallHost(l.native("hx_str_of_i64"), [x], TRef(RStr)));
 			case TBool: temp(TRef(RStr), ECallHost(l.native("hx_str_of_bool"), [x], TRef(RStr)));
-			case TStruct(n, _): structFail('the struct $n has no string form (concatenate its fields)');
+			case TStruct(_): toStr(coerce(x, t, TRef(RAny)), TRef(RAny));
 			case _: temp(TRef(RStr), ECallHost(l.native("hx_std_string"), [x], TRef(RStr)));
 		}
 	}
@@ -483,9 +499,8 @@ class FnLower {
 	// (init: the local's first value; a struct local holds a C function's
 	// struct result, which lives in this frame: MirBuild.cStructRet)
 	function declare(v:TVar, ?init:TExpr):Local {
+		if (structOf(v.vType) != null) throw new LowerError('the variable ' + v.vName + ' cannot hold a struct value here', CInterop.posOf(v.vPos));
 		switch CInterop.ctype(v.vType) {
-			case CStruct(c):
-				throw new LowerError('the variable ' + v.vName + ' cannot hold the struct ' + c.clPath.name + ' here', CInterop.posOf(v.vPos));
 			case COpaque(c):
 				throw new LowerError('local ' + v.vName + ' has the opaque C type ' + c.clPath.name + ' by value: it is reached through a Ptr only', CInterop.posOf(v.vPos));
 			case _:
@@ -521,6 +536,9 @@ class FnLower {
 						zeroStruct(ELocal(s), sc);
 						s;
 					};
+					// (a variable of the program's own holds its copy; the compiler's
+					// temporaries stay copies of the boxed value they read)
+					if (!v.vKind.match(VGenerated)) unboxed.remove(s);
 					locals.set(v.vId, s);
 					return;
 				}
@@ -934,10 +952,8 @@ class FnLower {
 				var xs = operands(vs);
 				ENewArr(elem, [for (i in 0...xs.length) coerce(xs[i], tyOf(vs[i]), elem)]);
 			case TObjectDecl(fs):
-				for (f in fs)
-					if (structOf(f.expr.etype) != null) cfail('the field ' + f.key.name + ' of an anonymous structure cannot hold a struct value (a class instead)', e);
 				var xs = operands([for (f in fs) f.expr]);
-				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: tyOf(fs[i].expr)}];
+				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: l.boxed(tyOf(fs[i].expr))}];
 				var sh = l.getProgram().shape(fields);
 				var vals = [];
 				for (sf in sh.fields)
@@ -1011,7 +1027,7 @@ class FnLower {
 						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), [value(obj)], t));
 						coerce(x, t, tyOf(e));
 					case Var(_) if (c.hasClassFlag(CInterface)):
-						EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+						anonGet(cf.cfName, obj, e);
 					case Var(_) if (structOf(cf.cfType) != null):
 						// a struct field (in the object's memory): copied out
 						var sc = structOf(cf.cfType);
@@ -1048,12 +1064,11 @@ class FnLower {
 					case Method(_):
 						var f = l.staticFunc(c, cf);
 						var li = l.staticClosure(f);
-						noStructSig(li.sig);
 						var x = temp(TRef(RClos(li.sig)), ENewClos(li, []));
 						coerce(x, TRef(RClos(li.sig)), tyOf(e));
 				}
 			case FAnon(cf):
-				EAnonGet(cf.cfName, tyOf(e), value(obj), anonHint(obj.etype, cf.cfName, tyOf(e)));
+				anonGet(cf.cfName, obj, e);
 			case FDynamic(name):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));
 				var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_get"), [o, EStr(name)], TRef(RAny)));
@@ -1144,7 +1159,6 @@ class FnLower {
 			if (impl == null) fail("no implementation of " + cf.cfName, e);
 			li = l.boundClosure(l.method(impl.cls, impl.field), null, fi);
 		}
-		noStructSig(li.sig);
 		var x = temp(TRef(RClos(li.sig)), ENewClos(li, [o]));
 		return coerce(x, TRef(RClos(li.sig)), rt);
 	}
@@ -1392,7 +1406,7 @@ class FnLower {
 			case TField(obj, FInstance(c, _, cf)) if (CInterop.isStruct(c)):
 				// (the address after the value: an object may move meanwhile)
 				var f = CInterop.field(c, cf.cfName);
-				var p = placeOf(obj);
+				var p = placeOf(obj, true);
 				var t = tyOf(lhs);
 				var x = pure(compute(() -> cLoad(p.addr(), f.off, f.ty, lhs), t, t), t);
 				cStore(p.addr(), f.off, f.ty, x, t, e);
@@ -1413,7 +1427,7 @@ class FnLower {
 				out.push(SExpr(ECallHost(l.native("Array_resize"), [o, x], TVoid)));
 				return coerce(x, TI32, et);
 			case TField(obj, FAnon(cf) | FInstance(_, _, cf)):
-				var t = tyOf(lhs);
+				var t = l.boxed(tyOf(lhs));
 				var o = ELocal(asLocal(value(obj), tyOf(obj)));
 				var x = pure(compute(() -> EAnonGet(cf.cfName, t, o, null), t, t), t);
 				out.push(SAnonSet(cf.cfName, t, o, x));
@@ -1523,7 +1537,7 @@ class FnLower {
 				var s = switch t { case TRef(RClos(s)): s; case _: fail("dynamic static " + cf.cfName + " is not a closure", e); };
 				var cl = asLocal(EGlobal(g, t), t);
 				var xs = args(cargs, s.args, null);
-				return coerceRhs(ECallClos(s, ELocal(cl), xs), s.ret, rt);
+				return callClos(s, ELocal(cl), xs, rt);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
 				var xs = args(cargs, callTys(fn), l.defaults.get(fn));
@@ -1574,7 +1588,7 @@ class FnLower {
 						var s = switch st { case TRef(RClos(s)): s; case _: fail("dynamic method " + cf.cfName + " is not a closure", e); };
 						var cl = asLocal(dynMethod(obj, c, cf, e), st);
 						var xs = args(cargs, s.args, null); // closure calls apply defaults in the callee
-						return coerceRhs(ECallClos(s, ELocal(cl), xs), s.ret, rt);
+						return callClos(s, ELocal(cl), xs, rt);
 					case Method(_):
 				}
 				if (l.needsDispatch(c, cf.cfName)) {
@@ -1608,6 +1622,7 @@ class FnLower {
 					case TRef(RClos(s)): s;
 					case _: null;
 				};
+				if (hasStruct(s)) structFail('a struct value passed to or returned by a function of a structural type: not supported (an interface or a class)');
 				var o = asLocal(value(obj), tyOf(obj));
 				var xs = args(cargs, s.args, null);
 				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
@@ -1630,7 +1645,7 @@ class FnLower {
 				var fx = value(f);
 				var c = asLocal(fx, tyOf(f));
 				var xs = args(cargs, s.args, null);
-				return coerceRhs(ECallClos(s, ELocal(c), xs), s.ret, rt);
+				return callClos(s, ELocal(c), xs, rt);
 			case _:
 				var fx = coerce(value(f), tyOf(f), TRef(RAny));
 				var c = asLocal(fx, TRef(RAny));
@@ -1849,10 +1864,15 @@ class FnLower {
 			case _: false;
 		}
 
+	// (Null<S> is not a struct value: a reference to its box, Lower.boxed)
 	static function structOf(t:core.TType.T):Null<TClass>
-		return switch CInterop.ctype(t) {
-			case CStruct(c): c;
-			case _: null;
+		return switch TFunctions.followWithoutNull(t) {
+			case TAbstract({aPath: {pack: [], name: "Null"}}, _): null;
+			case _:
+				switch CInterop.ctype(t) {
+					case CStruct(c): c;
+					case _: null;
+				}
 		}
 
 	static function structTy(c:TClass):Ty
@@ -1926,13 +1946,18 @@ class FnLower {
 		return s;
 	}
 
+	// struct values copied out of a box: assigning their fields would change
+	// the copy only (FnLower.placeOf)
+	var unboxed = new Map<Local, Bool>();
+
 	// where the struct e is, without a copy: its address, built when the
 	// caller asks (after what it evaluates next: an object moves at a GC
 	// point); heap: in an object
-	function placeOf(e:TExpr):{addr:() -> Ex, heap:Bool} {
+	// (write: for an assignment, which a copy out of a box cannot take)
+	function placeOf(e:TExpr, write = false):{addr:() -> Ex, heap:Bool} {
 		switch strip(e).eexpr {
 			case TField(obj, FInstance(c, _, cf)) if (CInterop.isStruct(c)):
-				var base = placeOf(obj);
+				var base = placeOf(obj, write);
 				var off = CInterop.field(c, cf.cfName).off;
 				return {addr: () -> off == 0 ? base.addr() : EBin(LAdd, base.addr(), EConv(I2L, EInt(off))), heap: base.heap};
 			case TField(obj, FInstance(c, _, cf)) if (!c.hasClassFlag(CExtern) && !c.hasClassFlag(CInterface) && cf.cfKind.match(Var(_)) && structOf(cf.cfType) != null):
@@ -1946,6 +1971,7 @@ class FnLower {
 					case ELocal(lo): lo;
 					case _: asLocal(x, tyOf(e));
 				};
+				if (write && unboxed.exists(lo)) cfail('this struct value is a copy (of an Array element, a Dynamic or a Null<T> value): assigning its fields would change the copy only (copy it into a variable, change that, store it back)', e);
 				return {addr: () -> ELocal(lo), heap: false};
 		}
 	}
@@ -1968,13 +1994,14 @@ class FnLower {
 				if (!src.match(ELocal(_) | EGlobal(_, _))) src = ELocal(asLocal(src, tyOf(r)));
 				copyStruct(EGlobal(g, t), src, c);
 				return coerce(EGlobal(g, t), t, tyOf(e));
-			case TField(_, FInstance(_)):
-				var p = placeOf(lhs);
+			case TField(_, FInstance(k, _, _)) if (!k.hasClassFlag(CInterface) && !k.hasClassFlag(CExtern)):
+				var p = placeOf(lhs, true);
 				var src = ELocal(asLocal(structRhs(r).x, tyOf(r)));
 				copyStruct(p.addr(), src, c);
 				return coerce(src, structTy(c), tyOf(e));
 			case _:
-				return cfail("assignment of a struct to " + strip(lhs).eexpr.getName(), e);
+				// (an Array's element, a structural type's field: a new box)
+				return assign(lhs, () -> {x: rhs(r), t: tyOf(r)}, e);
 		}
 	}
 
@@ -2032,13 +2059,51 @@ class FnLower {
 		return coerce(ELocal(s), f.ret, rt);
 	}
 
-	// a closure cannot take or return a struct value (its callers do not know it)
-	function noStructSig(s:SigInfo) {
-		for (t in s.args.concat([s.ret]))
-			switch t {
-				case TStruct(n, _): structFail('a function taking or returning the struct $n cannot be a closure or a function value (call it directly)');
-				case _:
-			}
+	static function hasStruct(s:SigInfo):Bool {
+		for (t in s.args)
+			if (t.match(TStruct(_))) return true;
+		return s.ret.match(TStruct(_));
+	}
+
+	// a call of a closure; a struct result lands in a slot of this frame
+	function callClos(s:SigInfo, c:Ex, xs:Array<Ex>, rt:Ty):Ex {
+		if (!s.ret.match(TStruct(_))) return coerceRhs(ECallClos(s, c, xs), s.ret, rt);
+		var r = newSlot(s.ret, true);
+		out.push(SExpr(ECallClos(s, c, xs.concat([ELocal(r)]))));
+		return coerce(ELocal(r), s.ret, rt);
+	}
+
+	// a struct value in a new box (its copy)
+	function box(x:Ex, n:String):Ex {
+		var ci = l.structBox(n);
+		var c = l.structClasses.get(n);
+		var src = x.match(ELocal(_) | EGlobal(_, _)) ? x : ELocal(asLocal(x, structTy(c)));
+		var b = temp(TRef(RObj(ci)), ENewObj(ci));
+		copyStruct(EFieldAddr(ci, 0, b), src, c);
+		return b;
+	}
+
+	// the value a box holds, copied out (null: zeros); a reference that is
+	// not one fails as a cast does
+	function unbox(x:Ex, from:Ty, n:String):Ex {
+		var ci = l.structBox(n);
+		var c = l.structClasses.get(n);
+		var t = TRef(RObj(ci));
+		var b = switch from {
+			case TRef(RObj(k)) if (k == ci): asLocal(x, from);
+			case _: asLocal(temp(TRef(RAny), ECallHost(l.native("hx_cast"), [coerce(x, from, TRef(RAny)), EType(TRClass(ci))], TRef(RAny))), TRef(RAny));
+		};
+		var s = newSlot(structTy(c), true);
+		unboxed.set(s, true);
+		out.push(SIf(EBin(RefEq, ELocal(b), ENull(b.ty)), block(() -> zeroStruct(ELocal(s), c)), block(() -> copyStruct(ELocal(s), EFieldAddr(ci, 0, ECast(t, ELocal(b))), c))));
+		return ELocal(s);
+	}
+
+	// a field of a structural type (or an interface's variable): a struct's box
+	function anonGet(name:String, obj:TExpr, e:TExpr):Ex {
+		var t = l.boxed(tyOf(e));
+		var x = EAnonGet(name, t, value(obj), anonHint(obj.etype, name, t));
+		return t == tyOf(e) ? x : coerce(temp(t, x), t, tyOf(e));
 	}
 
 	// ---- closures
@@ -2067,7 +2132,6 @@ class FnLower {
 			case TRef(RClos(s)): s;
 			case _: l.getProgram().sig([for (a in tf.tfArgs) ty(a.variable.vType)], ty(tf.tfType));
 		};
-		noStructSig(sig);
 		var outerBoxed = boxed;
 		var li = l.newLambda(sig, captureLocals, fl -> fl.runLambda(tf, copyMap(outerBoxed), caps), Lower.lambdaName(fi), fi.module);
 		return ENewClos(li, capVals);

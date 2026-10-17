@@ -108,6 +108,7 @@ enum LCall {
 	CMethod(c:TClass, cf:TClassField, r:FuncInfo);
 	CCtor(c:TClass, r:FuncInfo);
 	CStructCtor(c:TClass, r:FuncInfo);
+	CStructBox(name:String, r:ClassInfo);
 	CStaticVar(c:TClass, cf:TClassField, r:Int);
 	CReflect(c:TClass);
 	CStaticClos(f:FuncInfo, r:LambdaInfo);
@@ -330,6 +331,14 @@ class CachedLower extends Lower {
 		return r;
 	}
 
+	override public function structBox(name:String):ClassInfo {
+		depth++;
+		var r = super.structBox(name);
+		depth--;
+		log(CStructBox(name, r));
+		return r;
+	}
+
 	override public function structCtor(c:TClass):FuncInfo {
 		depth++;
 		var r = super.structCtor(c);
@@ -474,6 +483,8 @@ class CachedLower extends Lower {
 				bindFunc(r, ctor(k));
 			case CStructCtor(k, r):
 				bindFunc(r, structCtor(k));
+			case CStructBox(name, r):
+				bindClass(r, structBox(name));
 			case CStaticVar(k, cf, r):
 				bindGlobal(r, staticVar(k, cf));
 			case CReflect(k):

@@ -416,7 +416,7 @@ class Lower {
 					case "Void" if (isStd): TVoid;
 					case "Null" if (isStd):
 						var inner = ty(params[0]);
-						Ir.isScalar(inner) ? TRef(RNull(inner)) : inner;
+						Ir.isScalar(inner) ? TRef(RNull(inner)) : boxed(inner);
 					case "Any" if (isStd): TRef(RAny);
 					case "Class" | "Enum" if (isStd): TRef(RType);
 					case "EnumValue" if (isStd): TRef(REnum(null));
@@ -439,8 +439,12 @@ class Lower {
 					case KTypeParameter(_): TRef(RAny);
 					case _:
 						if (isCore(c, "String")) TRef(RStr);
-						else if (isCore(c, "Array")) TRef(RArr(noStruct(ty(params[0]), "an Array's element")));
-						else if (CInterop.isStruct(c)) TStruct(core.Globals.sTypePath(c.clPath), CInterop.layout(c).size);
+						else if (isCore(c, "Array")) TRef(RArr(boxed(ty(params[0]))));
+						else if (CInterop.isStruct(c)) {
+							var n = core.Globals.sTypePath(c.clPath);
+							structClasses.set(n, c);
+							TStruct(n, CInterop.layout(c).size);
+						}
 						else if (CInterop.isOpaque(c)) TI64; // the address of C memory (CInterop: through a Ptr only)
 						else if (c.hasClassFlag(CInterface)) TRef(RObj(classInfo(c)));
 						else if (c.hasClassFlag(CExtern)) TRef(RNative(nativeName(c)));
@@ -458,15 +462,30 @@ class Lower {
 		}
 	}
 
-	// a struct value cannot be a GC reference's contents (an Array's element,
-	// an enum's argument): those hold references or scalars only
-	public function noStruct(t:Ty, what:String):Ty {
-		switch t {
-			case TStruct(n, _): fail('$what cannot be the struct value $n (store it in a class field, a struct field or memory behind a Ptr)');
-			case _:
-		}
-		return t;
+	// Where a reference is needed (Dynamic, a type parameter, an Array's
+	// element, an enum's argument, a structural type's field, Null<S>), a
+	// struct value is boxed: an object holding a copy, never changed once
+	// made, of a class of its own named after the struct (FnLower.coerce)
+	public var structClasses = new Map<String, TClass>();
+	var boxes = new Map<String, ClassInfo>();
+
+	public function structBox(name:String):ClassInfo {
+		var ci = boxes.get(name);
+		if (ci != null) return ci;
+		var c = structClasses.get(name);
+		ci = new ClassInfo(name, nativeName(c) + "__box", root);
+		ci.fields.push({name: "value", ty: TStruct(name, CInterop.layout(c).size)});
+		boxes.set(name, ci);
+		prog.classes.push(ci);
+		return ci;
 	}
+
+	// t, or the reference to its box for a struct
+	public function boxed(t:Ty):Ty
+		return switch t {
+			case TStruct(n, _): TRef(RObj(structBox(n)));
+			case _: t;
+		}
 
 	public function classInfo(c:TClass):ClassInfo {
 		var ci = classes.get(c);
@@ -551,7 +570,7 @@ class Lower {
 			var ci = ei.ctors[ef.efIndex];
 			switch TFunctions.follow(ef.efType) {
 				case TFun(s):
-					ci.params = [for (a in s.args) noStruct(ty(a.type), "an enum constructor's argument")];
+					ci.params = [for (a in s.args) boxed(ty(a.type))];
 					ci.paramNames = [for (a in s.args) a.name];
 				case _:
 					ci.global = prog.globals.length;
@@ -809,6 +828,10 @@ class Lower {
 		for (i in 0...sig.args.length)
 			fi.args.push(new Local(i + 1, "a" + i, sig.args[i]));
 		fi.ret = sig.ret;
+		if (fi.ret.match(TStruct(_))) {
+			fi.args.push(new Local(sig.args.length + 1, "sret", TI64));
+			fi.sret = true;
+		}
 		prog.lambdas.push(li);
 		prog.funcs.push(fi);
 		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> body(new FnLower(this, fi, null, li)))));
@@ -844,7 +867,7 @@ class Lower {
 	public function staticClosure(f:FuncInfo):LambdaInfo {
 		var li = staticClosures.get(f);
 		if (li != null) return li;
-		var sig = prog.sig([for (a in f.args) a.ty], f.ret);
+		var sig = prog.sig([for (a in f.args) if (!(f.sret && a == f.args[f.args.length - 1])) a.ty], f.ret);
 		li = newLambda(sig, [], fl -> fl.forward(f, null), f.name + "__sclos", f.module);
 		staticClosures.set(f, li);
 		return li;
@@ -877,7 +900,7 @@ class Lower {
 	public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo}>, owner:FuncInfo):LambdaInfo {
 		var li = boundClosures.get(f);
 		if (li != null && dispatch == null) return li;
-		var args = [for (i in 1...f.args.length) f.args[i].ty];
+		var args = [for (i in 1...(f.sret ? f.args.length - 1 : f.args.length)) f.args[i].ty];
 		var sig = prog.sig(args, f.ret);
 		var self = new Local(-1, "self", TRef(RObj(root)));
 		li = newLambda(sig, [self], fl -> fl.forward(f, dispatch), dispatch == null ? f.name + "__bound" : lambdaName(owner), dispatch == null ? f.module : owner.module);

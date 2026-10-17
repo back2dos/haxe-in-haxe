@@ -3,8 +3,11 @@ import hxmc.unsafe.*;
 // @:hxmc.struct values (hxmc/LOWLEVEL.md, "Struct values"): locals,
 // parameters and results are copies; fields of structs and of objects hold
 // them inline (an object's moves with it at each collection: the corpus runs
-// with a small nursery); statics; memory behind a Ptr; equality; virtual and
-// interface calls; an abstract with operators over a struct; try/catch.
+// with a small nursery); statics; memory behind a Ptr or in a Slice;
+// equality; virtual and interface calls; an abstract with operators over a
+// struct; try/catch; boxes where a reference is needed (Dynamic, Array
+// elements, type parameters, Null<T>, enum arguments, structural types);
+// closures taking and returning structs.
 @:hxmc.struct @:publicFields class V2 {
 	var x:Float;
 	var y:Float;
@@ -92,7 +95,20 @@ class Boxes implements Shape {
 		return r.max;
 }
 
+enum Event {
+	Moved(to:V2);
+	Stopped;
+}
+
+typedef Labeled = {name:String, at:V2};
+
 class StructValues {
+	static function firstOf<T>(xs:Array<T>):T
+		return xs[0];
+
+	static function apply(f:V2->V2, v:V2):V2
+		return f(v);
+
 	static var origin = new V2(0.5, -0.5);
 	static var last:Rect;
 
@@ -231,5 +247,43 @@ class StructValues {
 			t.y = -9;
 		}
 		trace(show(t));
+		// boxes: copies where a reference is needed
+		var arr = [new V2(1, 2), new V2(3, 4)];
+		arr.push(a);
+		var e0 = arr[0];
+		e0.x = 50;
+		arr[1] = e0;
+		var sumX = 0.0;
+		for (v in arr)
+			sumX += v.x;
+		trace(arr.length, show(arr[0]), show(arr[1]), show(arr[2]), sumX, show(firstOf(arr)));
+		var d:Dynamic = new V2(7, 8);
+		var back:V2 = d;
+		var n:Null<V2> = null;
+		var n2:Null<V2> = back;
+		trace(show(back), n == null, n2 == null, show(n2), Std.string(d) != "");
+		var m = new Map<String, V2>();
+		m.set("a", new V2(9, 10));
+		var got:V2 = m.get("a");
+		got.y = 0;
+		trace(show(m.get("a")), show(got), m.exists("b"));
+		var evs = [Moved(new V2(1, 1)), Stopped, Moved(new V2(2, 3))];
+		var far = new V2();
+		for (ev in evs)
+			switch ev {
+				case Moved(to): far = mid(far, to);
+				case Stopped: far.x += 10;
+			}
+		var lab:Labeled = {name: "p", at: new V2(4, 5)};
+		trace(show(far), lab.name, show(lab.at), "s" + new V2(1, 2) != "");
+		// closures with struct parameters and results
+		var shift = (v:V2) -> new V2(v.x + 1, v.y - 1);
+		function twice(v:V2):V2
+			return shift(shift(v));
+		var fs:Array<V2->V2> = [shift, twice, v -> mid(v, origin)];
+		var r2 = new V2(0, 0);
+		for (f in fs)
+			r2 = f(r2);
+		trace(show(twice(new V2(5, 5))), show(apply(shift, new V2(1, 1))), show(apply(StructValues.fib.bind(_, 3), new V2(1, 1))), show(r2));
 	}
 }

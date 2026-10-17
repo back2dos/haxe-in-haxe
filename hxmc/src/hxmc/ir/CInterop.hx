@@ -55,6 +55,28 @@ class CInterop {
 	public static function isStruct(c:TClass):Bool
 		return Lower.hasMeta(":hxmc.struct", c.clMeta);
 
+	// Haxe's inline constructors (a filter) turn an object of a class with an
+	// inline constructor into locals shared by every variable it is assigned
+	// to: right for an object, wrong for a struct value (`var b = a; b.x = 1`
+	// would change a). For hxmc, a @:hxmc.struct class's constructor is an
+	// ordinary function, set once typing is done, before the filters (Mir
+	// inlines it, and Sroa keeps the struct in registers).
+	public static function install() {
+		var prev = compiler.Compiler.beforeTypingHook;
+		compiler.Compiler.beforeTypingHook = function(com, actx) {
+			if (prev != null) prev(com, actx);
+			if (!com.platform.match(CustomTarget("hxmc"))) return;
+			com.callbacks.addAfterTyping(types -> {
+				for (t in types)
+					switch t {
+						case TClassDecl(c) if (c.clConstructor != null && c.clConstructor.cfKind.match(Method(MethInline)) && isStruct(c)):
+							c.clConstructor.cfKind = Method(MethNormal);
+						case _:
+					}
+			});
+		}
+	}
+
 	public static function isOpaque(c:TClass):Bool
 		return Lower.hasMeta(":hxmc.opaque", c.clMeta);
 

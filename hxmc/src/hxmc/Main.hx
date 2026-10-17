@@ -42,6 +42,7 @@ class Main {
 				Sys.exit(Sys.command(Sys.programPath(), ["--server"].concat(args)));
 			}
 			Driver.resident = true;
+			hxmc.ir.CInterop.install();
 			compiler.Compiler.generateHook = function(com) {
 				try {
 					start = haxe.Timer.stamp();
@@ -83,6 +84,7 @@ class Main {
 		}
 		TypesCache.install();
 		ModuleCache.install();
+		hxmc.ir.CInterop.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));
 		ModuleCache.finish(failed == null ? code : 1);
 		if (failed != null) {

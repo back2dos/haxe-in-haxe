@@ -348,16 +348,31 @@ s[3].y = 2;                                  // in place
   is only the base of loads and stores at constant offsets becomes SSA
   values, so struct math in registers: `acc = acc + d * 0.5` over
   three-double vectors compiles to three `fadd`s in the loop.
-- Minimal behaviour elsewhere: `==` compares field by field (floats as
-  floats); a struct value is never boxed: `Dynamic`, type parameters,
-  `Null<T>`, interfaces, structural types, `Array<S>`, enum arguments,
-  anonymous structures, string conversion and closures taking or capturing
-  one are compile errors; struct fields are invisible to reflection and
-  Dynamic access. All seven targets (WebAssembly too). Corpus:
-  `StructValues`, `reject/Struct*`.
+- Boxes: where a reference is needed (`Dynamic`, a type parameter: `Map<K,
+  S>`, `Array<S>`'s elements, `Null<S>`, an enum's argument, a field of a
+  structural type), the value is copied into a box, an object of a class
+  named after the struct (`Lower.structBox`), never changed once made;
+  taking it back copies it out (null gives zeros; another type fails as a
+  cast). Assigning a field of such a copy (`arr[i].x = 1`) is a compile
+  error, as in C#: copy it into a variable, change that, store it back.
+  `Std.string` of a box is the struct's name.
+- Closures may take and return struct values (by address, as calls do);
+  one cannot become `Dynamic` or a function of another type, nor capture a
+  struct local (its memory is in the frame).
+- Other behaviour: `==` compares field by field (floats as floats);
+  struct fields are invisible to reflection and Dynamic access. Haxe's
+  inline constructors (a filter that turns objects into locals shared by
+  the variables they are assigned to) are kept off struct classes: their
+  constructors are ordinary functions for hxmc (`CInterop.install`), which
+  Mir inlining and `Sroa` make as cheap. A known gap: Haxe's inliner
+  passes a local argument of an inline function as itself, so assigning a
+  struct parameter's fields in an inline function changes the caller's
+  variable (copy the parameter into a local first). All seven targets
+  (WebAssembly too). Corpus: `StructValues`, `reject/Struct*`.
 - Left: instance methods on structs, value enums, `@:generic`
-  specialization for containers of structs, GC references inside structs,
-  passing structs to closures.
+  specialization for containers of structs (boxes cost an allocation per
+  element), GC references inside structs, struct locals captured by
+  closures.
 
 ### What it buys
 
