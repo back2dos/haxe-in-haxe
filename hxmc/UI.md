@@ -318,7 +318,8 @@ Since the design above (October 2026), in this order:
   on Windows with the IME's windows placed at the caret.
 - Text and images: CFF outlines (OpenType `.otf`, CID-keyed CJK fonts
   too) and GPOS pair kerning in `@hxmc/text`; a JPEG decoder (baseline
-  and progressive, libjpeg's arithmetic: pixel-exact with Chromium's).
+  and progressive, libjpeg's arithmetic: pixel-exact with Chromium's) and
+  a GIF decoder (the first frame).
 - Popups (a layer over the tree: anchored, modal), the widgets on them
   (Select, Menu, Tooltip, Dialog), and VirtualList.
 - Accessibility on every platform: NSAccessibility (macOS), UI Automation
@@ -340,7 +341,8 @@ Where this departs from section 6:
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
 - **Not yet**: Windows' compositions drawn in the field (its IME draws
-  its own), image formats beyond PNG and JPEG.
+  its own), image formats beyond PNG, JPEG and GIF (WebP, AVIF), an
+  animated GIF's later frames.
 
 ## Sources
 

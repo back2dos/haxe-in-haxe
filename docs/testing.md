@@ -105,7 +105,8 @@ focus; PNG files of every colour type, depth, filter and interlacing,
 `packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
 expected, checked against Chromium's decoder when written; JPEG files of
 every kind the decoder reads, `packages/ui/test/jpeg/`, which
-`jpeg-cases.mjs` writes with the pixels Chromium decodes, matched exactly;
+`jpeg-cases.mjs` writes with the pixels Chromium decodes, matched exactly,
+and GIF files the same way (`gif/`, `gif-cases.mjs`);
 popups placed, hit and dismissed; then signals and markup rendered into
 nodes, the popup widgets driven by pointer and keys, a VirtualList of
 100000 rows scrolled). Natively: `make
