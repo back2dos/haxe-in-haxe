@@ -107,9 +107,11 @@ writes, R8 and RGBA8 textures, blending, scissor) against
 
 ## UI
 
-On Eval: `make view-check` (`@hxmc/view` on a test renderer, on Eval and
-natively: signals, markup, components, text runs, reactive values, the
-control flow components, the programs the macro rejects), `make text-check` (the rasterizer,
+On Eval: `make view-check` (`@hxmc/view` on two test renderers, on Eval,
+natively and in JavaScript (compiled by the port, run by node): signals,
+markup, components, text runs, reactive values, the control flow
+components, boundaries between renderers, the programs the macro
+rejects), `make text-check` (the rasterizer,
 DejaVu Sans' tables and outlines, line layout, a text sample through the
 atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against

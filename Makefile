@@ -170,9 +170,10 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
-## view-check  packages/view on Eval, then natively: signals, markup (elements, attributes, whitespace,
-##             components, text runs, reactive values), the control flow components, on a test
-##             renderer, and the programs the macro rejects (packages/view/test/ViewTest.hx)
+## view-check  packages/view on Eval, natively and in JavaScript (the port, node): signals, markup
+##             (elements, attributes, whitespace, components, text runs, reactive values), the control
+##             flow components, on two test renderers with boundaries between them, and the programs
+##             the macro rejects (packages/view/test/ViewTest.hx)
 ## text-check  packages/text on Eval: the rasterizer, DejaVu Sans (metrics, cmap, kerning, outlines),
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
@@ -526,17 +527,20 @@ audio-web-check: $(TOOL) $(STD)
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
 
-VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer
-view-check: $(TOOL) $(STD) $(HOST_RT)
+# (two renderers: TestRenderer, OtherRenderer; JavaScript compiled by the port)
+VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer -D hxmc.view.renderer.other=OtherRenderer
+view-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(VIEW_CP) --run ViewTest $(TOOL)
 	$(call hxmc,bin/view/ViewTest,$(VIEW_CP) -main ViewTest $(HXMC_ARGS))
 	bin/view/ViewTest
+	ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(VIEW_CP) -main ViewTest -js bin/view/ViewTest.js
+	$(NODE) bin/view/ViewTest.js
 
 text-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)
 
 # (hxmc.view and its renderer for hxmc.ui, as -lib hxmc.ui sets it: packages/ui/extraParams.hxml)
-UI_VIEW := -cp packages/view/src -D hxmc.view.renderer=hxmc.ui.view.NodeRenderer
+UI_VIEW := -cp packages/view/src -D hxmc.view.renderer.ui=hxmc.ui.view.NodeRenderer
 ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run MarkupTest
