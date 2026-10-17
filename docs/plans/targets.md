@@ -10,7 +10,7 @@ are built natively and the releases ship per platform.
 Built: a linear-memory module from Mir with the whole runtime in Haxe;
 the corpus passes under node and wasmtime, the port as a module compiles
 itself (about 1.8x native time); the playground runs it in browsers
-(WASI's imports from JavaScript, `hxmc/web/src/WasiHost.hx`; exnref, or
+(WASI's imports from JavaScript, `site/client/WasiHost.hx`; exnref, or
 the legacy encoding). Left:
 
 - Threads: wasm threads (shared memory, atomics, `memory.atomic.wait`)

@@ -6,7 +6,7 @@ import sys.io.File;
 using StringTools;
 
 // Compile time and output of the target generators, for the website's target
-// table (hxmc/web/data/targets.json): the reference and the port compile the
+// table (site/data/targets.json): the reference and the port compile the
 // same projects to every target; the outputs must be identical.
 //   bin/hxmc/hxmc -cp haxe/test --run Targets [-n RUNS] [-p formatter,self]
 //       [-t js,lua,...] [--port <exe>] [--reference <exe>] [--json <file>] [--merge]

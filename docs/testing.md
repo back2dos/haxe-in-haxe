@@ -18,7 +18,7 @@ haxe/test --run <Name> --help`-style options at the top of each file):
 | `Haxelib` | `-L` through lix's haxelib shim, batch and server | 14/14 |
 | `EvalDebugger` | scripted Eval debugger sessions (`-D eval-debugger`): breakpoints, stepping, scopes, evaluation, assignment, exception and function breakpoints, a macro | 6/6 |
 | `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`); `--cases haxe/test/fuzz/cases` checks the kept programs (failures fixed since, reduced, one directory each) on the lanes | |
-| `Targets` | the website's target table (`hxmc/web/data/targets.json`): haxe-formatter and the port itself compiled for every target by both, CPU, wall and peak RSS, outputs compared (hl/c after `HlcNames`); `-p self -t hlc --merge --json hxmc/web/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
+| `Targets` | the website's target table (`site/data/targets.json`): haxe-formatter and the port itself compiled for every target by both, CPU, wall and peak RSS, outputs compared (hl/c after `HlcNames`); `-p self -t hlc --merge --json site/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
 | `Measure` | peak RSS, wall and CPU time: the self-compile (ours and the reference), the native build, the WebAssembly builds | self-compile 879 MB vs the reference's 1414 MB |
 | `unit.hxml` | unit tests of port modules, in-process | pass |
 
@@ -106,10 +106,10 @@ the `gfx` and `gfx-arm64` jobs on Linux, `gfx-windows` on Windows x86-64
 and arm64, `gfx-macos` from the npm packages).
 `make gfx-web-check`: the same on WebGPU and on WebGL2 (forced), built for
 wasm32-wasi, headless and in a canvas, in headless Chromium (SwiftShader;
-`packages/gfx/test/web.mjs`; CI's `gfx` job); CI checks the site's cube the
-same way (`hxmc/web/tools/browser-test.mjs`, the `playground` job: WebGPU
-and WebGL2 in Chromium, WebGL2 in Firefox, under Xvfb, and in WebKit),
-and in Chromium on an emulated phone (touch, a 390x844 viewport, Chromium's
+`packages/gfx/test/web.mjs`; CI's `gfx` job); CI checks the site's triangle and
+cube the same way (`make site-check`, `site/tools/browser-test.mjs`, the
+`playground` job: WebGPU and WebGL2 in Chromium, WebGL2 in Firefox, under
+Xvfb, and in WebKit), and in Chromium on an emulated phone (touch, a 390x844 viewport, Chromium's
 own touch input through DevTools): a horizontal touch drag turns the still
 cube (its frame read back differs), a vertical swipe starting on the canvas
 scrolls the page (`touchAction: 'pan-y'`).
@@ -204,9 +204,14 @@ npm packages with `-lib hxmc.gfx`, on Metal and in a Cocoa window). Then
 (on each of the six machines: the release binary's smoke test with a TLS
 handshake and libuv, lix, the corpus, the self-compile), `wasm` (the corpus
 and the self-compile under node and wasmtime, both also with legacy exception
-handling under node), `playground` (the playground in three browser engines
-with both modules and its fallback to the legacy one in a Chromium without
-exnref), `npm` (the nine packages in fresh projects on each of the six
+handling under node), `playground` (the website in three browser engines,
+`make site-check`: a link check; every page in Chromium and the key pages
+in Firefox and WebKit at a desktop's and a phone's width, rendered with
+its islands hydrated, no errors and no horizontal scrolling; the menu, the
+theme, the examples running, the triangle and the cube against their
+golden images, web's Counter and Lab islands, the tone; the playground's
+compiler with both modules and its fallback to the legacy one in a
+Chromium without exnref), `npm` (the nine packages in fresh projects on each of the six
 machines: native at once through the platform package, `-lib` from
 node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on linux-x64,
 or on all six on main, tags and the nightly run, lix with `dist/`, the
@@ -222,10 +227,10 @@ on npm yet; never from other branches), the nightly release and the website.
 
 Main, tags, the nightly schedule (02:41 UTC) and dispatches run everything. On
 other branches a push runs only what its changes need, since the last commit
-whose run succeeded (else since the merge base with main): only `*.md`,
-nothing beyond `changes`; only `hxmc/web`, `site` and `playground`; only
+whose run succeeded (else since the merge base with main): only `*.md` or
+`site/`, `site` and `playground` (the site renders the docs); only
 source-only packages (`packages/os`, `packages/gfx`: a version of their own),
-`build`, `npm-pack` and the `gfx` jobs; anything else (`haxe/`, `hxmc/src`,
+`build`, `npm-pack`, the `gfx` jobs and the site; anything else (`haxe/`, `hxmc/src`,
 `hxmc/std`, `hxmc/deps`, `hxmc/test`, the workflows, the Makefile, the
 compiler's npm packages), everything. A newer push to a branch cancels its
 run; runs on main, hxmc and tags always finish.
