@@ -351,10 +351,10 @@ Where this departs from section 6:
   shapers: the same pixels on every machine and target (golden images in
   CI, the browser without font files). Its limits are the shapers' reasons
   to come next: no optional ligatures or Indic shaping (GSUB beyond
-  Arabic's forms and required ligatures), no explicit bidi embeddings,
-  no hinting or subpixel rendering, no variable fonts' CFF2. Bidi
-  ordering, Arabic's joining and marks on their bases match Chromium's
-  widths and ink on the test strings.
+  Arabic's forms, the standard ligatures and colour sequences), no
+  explicit bidi embeddings, no hinting or subpixel rendering, no variable
+  fonts' CFF2. Bidi ordering, Arabic's joining, the ligatures and marks on
+  their bases match Chromium's widths and ink on the test strings.
 - **Layout uses CSS's automatic minimum size**, not Yoga's 0: items do not
   shrink below their content, so text is not squashed (a container that
   must shrink sets `minHeight: 0`, as in CSS).
