@@ -101,8 +101,9 @@ writes, R8 and RGBA8 textures, blending, scissor) against
 
 ## UI
 
-On Eval: `make esx-check` (markup literals: templates, values, components,
-HTML, the programs the macro rejects), `make text-check` (the rasterizer,
+On Eval: `make view-check` (`@hxmc/view` on a test renderer, on Eval and
+natively: signals, markup, components, text runs, reactive values, the
+control flow components, the programs the macro rejects), `make text-check` (the rasterizer,
 DejaVu Sans' tables and outlines, line layout, a text sample through the
 atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against
@@ -118,8 +119,8 @@ and GIF files the same way (`gif/`, `gif-cases.mjs`); SVG documents drawn
 by `Svg` against Chromium's pixels (`svg/`, `svg-cases.mjs`; the shapes
 must agree, edge anti-aliasing may differ); CSS colours and gradients
 against Chromium's (`css/`, `css-cases.mjs`);
-popups placed, hit and dismissed; then signals and markup rendered into
-nodes, the popup widgets driven by pointer and keys, a VirtualList of
+popups placed, hit and dismissed; then markup rendered into hxmc.ui's
+nodes (`MarkupTest.hx`: attributes from Style's properties), the popup widgets driven by pointer and keys, a VirtualList of
 100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
 `GuideTest.hx`). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,

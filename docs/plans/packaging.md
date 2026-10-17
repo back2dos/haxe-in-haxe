@@ -19,8 +19,10 @@ desktop targets: [docs/using.md](../using.md) and
 - **The `hxmc` haxelib** (`-lib hxmc`, `--custom-target hxmc=out`,
   `-D hxmc.target=<os>-<arch>`), as hxc had one, and the source-only
   packages on haxelib too.
-- **New packages**: `@hxmc/ui`, `@hxmc/text`, `@hxmc/esx` (landed with the UI toolkit),
-  then `@hxmc/view` and `@hxmc/web` ([web.md](web.md)): sources only, a
+- **New packages**: `@hxmc/ui`, `@hxmc/text` (landed with the UI toolkit),
+  `@hxmc/view` (signals and markup; it supersedes `@hxmc/esx`, which landed
+  with the toolkit and is no longer in the repository), then `@hxmc/web`
+  ([web.md](web.md)): sources only, a
   peer dependency on a range of `@hxmc/cli`, an `imports.mjs` each where
   they import from JavaScript.
 - **Using hxmc's built-in compiler**: HXB ties the user's Haxe version to

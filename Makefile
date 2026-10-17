@@ -107,7 +107,7 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs esx-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check text-check ui-check ui-draw-check ui-web-check portcheck measure \
 	quick check full clean distclean
 
 help:
@@ -170,13 +170,14 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
-## esx-check   packages/esx on Eval: markup literals' templates, values, whitespace, components and
-##             HTML, and the programs the macro rejects (packages/esx/test/EsxTest.hx)
+## view-check  packages/view on Eval, then natively: signals, markup (elements, attributes, whitespace,
+##             components, text runs, reactive values), the control flow components, on a test
+##             renderer, and the programs the macro rejects (packages/view/test/ViewTest.hx)
 ## text-check  packages/text on Eval: the rasterizer, DejaVu Sans (metrics, cmap, kerning, outlines),
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
-##             signals and markup rendered into nodes (ReactiveTest.hx); the guide's examples (GuideTest.hx)
+##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx)
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,BoxTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
@@ -525,18 +526,23 @@ audio-web-check: $(TOOL) $(STD)
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
 
-esx-check: $(TOOL)
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/esx/test --run EsxTest $(TOOL)
+VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer
+view-check: $(TOOL) $(STD) $(HOST_RT)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(VIEW_CP) --run ViewTest $(TOOL)
+	$(call hxmc,bin/view/ViewTest,$(VIEW_CP) -main ViewTest $(HXMC_ARGS))
+	bin/view/ViewTest
 
 text-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)
 
+# (hxmc.view and its renderer for hxmc.ui, as -lib hxmc.ui sets it: packages/ui/extraParams.hxml)
+UI_VIEW := -cp packages/view/src -D hxmc.view.renderer=hxmc.ui.view.NodeRenderer
 ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run ReactiveTest
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/esx/src -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run GuideTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run MarkupTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run GuideTest
 
-UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src -cp packages/esx/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
+UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
