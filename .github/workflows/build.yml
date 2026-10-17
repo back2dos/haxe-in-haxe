@@ -710,7 +710,8 @@ jobs:
           export PATH="$PATH:$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
           make android-check ANDROID_TARGET=android-arm64
           make android-check ANDROID_TARGET=android-x86_64
-          make shared-check
+      - name: Shared libraries (glibc mode)
+        run: make shared-check
       - name: KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
