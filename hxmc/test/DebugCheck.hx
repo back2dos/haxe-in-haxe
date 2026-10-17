@@ -17,8 +17,8 @@ using StringTools;
 //   (a debug build's code is the release build's);
 // - the unwind tables: readelf --debug-dump=frames (ELF: an FDE per
 //   function, nothing it warns about), llvm-readobj --unwind (Windows: a
-//   function entry per function with a frame), llvm-dwarfdump --verify (the
-//   DWARF of ELF and Mach-O, and the CFI);
+//   function entry per function with a frame); llvm-dwarfdump --verify (the
+//   DWARF of ELF, Mach-O and PE) and a line table row at the breakpoint;
 // - the sizes of the unwind tables and of the line information.
 // --target cross-builds (no debugger: the tools' checks only); --stage
 // writes the -debug build and its source to DIR, for --run on the target's
@@ -99,7 +99,7 @@ class DebugCheck {
 				} else skip("llvm-readobj: the functions' unwind entries", "(no llvm-readobj)");
 			case _:
 		}
-		if (fmt.kind != "pe") {
+		{
 			if (has("llvm-dwarfdump")) {
 				var r = exec(["llvm-dwarfdump", "--verify", debug], {merge: true});
 				check("llvm-dwarfdump --verify", r.code == 0 && r.out.indexOf("No errors.") >= 0, r.code == 0 ? "" : tail(r.out, 400));
@@ -219,10 +219,14 @@ class DebugCheck {
 		} else if (b.get(0) == 0x4d && b.get(1) == 0x5a) {
 			var pe = b.getInt32(0x3c);
 			var n = b.getUInt16(pe + 6), opt = b.getUInt16(pe + 20);
+			// (long names: /<offset> in the string table after the COFF symbols)
+			var strtab = b.getInt32(pe + 12) + 18 * b.getInt32(pe + 16);
 			var at = pe + 24 + opt;
 			for (i in 0...n) {
 				var h = at + 40 * i;
-				m.set(cstr(h, 8), {off: b.getInt32(h + 20), size: b.getInt32(h + 8)});
+				var name = cstr(h, 8);
+				if (name.startsWith("/")) name = cstr(strtab + Std.parseInt(name.substr(1)), 256);
+				m.set(name, {off: b.getInt32(h + 20), size: b.getInt32(h + 8)});
 			}
 		} else {
 			var n = b.getInt32(16);

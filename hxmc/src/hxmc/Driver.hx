@@ -426,7 +426,11 @@ class Driver {
 			var imp = LinkInputs.peImports(still, abi);
 			if (imp != null) all.push(imp);
 		}
-		var exe = abi.os == "windows" ? new LinkPE(all, abi.arm).link("mainCRTStartup") : abi.os == "macos" ? {
+		var exe = abi.os == "windows" ? {
+			var l = new LinkPE(all, abi.arm);
+			l.symbols = !o.strip;
+			l.link("mainCRTStartup");
+		} : abi.os == "macos" ? {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
 			l.dylibs = dylibs;
