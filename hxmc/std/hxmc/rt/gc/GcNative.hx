@@ -78,21 +78,17 @@ class GcNative {
 	public static function enumParams(v:Dynamic):Array<Dynamic>
 		return W.enumParams(v);
 
-	public static function enumEq(a:Dynamic, b:Dynamic):Bool {
-		if (W.same(a, b)) return true;
-		if (a == null || b == null) return false;
-		if (!W.same(W.enumOf(a), W.enumOf(b)) || W.enumIndex(a) != W.enumIndex(b)) return false;
-		var pa = enumParams(a), pb = enumParams(b);
-		for (i in 0...pa.length) {
-			var x = pa[i], y = pb[i];
-			if (W.kind(x) == 6 && W.kind(y) == 6) {
-				if (!enumEq(x, y)) return false;
-			} else if (!GcDyn.eq(x, y)) return false;
-		}
-		return true;
-	}
+	public static function enumEq(a:Dynamic, b:Dynamic):Bool
+		return W.enumEq(a, b);
 
 	// ---- fields (a class instance's or an anonymous structure's, then those added: GcFields)
+
+	// the index of the name among the names (strings compared directly), -1
+	public static function find(names:Array<String>, name:String):Int {
+		for (i in 0...names.length)
+			if (names[i] == name) return i;
+		return -1;
+	}
 
 	static function extra(o:Dynamic, make:Bool):Null<GcFields> {
 		if (W.kind(o) != 10) return null;
@@ -107,7 +103,7 @@ class GcNative {
 	public static function getField(o:Dynamic, name:String):Dynamic {
 		var names:Array<String> = W.fieldNames(o);
 		if (names != null) {
-			var i = names.indexOf(name);
+			var i = find(names, name);
 			if (i >= 0) return W.objGet(o, i);
 		}
 		var x = extra(o, false);
@@ -117,7 +113,7 @@ class GcNative {
 	public static function setField(o:Dynamic, name:String, v:Dynamic):Void {
 		var names:Array<String> = W.fieldNames(o);
 		if (names != null) {
-			var i = names.indexOf(name);
+			var i = find(names, name);
 			if (i >= 0) {
 				W.objSet(o, i, v);
 				return;
@@ -129,9 +125,9 @@ class GcNative {
 
 	public static function hasField(o:Dynamic, name:String):Bool {
 		var names:Array<String> = W.fieldNames(o);
-		if (names != null && names.indexOf(name) >= 0) return true;
+		if (names != null && find(names, name) >= 0) return true;
 		var x = extra(o, false);
-		return x != null && x.names.indexOf(name) >= 0;
+		return x != null && find(x.names, name) >= 0;
 	}
 
 	public static function fields(o:Dynamic):Array<String> {
@@ -147,7 +143,7 @@ class GcNative {
 	public static function deleteField(o:Dynamic, name:String):Bool {
 		var x = extra(o, false);
 		if (x == null) return false;
-		var i = x.names.indexOf(name);
+		var i = find(x.names, name);
 		if (i < 0) return false;
 		x.names.splice(i, 1);
 		x.values.splice(i, 1);
@@ -203,12 +199,12 @@ class GcFields {
 	public function new() {}
 
 	public function get(name:String):Dynamic {
-		var i = names.indexOf(name);
+		var i = GcNative.find(names, name);
 		return i < 0 ? null : values[i];
 	}
 
 	public function set(name:String, v:Dynamic) {
-		var i = names.indexOf(name);
+		var i = GcNative.find(names, name);
 		if (i < 0) {
 			names.push(name);
 			values.push(v);

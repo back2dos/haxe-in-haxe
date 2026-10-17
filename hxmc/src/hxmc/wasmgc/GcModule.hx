@@ -179,6 +179,48 @@ class GcModule {
 		return t;
 	}
 
+	// a function type by tokens: "i", "f", "l", "p" or "t<type>" (ref null type); "v" no result
+	function funcTypeTokens(params:Array<String>, ret:String):Int {
+		var key = params.join(",") + ">" + ret;
+		var t = funcTypes.get(key);
+		if (t != null) return t;
+		t = newType();
+		var b = types[t];
+		b.u8(0x4F);
+		b.u8(0);
+		b.u8(0x60);
+		function tok(x:String)
+			if (x.charAt(0) == "t") refType(b, Std.parseInt(x.substr(1))) else valType(b, x);
+		Enc.uleb(b, params.length);
+		for (p in params)
+			tok(p);
+		if (ret == "v") b.u8(0) else {
+			b.u8(1);
+			tok(ret);
+		}
+		funcTypes.set(key, t);
+		return t;
+	}
+
+	// a type the IR's type proves (a class's), else the representation (as FuncGen's locals)
+	public function keyOf(t:Ty):String
+		return switch t {
+			case TRef(RObj(c)) if (!c.isInterface): "t" + classType(c);
+			case TRef(RStr): "t" + tString;
+			case _: repr(t);
+		}
+
+	// called only directly (not a method in the dispatch table, a closure's body or
+	// an export): its signature is its own, its class-typed parameters and result typed
+	public function directOnly(f:FuncInfo):Bool
+		return f.lambda == null && f.selfClass == null && f.cSymbol == null;
+
+	public function paramKey(f:FuncInfo, i:Int):String
+		return directOnly(f) ? keyOf(f.args[i].ty) : repr(f.args[i].ty);
+
+	public function retKey(f:FuncInfo):String
+		return directOnly(f) ? keyOf(f.ret) : repr(f.ret);
+
 	public static function sigKey(args:Array<Ty>, ret:Ty):String
 		return [for (a in args) repr(a)].join("") + "_" + repr(ret);
 
@@ -195,9 +237,11 @@ class GcModule {
 			tData.set(k, d);
 			tArr.set(k, structType([{r: "i", mut: true}, {r: "p", mut: true}], tArrBase, false, [null, b -> refType(b, d, false)]));
 		}
-		tEnum = structType([{r: "i", mut: false}], -1, true);
+		// {tag, enum}: the enum's index (prog.enums) makes getEnum a table read
+		tEnum = structType([{r: "i", mut: false}, {r: "i", mut: false}], -1, true);
 		tFunBase = structType([], -1, true);
-		tAnonBase = structType([{r: "p", mut: true}], -1, true);
+		// {added fields (GcFields), layout index}
+		tAnonBase = structType([{r: "p", mut: true}, {r: "i", mut: false}], -1, true);
 		for (k in ["i", "f", "l", "b"])
 			tDyn.set(k, structType([{r: k == "b" ? "i" : k, mut: false}], -1, false));
 		for (k in ["i", "f", "l", "p"])
@@ -212,16 +256,16 @@ class GcModule {
 			if (c.sup == null) tObj = tClass.get(c);
 		}
 		for (e in prog.enums) {
-			var te = structType([{r: "i", mut: false}], tEnum, true);
+			var te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, true);
 			tEnumOf.set(e, te);
 			for (c in e.ctors)
 				if (c.params.length > 0)
-					tCtor.set(c, structType([{r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false));
+					tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false));
 		}
 		for (l in reach.lambdas.keys())
 			lambdaType(l);
 		for (s in prog.shapes)
-			tShape.set(s, structType([{r: "p", mut: true}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
+			tShape.set(s, structType([{r: "p", mut: true}, {r: "i", mut: false}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
 	}
 
 	function closType(s:SigInfo):Int {
@@ -280,6 +324,8 @@ class GcModule {
 				// an enum singleton: its constructor's tag
 				ib.u8(0x41);
 				Enc.sleb(ib, g.init.tag);
+				ib.u8(0x41);
+				Enc.sleb(ib, enumId(g.init.en));
 				gc(ib, 0x00, tEnumOf.get(g.init.en));
 			} else constZero(ib, r);
 			ib.u8(0x0B);
@@ -452,19 +498,40 @@ class GcModule {
 	}
 
 	public function typeOfFunc(f:FuncInfo):Int
-		return funcType(funcKey(f));
+		return directOnly(f) ? funcTypeTokens([for (i in 0...f.args.length) paramKey(f, i)], retKey(f)) : funcType(funcKey(f));
 
-	// a class's type, made now for one never instantiated (after its superclass's)
+	// a class's type, made when first asked for (after its superclass's; its index
+	// taken before its fields are written: they may name classes that name it)
 	public function classType(c:ClassInfo):Int {
 		var t = tClass.get(c);
 		if (t != null) return t;
 		var sup = c.sup == null ? -1 : classType(c.sup);
-		var fields = [{r: "i", mut: false}].concat([for (f in c.fields) {r: repr(f.ty), mut: true}]);
-		t = structType(fields, sup, true);
+		t = tClass.get(c);
+		if (t != null) return t;
+		t = newType();
 		tClass.set(c, t);
 		classOfType.set(t, c);
+		var b = types[t];
+		b.u8(0x50);
+		if (sup >= 0) {
+			b.u8(1);
+			Enc.uleb(b, sup);
+		} else b.u8(0);
+		b.u8(0x5F);
+		Enc.uleb(b, c.fields.length + 1);
+		valType(b, "i");
+		b.u8(0);
+		for (f in c.fields) {
+			var k = keyOf(f.ty);
+			if (k.charAt(0) == "t") refType(b, Std.parseInt(k.substr(1))) else valType(b, repr(f.ty));
+			b.u8(1);
+		}
 		return t;
 	}
+
+	// a class field's type (its key, as keyOf)
+	public function fieldKey(c:ClassInfo, idx:Int):String
+		return keyOf(c.fields[idx].ty);
 
 	// whether type a is t or a subtype (classes: by their hierarchy)
 	final classOfType = new Map<Int, ClassInfo>();
@@ -489,6 +556,13 @@ class GcModule {
 
 	public function ctorType(c:CtorInfo):Int
 		return tCtor.get(c);
+
+	// an enum's index (prog.enums: its type value's id)
+	public function enumId(e:EnumInfo):Int
+		return prog.enums.indexOf(e);
+
+	public function shapeId(s:ShapeInfo):Int
+		return prog.shapes.indexOf(s);
 
 	public function enumTypeOf(e:EnumInfo):Int
 		return tEnumOf.get(e);

@@ -159,21 +159,44 @@ class Meta {
 			b.u8(0x0B);
 		});
 
-	// the index of an anonymous structure's layout, -1 when not one
+	// the index of an anonymous structure's layout (its field 1), -1 when not one
 	public function shapeIndex():Int
 		return helper("meta_shape_index", "p_i", [], b -> {
-			var ss = m.shapeList();
-			for (i in 0...ss.length) {
-				get(b, 0);
-				test(b, m.shapeType(ss[i]));
-				b.u8(0x04);
-				b.u8(0x40);
-				i32(b, i);
-				b.u8(0x0F);
-				b.u8(0x0B);
-			}
+			get(b, 0);
+			test(b, m.anonBaseType);
+			b.u8(0x04);
+			b.u8(0x40);
+			get(b, 0);
+			m.castTo(b, m.anonBaseType);
+			m.gc(b, 0x02, m.anonBaseType, 1);
+			b.u8(0x0F);
+			b.u8(0x0B);
 			i32(b, -1);
 		});
+
+	// a switch on the i32 in local sel over 0...n: each case's code (which may
+	// return), then on past the switch (also for the values outside)
+	static function dispatch(b:Buf, sel:Int, n:Int, body:Int->Void) {
+		b.u8(0x02);
+		b.u8(0x40);
+		for (_ in 0...n) {
+			b.u8(0x02);
+			b.u8(0x40);
+		}
+		get(b, sel);
+		b.u8(0x0E);
+		Enc.uleb(b, n);
+		for (i in 0...n)
+			Enc.uleb(b, i);
+		Enc.uleb(b, n);
+		for (i in 0...n) {
+			b.u8(0x0B);
+			body(i);
+			b.u8(0x0C);
+			Enc.uleb(b, n - 1 - i);
+		}
+		b.u8(0x0B);
+	}
 
 	// the names of an object's fields (class or anonymous structure; null otherwise), by index
 	public function fieldNames():Int {
@@ -206,8 +229,9 @@ class Meta {
 		});
 	}
 
-	// o's field i (of fieldNames), boxed
-	public function objGet():Int
+	// o's field i (of fieldNames), boxed: by its class or layout (br_table), then by i
+	public function objGet():Int {
+		var si = shapeIndex();
 		return helper("meta_obj_get", "pi_p", [Enc.I32], b -> {
 			get(b, 0);
 			test(b, m.objType);
@@ -216,12 +240,9 @@ class Meta {
 			clsOf(b);
 			b.u8(0x21);
 			b.u8(2);
-			for (c in m.classList()) {
-				get(b, 2);
-				i32(b, m.clsOf(c));
-				b.u8(0x46);
-				b.u8(0x04);
-				b.u8(0x40);
+			var cls = m.classList();
+			dispatch(b, 2, cls.length, k -> {
+				var c = cls[k];
 				for (j in 0...c.fields.length) {
 					if (!storable(c.fields[j].ty)) continue;
 					get(b, 1);
@@ -236,35 +257,40 @@ class Meta {
 					b.u8(0x0F);
 					b.u8(0x0B);
 				}
-				b.u8(0x0B);
-			}
+			});
+			m.constZero(b, "p");
+			b.u8(0x0F);
 			b.u8(0x0B);
-			for (s in m.shapeList()) {
-				get(b, 0);
-				test(b, m.shapeType(s));
-				b.u8(0x04);
-				b.u8(0x40);
-				for (j in 0...s.fields.length) {
-					if (!storable(s.fields[j].ty)) continue;
+			get(b, 0);
+			b.u8(0x10);
+			Enc.uleb(b, si);
+			b.u8(0x21);
+			b.u8(2);
+			var ss = m.shapeList();
+			dispatch(b, 2, ss.length, k -> {
+				var sh = ss[k];
+				for (j in 0...sh.fields.length) {
+					if (!storable(sh.fields[j].ty)) continue;
 					get(b, 1);
 					i32(b, j);
 					b.u8(0x46);
 					b.u8(0x04);
 					b.u8(0x40);
 					get(b, 0);
-					m.castTo(b, m.shapeType(s));
-					m.gc(b, 0x02, m.shapeType(s), j + 1);
-					box(b, s.fields[j].ty);
+					m.castTo(b, m.shapeType(sh));
+					m.gc(b, 0x02, m.shapeType(sh), j + 2);
+					box(b, sh.fields[j].ty);
 					b.u8(0x0F);
 					b.u8(0x0B);
 				}
-				b.u8(0x0B);
-			}
+			});
 			m.constZero(b, "p");
 		});
+	}
 
 	// o's field i = v (unboxed)
-	public function objSet():Int
+	public function objSet():Int {
+		var si = shapeIndex();
 		return helper("meta_obj_set", "pip_v", [Enc.I32], b -> {
 			get(b, 0);
 			test(b, m.objType);
@@ -273,12 +299,9 @@ class Meta {
 			clsOf(b);
 			b.u8(0x21);
 			b.u8(3);
-			for (c in m.classList()) {
-				get(b, 3);
-				i32(b, m.clsOf(c));
-				b.u8(0x46);
-				b.u8(0x04);
-				b.u8(0x40);
+			var cls = m.classList();
+			dispatch(b, 3, cls.length, k -> {
+				var c = cls[k];
 				for (j in 0...c.fields.length) {
 					if (!storable(c.fields[j].ty)) continue;
 					get(b, 1);
@@ -290,36 +313,41 @@ class Meta {
 					m.castTo(b, m.classType(c));
 					get(b, 2);
 					unbox(b, c.fields[j].ty);
+					var fk = m.fieldKey(c, j);
+					if (fk.charAt(0) == "t") m.castTo(b, Std.parseInt(fk.substr(1)));
 					m.gc(b, 0x05, m.classType(c), j + 1);
 					b.u8(0x0F);
 					b.u8(0x0B);
 				}
-				b.u8(0x0B);
-			}
+			});
+			b.u8(0x0F);
 			b.u8(0x0B);
-			for (s in m.shapeList()) {
-				get(b, 0);
-				test(b, m.shapeType(s));
-				b.u8(0x04);
-				b.u8(0x40);
-				for (j in 0...s.fields.length) {
-					if (!storable(s.fields[j].ty)) continue;
+			get(b, 0);
+			b.u8(0x10);
+			Enc.uleb(b, si);
+			b.u8(0x21);
+			b.u8(3);
+			var ss = m.shapeList();
+			dispatch(b, 3, ss.length, k -> {
+				var sh = ss[k];
+				for (j in 0...sh.fields.length) {
+					if (!storable(sh.fields[j].ty)) continue;
 					get(b, 1);
 					i32(b, j);
 					b.u8(0x46);
 					b.u8(0x04);
 					b.u8(0x40);
 					get(b, 0);
-					m.castTo(b, m.shapeType(s));
+					m.castTo(b, m.shapeType(sh));
 					get(b, 2);
-					unbox(b, s.fields[j].ty);
-					m.gc(b, 0x05, m.shapeType(s), j + 1);
+					unbox(b, sh.fields[j].ty);
+					m.gc(b, 0x05, m.shapeType(sh), j + 2);
 					b.u8(0x0F);
 					b.u8(0x0B);
 				}
-				b.u8(0x0B);
-			}
+			});
 		});
+	}
 
 	// a type value's field (0 kind, 1 id, 2 name)
 	public function typeField(b:Buf, f:Int) {
@@ -350,21 +378,110 @@ class Meta {
 			m.constZero(b, "p");
 		});
 
-	// the enum of an enum value (its type value), null for anything else
+	// the enum of an enum value (its type value: the table at its enum index), null for anything else
 	public function enumOf():Int
 		return helper("meta_enum_of", "p_p", [], b -> {
-			for (e in m.enumList()) {
-				get(b, 0);
-				test(b, m.enumTypeOf(e));
-				b.u8(0x04);
-				b.u8(0x40);
-				b.u8(0x23);
-				Enc.uleb(b, m.typeValue(TREnum(e)));
-				b.u8(0x0F);
-				b.u8(0x0B);
-			}
+			get(b, 0);
+			test(b, m.enumType);
+			b.u8(0x04);
+			b.u8(0x6D);
+			tableGet(b, enumTypes);
+			get(b, 0);
+			m.castTo(b, m.enumType);
+			m.gc(b, 0x02, m.enumType, 1);
+			m.gc(b, 0x0B, m.dataType("p"));
+			b.u8(0x05);
 			m.constZero(b, "p");
+			b.u8(0x0B);
 		});
+
+	// whether two enum values are equal (Type.enumEq, as hxmc.rt.Dyn's): the
+	// same enum and constructor, their arguments equal (enums compared so, the
+	// rest as Dynamic: gc_dyn_eq)
+	public function enumEq():Int {
+		var h = m.hasHelper("meta_enum_eq");
+		if (h != null) return h;
+		need();
+		var b = new Buf();
+		var idx = m.addHelper("meta_enum_eq", "pp_i", b, [Enc.I32, Enc.I32]);
+		var dynEq = m.exportOf("gc_dyn_eq");
+		get(b, 0);
+		get(b, 1);
+		b.u8(0xD3);
+		b.u8(0x04);
+		b.u8(0x40);
+		i32(b, 1);
+		b.u8(0x0F);
+		b.u8(0x0B);
+		for (x in 0...2) {
+			get(b, x);
+			test(b, m.enumType);
+			b.u8(0x45);
+			b.u8(0x04);
+			b.u8(0x40);
+			i32(b, 0);
+			b.u8(0x0F);
+			b.u8(0x0B);
+		}
+		// (the same enum, local 2; the same constructor, local 3)
+		for (f in 0...2) {
+			get(b, 0);
+			m.castTo(b, m.enumType);
+			m.gc(b, 0x02, m.enumType, f);
+			b.u8(0x22);
+			b.u8(3 - f);
+			get(b, 1);
+			m.castTo(b, m.enumType);
+			m.gc(b, 0x02, m.enumType, f);
+			b.u8(0x47);
+			b.u8(0x04);
+			b.u8(0x40);
+			i32(b, 0);
+			b.u8(0x0F);
+			b.u8(0x0B);
+		}
+		var es = m.enumList();
+		dispatch(b, 2, es.length, ei -> {
+			var e = es[ei];
+			var maxTag = 0;
+			for (c in e.ctors)
+				if (c.tag > maxTag) maxTag = c.tag;
+			dispatch(b, 3, maxTag + 1, tag -> {
+				var c = null;
+				for (k in e.ctors)
+					if (k.tag == tag) c = k;
+				if (c == null || c.params.length == 0) return;
+				var t = m.ctorType(c);
+				for (k in 0...c.params.length) {
+					var r = GcModule.repr(c.params[k]);
+					inline function field(x:Int) {
+						get(b, x);
+						m.castTo(b, t);
+						m.gc(b, 0x02, t, k + 2);
+					}
+					field(0);
+					field(1);
+					switch r {
+						case "i": b.u8(0x47);
+						case "f": b.u8(0x62);
+						case "l": b.u8(0x52);
+						case _:
+							// (references: the same, else both enums compared so, else as Dynamic)
+							b.u8(0x10);
+							Enc.uleb(b, Helpers.refEq3(m, idx, dynEq));
+							b.u8(0x45);
+					}
+					b.u8(0x04);
+					b.u8(0x40);
+					i32(b, 0);
+					b.u8(0x0F);
+					b.u8(0x0B);
+				}
+			});
+		});
+		i32(b, 1);
+		return idx;
+	}
 
 	// the names of an enum's constructors (a type value)
 	public function enumNamesOf():Int
@@ -389,7 +506,7 @@ class Meta {
 					for (k in 0...c.params.length) {
 						get(b, 0);
 						m.castTo(b, m.ctorType(c));
-						m.gc(b, 0x02, m.ctorType(c), k + 1);
+						m.gc(b, 0x02, m.ctorType(c), k + 2);
 						box(b, c.params[k]);
 					}
 					m.gc(b, 0x08, m.dataType("p"), c.params.length);
@@ -426,6 +543,7 @@ class Meta {
 					b.u8(0x04);
 					b.u8(0x40);
 					i32(b, c.tag);
+					i32(b, ei);
 					if (c.params.length == 0) m.gc(b, 0x00, m.enumTypeOf(e)) else {
 						for (k in 0...c.params.length) {
 							get(b, 2);

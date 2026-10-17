@@ -37,17 +37,15 @@ class FuncGen {
 	// a reference type the IR's type proves (a class's: locals of it keep its
 	// type, so that their fields are read without a cast), else the representation
 	function keyOf(t:Ty):String
-		return switch t {
-			case TRef(RObj(c)) if (!c.isInterface): "t" + m.classType(c);
-			case _: repr(t);
-		}
+		return m.keyOf(t);
 
 	public function emit():Buf {
 		var shadows = [];
 		for (i in 0...f.args.length) {
 			var a = f.args[i];
 			local.set(a.id, nparams++);
-			localKey.set(a.id, repr(a.ty));
+			localKey.set(a.id, m.paramKey(f, i));
+			if (m.directOnly(f)) continue;
 			// (a parameter of a class type, or this: cast once into a local of its type)
 			var k = i == 0 && f.selfClass != null ? "t" + m.classType(f.selfClass) : keyOf(a.ty);
 			if (k.charAt(0) == "t") shadows.push({param: nparams - 1, id: a.id, key: k});
@@ -146,6 +144,9 @@ class FuncGen {
 		return switch e {
 			case ELocal(l): localKey.exists(l.id) ? localKey.get(l.id) : repr(l.ty);
 			case ENewObj(c): "t" + m.classType(c);
+			case ECall(fn, _): m.retKey(fn);
+			case EField(c, idx, _): m.fieldKey(c, idx);
+			case EStr(_): "t" + m.stringType;
 			case ECast(_, x): wtype(x);
 			case ENull(_): "n";
 			case _: rOf(e);
@@ -200,7 +201,8 @@ class FuncGen {
 				if (rOf(e) != "v") op(0x1A);
 			case SSetField(c, idx, o, v):
 				exprAs(o, m.classType(c));
-				expr(v);
+				var fk = m.fieldKey(c, idx);
+				if (fk.charAt(0) == "t") exprAs(v, Std.parseInt(fk.substr(1))) else expr(v);
 				gc(0x05, m.classType(c), idx + 1);
 			case SAnonSet(name, t, o, v):
 				// (through the runtime: the field may be one added dynamically)
@@ -253,7 +255,10 @@ class FuncGen {
 			case SSwitch(e, cases, def):
 				switchStmt(e, cases, def);
 			case SReturn(e):
-				if (e != null) expr(e);
+				if (e != null) {
+					var rk = m.retKey(f);
+					if (rk.charAt(0) == "t") exprAs(e, Std.parseInt(rk.substr(1))) else expr(e);
+				}
 				op(0x0F);
 			case SThrow(e):
 				expr(e);
@@ -492,7 +497,7 @@ class FuncGen {
 					blockType(r);
 					localGet(tmp);
 					castTo(m.shapeType(hint));
-					gc(0x02, m.shapeType(hint), hint.slot(name));
+					gc(0x02, m.shapeType(hint), hint.slot(name) + 1);
 					op(0x05);
 					localGet(tmp);
 				}
@@ -518,7 +523,7 @@ class FuncGen {
 			case EEnumParam(c, idx, x):
 				expr(x);
 				castTo(m.ctorType(c));
-				gc(0x02, m.ctorType(c), idx + 1);
+				gc(0x02, m.ctorType(c), idx + 2);
 			case EArrLen(a):
 				expr(a);
 				castTo(m.arrBaseType);
@@ -546,8 +551,10 @@ class FuncGen {
 				op(0x23);
 				Enc.uleb(b, m.typeValue(tr));
 			case ECall(fn, args):
-				for (a in args)
-					expr(a);
+				for (k in 0...args.length) {
+					var pk = m.paramKey(fn, k);
+					if (pk.charAt(0) == "t") exprAs(args[k], Std.parseInt(pk.substr(1))) else expr(args[k]);
+				}
 				call(m.funcOf(fn));
 			case ECallDispatch(sel, s, args):
 				var t = temp("p");
@@ -626,6 +633,7 @@ class FuncGen {
 				gc(0x00, t);
 			case ENewEnum(c, args):
 				i32(c.tag);
+				i32(m.enumId(c.en));
 				if (c.params.length == 0) gc(0x00, m.enumTypeOf(c.en)) else {
 					for (a in args)
 						expr(a);
@@ -650,8 +658,8 @@ class FuncGen {
 				expr(v);
 				gc(0x00, m.boxType(t));
 			case ENewAnon(s, values):
-				op(0xD0);
-				op(0x6D);
+				m.constZero(b, "p");
+				i32(m.shapeId(s));
 				for (v in values)
 					expr(v);
 				gc(0x00, m.shapeType(s));
@@ -788,29 +796,24 @@ class FuncGen {
 		if (StringTools.startsWith(name, w)) {
 			switch name.substr(w.length) {
 				case "strLen":
-					all();
-					castTo(m.stringType);
+					exprAs(args[0], m.stringType);
 					gc(0x0F);
 				case "strGet":
-					expr(args[0]);
-					castTo(m.stringType);
+					exprAs(args[0], m.stringType);
 					expr(args[1]);
 					gc(0x0D, m.stringType);
 				case "strNew":
 					all();
 					gc(0x07, m.stringType);
 				case "strSet":
-					expr(args[0]);
-					castTo(m.stringType);
+					exprAs(args[0], m.stringType);
 					expr(args[1]);
 					expr(args[2]);
 					gc(0x0E, m.stringType);
 				case "strCopy":
-					expr(args[0]);
-					castTo(m.stringType);
+					exprAs(args[0], m.stringType);
 					expr(args[1]);
-					expr(args[2]);
-					castTo(m.stringType);
+					exprAs(args[2], m.stringType);
 					expr(args[3]);
 					expr(args[4]);
 					gc(0x11, m.stringType, m.stringType);
@@ -879,6 +882,9 @@ class FuncGen {
 				case "enumParams":
 					all();
 					call(m.meta.enumParams());
+				case "enumEq":
+					all();
+					call(m.meta.enumEq());
 				case "enumCreate":
 					all();
 					call(m.meta.enumCreate());
@@ -1151,8 +1157,7 @@ class FuncGen {
 				release("i", t);
 				release("p", s);
 			case "String_length":
-				all();
-				castTo(m.stringType);
+				exprAs(args[0], m.stringType);
 				gc(0x0F);
 			case "Math_NaN": f64(Math.NaN);
 			case "Math_POSITIVE_INFINITY": f64(Math.POSITIVE_INFINITY);

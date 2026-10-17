@@ -362,6 +362,44 @@ class Helpers {
 		return idx;
 	}
 
+	// two references of enum arguments equal: the same, else both enums
+	// (enumEq), else as Dynamic (dynEq)
+	public static function refEq3(m:GcModule, enumEq:Int, dynEq:Int):Int {
+		var h = m.hasHelper("ref_eq3");
+		if (h != null) return h;
+		var b = new Buf();
+		get(b, 0);
+		get(b, 1);
+		b.u8(0xD3);
+		b.u8(0x04);
+		b.u8(0x40);
+		i32(b, 1);
+		b.u8(0x0F);
+		b.u8(0x0B);
+		get(b, 0);
+		b.u8(0xFB);
+		b.u8(0x14);
+		Enc.sleb(b, m.enumType);
+		get(b, 1);
+		b.u8(0xFB);
+		b.u8(0x14);
+		Enc.sleb(b, m.enumType);
+		b.u8(0x71);
+		b.u8(0x04);
+		b.u8(0x40);
+		get(b, 0);
+		get(b, 1);
+		b.u8(0x10);
+		Enc.uleb(b, enumEq);
+		b.u8(0x0F);
+		b.u8(0x0B);
+		get(b, 0);
+		get(b, 1);
+		b.u8(0x10);
+		Enc.uleb(b, dynEq);
+		return m.addHelper("ref_eq3", "pp_i", b, []);
+	}
+
 	// the kind of a Dynamic value (hxmc.rt.gc.W.kind): 0 null, 1 Int, 2 Float,
 	// 3 Bool, 4 String, 5 class instance, 6 enum, 7 array, 8 function, 9 Int64,
 	// 10 anonymous structure, 11 other, 12 a type value (Class, Enum)

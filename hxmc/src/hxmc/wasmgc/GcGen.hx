@@ -112,6 +112,7 @@ class Reach {
 			case ECallDispatch(sel, _, _): sels.set(sel, true);
 			case ECallHost(n, args, _):
 				hosts.set(n, (hosts.exists(n) ? hosts.get(n) : 0) + 1);
+				if (n == "hxmc_rt_gc_W_enumEq") export("gc_dyn_eq");
 				if (n == "Type_createEmptyInstance") switch args[0] {
 					case EType(TRClass(c)): cls(c);
 					case _:

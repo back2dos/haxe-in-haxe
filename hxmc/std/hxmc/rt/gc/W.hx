@@ -62,6 +62,8 @@ extern class W {
 	static function enumIndex(v:Dynamic):Int;
 	static function enumNames(e:Dynamic):Dynamic;
 	static function enumParams(v:Dynamic):Array<Dynamic>;
+	// Type.enumEq (hxmc.wasmgc.Meta.enumEq)
+	static function enumEq(a:Dynamic, b:Dynamic):Bool;
 	static function enumCreate(e:Dynamic, index:Int, params:Array<Dynamic>):Dynamic;
 	// the classes' types then the enums' (null past the end)
 	static function typeAt(i:Int):Dynamic;

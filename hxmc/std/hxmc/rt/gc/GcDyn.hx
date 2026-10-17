@@ -25,6 +25,10 @@ class GcDyn {
 		return eq(a, b) ? 0 : -1;
 	}
 
+	// (for the generated code's enum comparisons: hxmc.wasmgc.Meta.enumEq)
+	@:hxmc.export("gc_dyn_eq") static function dynEqExport(a:Dynamic, b:Dynamic):Bool
+		return eq(a, b);
+
 	public static function string(v:Dynamic):String
 		return GcStr.dynString(v);
 }

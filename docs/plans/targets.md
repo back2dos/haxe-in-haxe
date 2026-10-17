@@ -72,8 +72,32 @@ median of 3 (`hxmc/test/wasmgc`):
 | Nbody | 0.15 | 0.13 | 0.21 | 50 | 148 | 3.8 | 35.3 |
 | Trees | 0.15 | 0.34 | 0.48 | 86 | 165 | 2.2 | 33.4 |
 
-Not yet: Dynamic field access, anonymous structures read without their
-layout, reflection, `Bytes`, maps, `Class`/`Enum` values, the std's `sys` APIs.
+Every HaxeBenchmarks case runs, its check identical on every target
+(`make bench`'s `hxmc-wasmgc` target). Its run here against linear memory
+(median of 3, node 22; formatter_noio and json after the last runtime fixes):
+
+| case | linear s | WasmGC s | linear MB | WasmGC MB | linear KB | WasmGC KB |
+| --- | --- | --- | --- | --- | --- | --- |
+| alloc | 2.82 | 3.27 | 1555 | 665 | 41 | 9 |
+| bcrypt | 4.23 | 3.15 | 150 | 53 | 277 | 305 |
+| binarytrees | 1.30 | 1.39 | 182 | 84 | 37 | 7 |
+| json | 0.84 | 0.94 | 336 | 189 | 116 | 29 |
+| mandelbrot | 1.09 | 2.27 | 151 | 57 | 42 | 9 |
+| mandelbrot_anon | 3.21 | 4.14 | 151 | 57 | 45 | 9 |
+| nbody | 1.37 | 1.36 | 148 | 49 | 41 | 10 |
+| sha256 | 0.42 | 0.51 | 154 | 67 | 249 | 291 |
+| sha512 | 0.18 | 0.10 | 150 | 55 | 256 | 295 |
+| formatter_noio | 8.93 | 16.9 | 257 | 152 | 1087 | 497 |
+
+WasmGC takes a third to a half of the memory everywhere and is as fast or
+faster on half the cases. It is slower where small objects are allocated
+and read in tight loops (mandelbrot: V8's allocation and the casts at
+function boundaries; formatter_noio: closures, arrays read through
+helpers). Left to try: typed arrays in locals (the fast path inline),
+br_on_cast instead of ref.test then ref.cast, precise types for methods
+(their signatures are shared with the dispatch table). ObjectMap has one
+bucket (WasmGC objects have no address to hash); `sys.io.File` streams and
+processes are not supported.
 
 ## Android
 
