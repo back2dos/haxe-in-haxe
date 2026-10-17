@@ -33,6 +33,13 @@ MBEDTLS_COMMIT=2fc8413bfcb51354c8e679141b17b3f1a5942561
 LIBUV_VERSION=1.48.0
 LIBUV_URL=https://github.com/libuv/libuv.git
 LIBUV_COMMIT=e9f29cb984231524e3931aa0ae2c5dae1a32884e
+# Android: Bionic's headers (libc/include and the kernel's uapi headers, merged
+# into include/) and its version scripts (libc.map.txt, libm.map.txt,
+# libdl.map.txt into bionic/: mkrt.sh's import table), at a pinned commit of
+# AOSP's bionic (a sparse, blobless fetch: a few MB); mbedtls and libuv are
+# compiled against them (zig has no Bionic of its own)
+BIONIC_URL=https://android.googlesource.com/platform/bionic
+BIONIC_COMMIT=731631f300090436d7f5df80d50b6275c8c60a93
 
 ZIG=${ZIG:-zig}
 command -v "$ZIG" >/dev/null || { echo "deps: zig not found (set ZIG)" >&2; exit 1; }
@@ -50,6 +57,9 @@ case $T in
 	windows-arm64) TRIPLE=aarch64-windows-gnu OS=win ;;
 	macos-x86_64) TRIPLE=x86_64-macos OS=darwin CFLAGS="$CFLAGS -mmacosx-version-min=10.15" ;;
 	macos-arm64) TRIPLE=aarch64-macos OS=darwin CFLAGS="$CFLAGS -mmacosx-version-min=11.0" ;;
+	# Android 10 (API 29): ELF TLS (TLSDESC) in Bionic, hxmc's floor
+	android-arm64) TRIPLE=aarch64-linux-android.29 OS=linux BIONIC_ARCH=arm64 ;;
+	android-x86_64) TRIPLE=x86_64-linux-android.29 OS=linux BIONIC_ARCH=x86 ;;
 	*) echo "deps: unknown target $T" >&2; exit 1 ;;
 esac
 # (glibc: zig compiles position-independent code for dynamically linked
@@ -57,6 +67,8 @@ esac
 # binds those slots at load time, and the rest pc-relatively)
 case $T in
 	*-glibc) CFLAGS="$CFLAGS -fPIE -ffunction-sections -fdata-sections" ;;
+	# (Android: a shared library, position-independent; Bionic's headers)
+	android-*) CFLAGS="$CFLAGS -fPIC -ffunction-sections -fdata-sections -isystem $OUT/include" ;;
 	linux-*) CFLAGS="$CFLAGS -fno-pie -fno-pic -ffunction-sections -fdata-sections" ;;
 esac
 CC="$ZIG cc -target $TRIPLE"
@@ -68,13 +80,15 @@ STAMP="mbedtls $MBEDTLS_VERSION $MBEDTLS_COMMIT
 libuv $LIBUV_VERSION $LIBUV_COMMIT
 cflags $CFLAGS
 $TOOLCHAIN"
+case $T in android-*) STAMP="$STAMP
+bionic $BIONIC_COMMIT" ;; esac
 if [ -f "$OUT/VERSIONS" ] && [ "$(cat "$OUT/VERSIONS")" = "$STAMP" ]; then
 	echo "deps: $OUT is up to date"
 	exit 0
 fi
 
 W=$OUT/build
-rm -rf "$W" "$OUT/include" "$OUT/lib" "$OUT/VERSIONS"
+rm -rf "$W" "$OUT/include" "$OUT/lib" "$OUT/bionic" "$OUT/VERSIONS"
 mkdir -p "$W" "$OUT/include" "$OUT/lib"
 
 # fetch <name> <url> <tag> <commit>
@@ -105,6 +119,28 @@ archive() {
 	# (GNU format everywhere: hxmc --mkrt and --mkrt-macho read its index)
 	$AR --format=gnu rcs "$OUT/lib/$lib" $objs
 }
+
+case $T in
+android-*)
+	echo "deps: bionic $BIONIC_COMMIT"
+	B=$W/bionic
+	mkdir -p "$B"
+	git -C "$B" init -q
+	git -C "$B" fetch -q --depth 1 --filter=blob:none "$BIONIC_URL" "$BIONIC_COMMIT"
+	git -C "$B" sparse-checkout set --no-cone /libc/include /libc/kernel/uapi /libc/kernel/android/uapi /libc/libc.map.txt /libm/libm.map.txt /libdl/libdl.map.txt /libc/NOTICE
+	git -C "$B" checkout -q FETCH_HEAD
+	got=$(git -C "$B" rev-parse HEAD)
+	[ "$got" = "$BIONIC_COMMIT" ] || { echo "deps: bionic: got $got, expected $BIONIC_COMMIT" >&2; exit 1; }
+	cp -r "$B/libc/include/." "$OUT/include/"
+	for d in "$B"/libc/kernel/uapi/*; do
+		case ${d##*/} in asm-generic) cp -r "$d" "$OUT/include/" ;; asm-*) ;; *) cp -r "$d" "$OUT/include/" ;; esac
+	done
+	cp -r "$B/libc/kernel/uapi/asm-$BIONIC_ARCH/asm" "$OUT/include/asm"
+	cp -r "$B/libc/kernel/android/uapi/." "$OUT/include/"
+	mkdir -p "$OUT/bionic"
+	cp "$B/libc/libc.map.txt" "$B/libm/libm.map.txt" "$B/libdl/libdl.map.txt" "$OUT/bionic/"
+	cp "$B/libc/NOTICE" "$OUT/LICENSE.bionic" ;;
+esac
 
 echo "deps: mbedtls $MBEDTLS_VERSION ($TOOLCHAIN)"
 fetch mbedtls-$MBEDTLS_VERSION "$MBEDTLS_URL" v$MBEDTLS_VERSION $MBEDTLS_COMMIT
@@ -140,7 +176,9 @@ case $OS in
 	linux)
 		UV="$UV src/unix/proctitle.c src/unix/linux.c src/unix/procfs-exepath.c src/unix/random-getrandom.c
 src/unix/random-sysctl-linux.c"
-		UV_FLAGS="$UV_FLAGS -D_GNU_SOURCE -D_POSIX_C_SOURCE=200112" ;;
+		UV_FLAGS="$UV_FLAGS -D_GNU_SOURCE -D_POSIX_C_SOURCE=200112"
+		# (Android: CMakeLists.txt's list for it, getentropy too)
+		case $T in android-*) UV="$UV src/unix/random-getentropy.c" UV_FLAGS="-Iinclude -Isrc -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE" ;; esac ;;
 	darwin)
 		# fsevents.c and darwin*.c load CoreFoundation/CoreServices with dlopen
 		# (declarations from src/unix/darwin-stub.h): no SDK frameworks to link

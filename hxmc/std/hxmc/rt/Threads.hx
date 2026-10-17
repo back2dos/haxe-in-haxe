@@ -103,7 +103,9 @@ class Threads {
 		Mem.setPtr(byId, 8, m);
 		self = m;
 		thrStats = Os.has("RT_STATS");
-		if (thrStats) C.atexit(Callback.addr(thrReport));
+		if (thrStats) {
+			if (Mem.target() >= 9) C.__cxa_atexit(Callback.addr(thrReport), Ptr.nil(), Mem.sym("__dso_handle")) else C.atexit(Callback.addr(thrReport));
+		}
 	}
 
 	@:hxmc.callback @:hxmc.noGc static function thrReport():Void {
@@ -541,6 +543,7 @@ class Threads {
 
 @:hxmc.c @:hxmc.fast private extern class C {
 	static function atexit(f:Ptr):Int;
+	static function __cxa_atexit(f:Ptr, arg:Ptr, dso:Ptr):Int;
 }
 
 // a call through a C function pointer (the @:hxmc.callback run: its

@@ -29,10 +29,15 @@ class Driver {
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
 		abi.framePointers = !abi.wasm && (abi.arm || o.framePointers);
-		if (o.shared) {
+		if (o.shared && !abi.android) {
+			// (Linux in the dynamic glibc mode: the C library's imports; Android always is one)
+			if (abi.interp == null) throw "hxmc: -D hxmc.shared: a shared library is written for Linux in the dynamic glibc mode (-D hxmc.libc=glibc) and Android";
 			abi.reloc = Pic;
 			abi.output = SharedLibrary;
+			abi.tls = Desc;
 		}
+		for (e in o.exports)
+			if (abi.exports.indexOf(e) < 0) abi.exports.push(e);
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
 
@@ -223,7 +228,8 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "")
+			+ (abi.output == SharedLibrary ? "+shared" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)
@@ -424,17 +430,17 @@ class Driver {
 		var dylibs = new Map<String, String>();
 		// (a shared object named as such, libm.so.6: never from an object, which
 		// may define the name too, as compiler-rt's weak cos)
-		if (abi.os == "linux" && abi.interp == null)
+		if (abi.os == "linux" && !abi.linksDynamically())
 			for (n => lib in hxmc.ir.CInterop.LIBS)
 				if (lib.indexOf(".so") >= 0)
 					throw 'hxmc: link: the C function $n of the shared library $lib (@:hxmc.lib): Linux executables are static with musl (the default); shared libraries need the dynamic glibc mode (-D hxmc.libc=glibc)';
 		for (n in still) {
 			var lib = hxmc.ir.CInterop.LIBS.get(n);
-			if (abi.os == "linux" && abi.interp == null && lib != null)
+			if (abi.os == "linux" && !abi.linksDynamically() && lib != null)
 				throw 'hxmc: link: the C function $n of the shared library $lib (@:hxmc.lib): Linux executables are static with musl (the default); shared libraries need the dynamic glibc mode (-D hxmc.libc=glibc)';
-			if (abi.os == "linux" && abi.interp == null && hxmc.ir.CInterop.USER.exists(n))
+			if (abi.os == "linux" && !abi.linksDynamically() && hxmc.ir.CInterop.USER.exists(n))
 				throw 'hxmc: link: the C function $n is defined nowhere: Linux executables are static, so it must come from an object or archive (-D hxmc.link=<file>, or @:hxmc.link), or from a shared library in the dynamic glibc mode (-D hxmc.libc=glibc, @:hxmc.lib)';
-			if ((abi.os == "macos" || abi.interp != null) && lib != null) dylibs.set(n, LinkInputs.libFile(lib, abi));
+			if ((abi.os == "macos" || abi.linksDynamically()) && lib != null) dylibs.set(n, LinkInputs.libFile(lib, abi));
 		}
 		if (abi.os == "windows") {
 			var imp = LinkInputs.peImports(still, abi);
@@ -450,9 +456,13 @@ class Driver {
 			l.dylibs = dylibs;
 			l.link("main");
 		} : {
-			var l = if (abi.interp != null) {
+			// (an APK: its lib<name>.so, Apk)
+			var apk = abi.android && StringTools.endsWith(out, ".apk");
+			var l = if (abi.linksDynamically()) {
 				var d = new LinkDyn(all, abi);
 				d.libs = dylibs;
+				if (abi.output == SharedLibrary) d.soname = apk ? "lib" + hxmc.android.Apk.libName(out) + ".so" : haxe.io.Path.withoutDirectory(out);
+				if (abi.android && !apk) d.optional = ["ANativeActivity_onCreate"];
 				// (a library named without a directory or a version: next to the executable)
 				d.origin = Lambda.exists([for (f in dylibs) f], f -> f.indexOf("/") < 0 && StringTools.endsWith(f, ".so"));
 				d;
@@ -466,6 +476,11 @@ class Driver {
 			exe;
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
+		// Android: the shared library alone (lib<name>.so), or in an APK
+		if (abi.android && StringTools.endsWith(out, ".apk")) {
+			hxmc.android.Apk.write(out, exe, abi, o.android, hxmc.android.Apk.keyFile(o.android, CacheDir.root()));
+			return;
+		}
 		sys.io.File.saveBytes(out, exe);
 		// under WASI (the tool as a WebAssembly module) there are no processes:
 		// whoever runs the module marks the output executable (HXMC_EXE_LIST

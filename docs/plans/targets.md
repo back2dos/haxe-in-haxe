@@ -133,10 +133,21 @@ Google's `d8`.
 
 Order:
 
-1. GPU only: `NativeActivity` (`hasCode="false"`), EGL and the GLES back
-   end on its `ANativeWindow`, the cube; the APK writer (binary XML, zip,
-   v2 signing with a generated debug key through mbedtls); `adb` only to
-   install. CI: an x86-64 emulator with KVM on a Linux runner.
+1. GPU only (done, [hxmc.md](../hxmc.md#android)): `NativeActivity`
+   (`hasCode="false"`), EGL and the GLES back end on its `ANativeWindow`,
+   the cube; the APK writer (binary XML, an aligned zip, v2 signing with a
+   generated debug key: ECDSA P-256 in plain Haxe rather than through
+   mbedtls, so that the WebAssembly tool writes APKs too); `adb` only to
+   install. No `resources.arsc` was needed (the label a plain string, a
+   framework theme). TLS: TLSDESC on arm64, the general dynamic model on
+   x86-64 (Bionic implements TLSDESC on arm64 and riscv64 only), never
+   initial-exec (refused for a dlopen'ed library); the floor is API 29, the
+   first Bionic with ELF TLS. CI: AndroidTest on an x86-64 emulator with
+   KVM on a Linux runner, not a required check yet. Left from this step:
+   several ABIs in one APK, release signing with the developer's keystore
+   (PKCS#12, v3 for key rotation), icons and a `resources.arsc`, the `.aab`
+   for Google Play, `DT_RELR` (API 30+) or Android's packed relocations to
+   shrink the RELATIVE table, RELRO for the data that holds addresses.
 2. Native controls: JNI bindings in Haxe (`JNIEnv` is a function table,
    bound like COM's vtables), an Android backend for `hxmc.ui.native`'s
    `NativeHost` (`android.widget.*` laid out by our flexbox). Callbacks

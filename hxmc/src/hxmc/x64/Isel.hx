@@ -485,7 +485,8 @@ class Isel implements hxmc.Target.Selector {
 		// (hxmc_tls_base in the runtime), once the parameters are out of
 		// their registers
 		var macTls = false;
-		if (abi.tls == MachoTlv)
+		// (Android's TLSDESC: the module's block from hxmc_tls_base too, LinkDyn)
+		if (abi.tls == MachoTlv || abi.tls == Desc)
 			for (b in mf.blocks)
 				for (i in b.ins)
 					if (i.op == TlsLoad || i.op == TlsStore) macTls = true;

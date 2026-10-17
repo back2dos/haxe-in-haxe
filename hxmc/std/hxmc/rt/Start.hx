@@ -14,6 +14,10 @@ import hxmc.unsafe.*;
 class Start {
 	@:hxmc.export("rt_argc") static var argc:Int;
 	@:hxmc.export("rt_argv") static var argv:Ptr;
+	// Android: the address of the C library's environ, taken here (a shared
+	// library reaches a library's variable through its GOT slot, which the
+	// linker can make of an address computation but not of a load)
+	public static var environ:Ptr;
 
 	@:hxmc.export("rt_init") @:hxmc.noGc static function init(ng:Int, ac:Int, av:Ptr):Void {
 		if (Mem.os() == 2) {
@@ -40,6 +44,7 @@ class Start {
 		}
 		argc = ac;
 		argv = av;
+		if (Mem.target() >= 9) environ = Mem.sym("environ");
 		var sbase = Gc.init(ng);
 		Threads.init(sbase);
 		var g = LibC.malloc(((ng + 1) : I64) * 8);
@@ -53,7 +58,8 @@ class Start {
 			Mem.setI64(to, 16 * t, (((Types.T_TYPEOBJ : I64) << 32) | ((Types.K_RAW << 28) | 1)));
 			Mem.setI32(to, 16 * t + 8, t);
 		}
-		U.atexit(Callback.addr(Gc.report));
+		// (Android: Bionic's atexit is crtbegin_so.o's, __cxa_atexit with the library's handle)
+		if (Mem.target() >= 9) U.__cxa_atexit(Callback.addr(Gc.report), Ptr.nil(), Mem.sym("__dso_handle")) else U.atexit(Callback.addr(Gc.report));
 	}
 
 	// The program's main runs on a reserved stack of RT_STACK_MB (default
@@ -122,6 +128,7 @@ class Start {
 
 @:hxmc.c @:hxmc.fast private extern class U {
 	static function atexit(f:Ptr):Int;
+	static function __cxa_atexit(f:Ptr, arg:Ptr, dso:Ptr):Int;
 	static function _setmode(fd:Int, mode:Int):Int;
 }
 
