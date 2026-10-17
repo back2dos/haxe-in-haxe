@@ -1,0 +1,41 @@
+exit 0
+L5lfalse
+C1ctrue
+4atrue 0atrue 4.5
+B7bfalse B0bfalse 9
+C9ctrue C0ctrue 9
+L5lfalse L0lfalse 4.5
+C9ctrue
+-1 3.5 2
+6 4.5 1
+5 1.5 true s
+1 1.5 true s
+1 2.5 false s
+4atrue 3atrue 3.5
+B7bfalse B3bfalse 4.5
+C9ctrue C3ctrue 4.5
+L5lfalse L3lfalse 3.5
+5.5 -1
+13.5 6
+L5lfalse
+5 1.5 true s
+2 1.5 true s
+8
+8
+27
+5 2.5 true s
+3 2.5 true s
+5 1.5 true s
+[0.5,1]
+4atrue 2atrue 3.5 3rtrue
+3.5 3
+B7bfalse B2bfalse 4.5 B3rfalse
+4.5 2
+C9ctrue C2ctrue 4.5 C3rtrue
+4.5 2
+L5lfalse L2lfalse 3.5 L3rfalse
+3.5 3
+5.5 null
+3.5 null
+7
+1

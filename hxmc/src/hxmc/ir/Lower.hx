@@ -470,7 +470,7 @@ class Lower {
 						else TRef(RObj(classInfo(c)));
 				}
 			case TEnum(e, _): TRef(REnum(enumInfo(e)));
-			case TFun(s): TRef(RClos(prog.sig([for (a in s.args) ty(a.type)], ty(s.ret))));
+			case TFun(s): TRef(RClos(prog.sig([for (a in s.args) a.optional ? optionalTy(ty(a.type)) : ty(a.type)], ty(s.ret))));
 			case TAnon(an):
 				switch an.aStatus {
 					case ClassStatics(_) | EnumStatics(_) | AbstractStatics(_): TRef(RType);
@@ -480,6 +480,19 @@ class Lower {
 			case _: TRef(RAny);
 		}
 	}
+
+	// An optional argument of a function type (`?x:Int`, or `x:Int = 1`) is
+	// nullable when its type is a number or a Bool: a call through a closure
+	// passes null for it when left out, and the function the closure calls
+	// gives it its own default value (the closures of functions,
+	// `closureArgTy`, and function literals, FnLower.bindArgs). Direct calls
+	// pass the callee's default values themselves.
+	public static function optionalTy(t:Ty):Ty
+		return t == TI32 || t == TF64 || t == TBool ? TRef(RNull(t)) : t;
+
+	// an argument of a closure calling a function: nullable where the function has a default value
+	public static function closureArgTy(t:Ty, d:Null<TExpr>):Ty
+		return d != null ? optionalTy(t) : t;
 
 	// Where a reference is needed (Dynamic, a type parameter, an Array's
 	// element, an enum's argument, a structural type's field, Null<S>), a
@@ -774,6 +787,8 @@ class Lower {
 		var dtf = decl != null ? funcOf(decl) : null;
 		if (dtf != null && dtf.tfArgs.length == tf.tfArgs.length) {
 			signature(fi, dtf, TRef(RObj(root)));
+			// (the default values are the method's own: an override may declare others)
+			defaults.set(fi, [null].concat([for (a in tf.tfArgs) a.defaultValue]));
 		} else if (decl != null && dtf == null) {
 			// interface or abstract declaration without a body: use its type
 			switch followFun(decl.cfType) {
@@ -794,7 +809,35 @@ class Lower {
 			}
 		} else signature(fi, tf, TRef(RObj(root)));
 		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, ci, null).run(tf))));
+		defaultsEntry(fi, ci);
 		return fi;
+	}
+
+	// A method called dynamically (by name through Dynamic, Reflect) may be
+	// given fewer arguments than it has: where it has default values for
+	// numbers or Bools, its entry in the method table (DataGen.types: dynamic
+	// and structural calls) is this one, those arguments nullable
+	// (closureArgTy, as a closure of a function type with optional
+	// arguments), null meaning the default.
+	function defaultsEntry(fi:FuncInfo, ci:ClassInfo) {
+		if (fi.sret) return;
+		var ds = defaults.get(fi);
+		if (ds == null) return;
+		var tys = [for (i in 1...fi.args.length) closureArgTy(fi.args[i].ty, i < ds.length ? ds[i] : null)];
+		var differs = false;
+		for (i in 0...tys.length)
+			if (tys[i] != fi.args[i + 1].ty) differs = true;
+		if (!differs) return;
+		var w = new FuncInfo(fi.name + "__dflt", fi.module);
+		w.args.push(new Local(0, "this0", fi.args[0].ty));
+		for (i in 0...tys.length)
+			w.args.push(new Local(i + 1, fi.args[i + 1].name, tys[i]));
+		w.ret = fi.ret;
+		w.pos = fi.pos;
+		w.display = fi.display;
+		fi.dfltEntry = w;
+		prog.funcs.push(w);
+		pending.push(guarded(w, () -> lowerBody(w, null, () -> new FnLower(this, w, ci, null).forwardDefaults(fi))));
 	}
 
 	public function ctor(c:TClass):FuncInfo {
@@ -886,7 +929,11 @@ class Lower {
 	public function staticClosure(f:FuncInfo):LambdaInfo {
 		var li = staticClosures.get(f);
 		if (li != null) return li;
-		var sig = prog.sig([for (a in f.args) if (!(f.sret && a == f.args[f.args.length - 1])) a.ty], f.ret);
+		var ds = defaults.get(f);
+		var sig = prog.sig([
+			for (i in 0...f.args.length)
+				if (!(f.sret && i == f.args.length - 1)) closureArgTy(f.args[i].ty, ds != null && i < ds.length ? ds[i] : null)
+		], f.ret);
 		li = newLambda(sig, [], fl -> fl.forward(f, null), f.name + "__sclos", f.module);
 		staticClosures.set(f, li);
 		return li;
@@ -916,10 +963,31 @@ class Lower {
 	// a closure over `this` calling a method (obj.method used as a value)
 	var boundClosures = new Map<FuncInfo, LambdaInfo>();
 
-	public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo}>, owner:FuncInfo):LambdaInfo {
+	public function boundClosure(f:Null<FuncInfo>, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo):LambdaInfo {
+		if (f == null) {
+			// (an interface's method, or an abstract one no class of the chain
+			// implements: dispatched, the selector's signature without the
+			// receiver and the result address; nullable where an implementation
+			// has a default value)
+			var ds = dispatch.sig;
+			var n = ds.ret.match(TStruct(_)) ? ds.args.length - 1 : ds.args.length;
+			var impls = dispatch.cls != null ? implementors(dispatch.cls, prog.selectors[dispatch.sel].name) : [];
+			function hasDefault(i:Int):Bool {
+				for (k in impls)
+					switch k.field.cfExpr.eexpr {
+						case TFunction(tf) if (i - 1 < tf.tfArgs.length && tf.tfArgs[i - 1].defaultValue != null): return true;
+						case _:
+					}
+				return false;
+			}
+			var sig = prog.sig([for (i in 1...n) hasDefault(i) ? optionalTy(ds.args[i]) : ds.args[i]], ds.ret);
+			var self = new Local(-1, "self", TRef(RObj(root)));
+			return newLambda(sig, [self], fl -> fl.forward(null, dispatch), lambdaName(owner), owner.module);
+		}
 		var li = boundClosures.get(f);
 		if (li != null && dispatch == null) return li;
-		var args = [for (i in 1...(f.sret ? f.args.length - 1 : f.args.length)) f.args[i].ty];
+		var ds = defaults.get(f);
+		var args = [for (i in 1...(f.sret ? f.args.length - 1 : f.args.length)) closureArgTy(f.args[i].ty, ds != null && i < ds.length ? ds[i] : null)];
 		var sig = prog.sig(args, f.ret);
 		var self = new Local(-1, "self", TRef(RObj(root)));
 		li = newLambda(sig, [self], fl -> fl.forward(f, dispatch), dispatch == null ? f.name + "__bound" : lambdaName(owner), dispatch == null ? f.module : owner.module);
@@ -1037,35 +1105,60 @@ class Lower {
 		return null;
 	}
 
-	// the default arguments a dispatched call passes for those left out: its
-	// implementation's (the callee's, as Haxe's static targets apply them);
-	// an interface's method has no body, so the first implementation's
-	// (read from its function, not compiled for it: it may be one this
-	// program never makes)
-	public function dispatchDefaults(c:TClass, name:String):Null<Array<Null<TExpr>>> {
-		var impl = lookupMethod(c, name);
-		if (impl != null) return defaults.get(method(impl.cls, impl.field));
-		for (d in c.clDescendants) {
-			var m = lookupMethod(d, name);
-			var tf = m == null ? null : funcOf(m.field);
-			if (tf != null) return [null].concat([for (a in tf.tfArgs) a.defaultValue]);
+	// the classes under c (c itself, its subclasses; for an interface, the
+	// classes implementing it and theirs) declaring a body for the method
+	// `name`, each after its superclass
+	public function implementors(c:TClass, name:String):Array<{cls:TClass, field:TClassField}> {
+		var r = [];
+		var seen = new haxe.ds.ObjectMap<TClass, Bool>();
+		function visit(k:TClass) {
+			if (seen.exists(k)) return;
+			seen.set(k, true);
+			var f = k.clFields.get(name);
+			if (f != null && f.cfExpr != null && !k.hasClassFlag(CInterface)) r.push({cls: k, field: f});
+			for (d in k.clDescendants)
+				visit(d);
 		}
-		return null;
+		visit(c);
+		function depth(k:TClass):Int
+			return k.clSuper == null ? 0 : 1 + depth(k.clSuper.cls);
+		haxe.ds.ArraySort.sort(r, (a, b) -> depth(a.cls) - depth(b.cls));
+		return r;
 	}
 
-	// virtual unless no known subclass overrides it
+	// virtual unless no known subclass overrides it; an abstract method no
+	// class of the chain implements is dispatched too (no instance may exist,
+	// but the call must still compile)
 	public function needsDispatch(c:TClass, name:String):Bool {
 		if (c.hasClassFlag(CInterface)) return true;
+		if (lookupMethod(c, name) == null) return true;
 		var f = c.clFields.get(name);
 		if (f != null && f.hasClassFieldFlag(CfFinal)) return false;
 		var subs = subclasses.get(c);
 		if (subs != null)
 			for (d in subs)
 				if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
-		// a subclass loaded later may still override: dispatch if any descendant is known to the typer
+		// a subclass lowered later may still override: dispatch if any
+		// descendant the typer knows does (clDescendants holds the direct
+		// subclasses: their subclasses too)
+		return overriddenBelow(c, name);
+	}
+
+	var overridden = new Map<String, Bool>();
+
+	function overriddenBelow(c:TClass, name:String):Bool {
+		var key = core.Globals.sTypePath(c.clPath) + "." + name;
+		var r = overridden.get(key);
+		if (r != null) return r;
+		r = false;
 		for (d in c.clDescendants)
-			if (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null) return true;
-		return false;
+			if (!d.hasClassFlag(CInterface) && d.clSuper != null && d.clSuper.cls == c
+				&& (d.clFields.exists(name) && d.clFields.get(name).cfExpr != null || overriddenBelow(d, name))) {
+				r = true;
+				break;
+			}
+		overridden.set(key, r);
+		return r;
 	}
 
 	public function selector(name:String, sig:SigInfo):Int {

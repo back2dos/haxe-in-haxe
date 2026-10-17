@@ -278,12 +278,20 @@ class Types {
 	public static function eq(a:Ty, b:Ty):Bool
 		return str(a) == str(b);
 
+	/**
+		Whether an Int value may be used where a Float is expected. Off in
+		portable programs (Gen): Eval keeps the Int, and multiplies two such
+		Floats as Ints, overflowing (a bug of the reference); they convert
+		explicitly (`x + 0.0`) instead.
+	**/
+	public static var intAsFloat = true;
+
 	/** Whether a value of `from` can be used where `to` is expected (without casts). **/
 	public static function assignable(from:Ty, to:Ty):Bool {
 		if (eq(from, to))
 			return true;
 		return switch [from, to] {
-			case [TInt, TFloat]: true;
+			case [TInt, TFloat]: intAsFloat;
 			case [TInst(a, []), TInst(b, [])]: a.isSubOf(b);
 			case [_, TNull(t)]: assignable(from, t);
 			case [_, TDyn]: true;

@@ -17,7 +17,7 @@ haxe/test --run <Name> --help`-style options at the top of each file):
 | `Interp` | `--interp` runs of the case lists | 275/276 (`eval-eventLoop-compile` depends on thread timing) |
 | `Haxelib` | `-L` through lix's haxelib shim, batch and server | 14/14 |
 | `EvalDebugger` | scripted Eval debugger sessions (`-D eval-debugger`): breakpoints, stepping, scopes, evaluation, assignment, exception and function breakpoints, a macro | 6/6 |
-| `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`); `--cases haxe/test/fuzz/cases` checks the kept programs (failures fixed since, reduced, one directory each) on the lanes | |
+| `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`); `--cases haxe/test/fuzz/cases` checks the kept programs (failures fixed since, reduced, one directory each) on the lanes | CI: the diff lanes of ten targets, `exec:interp,hxmc` and `exec:interp,hxmc-wasm` (below) |
 | `Targets` | the website's target table (`site/data/targets.json`): haxe-formatter and the port itself compiled for every target by both, CPU, wall and peak RSS, outputs compared (hl/c after `HlcNames`); `-p self -t hlc --merge --json site/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
 | `Measure` | peak RSS, wall and CPU time: the self-compile (ours and the reference), the native build, the WebAssembly builds | self-compile 879 MB vs the reference's 1414 MB |
 | `unit.hxml` | unit tests of port modules, in-process | pass |
@@ -55,6 +55,28 @@ fuzzer's output comparison (`Runner.sameOutput`) accepts two printed floats at
 the same place of a line when they are at most `Runner.MAX_ULPS` (4) apart,
 both finite and of the same sign; every other character must match. The kept
 case `interp-108625377` is that example.
+
+## The fuzzer's exec lanes
+
+`exec:interp,hxmc` runs each program on the reference's Eval (`--interp`)
+and as a native executable built by hxmc (`bin/hxmc/hxmc`, `bin/hxmc/std`),
+`exec:interp,hxmc-wasm` as a wasm32-wasi module (`-D
+hxmc.target=wasm32-wasi`, under node with `hxmc/bootstrap/wasi.mjs`); both
+hxmc sides run with a 64 KB nursery (`RT_MINOR_KB=64`, as the corpus: a
+missing root shows), and what the two print must match (with the float
+tolerance above). Exec lanes generate portable programs (`--portable`:
+only constructs every target runs alike: no Unicode, Dynamic or operand
+side effects, numbers printed through `H.fmt`, Int arithmetic wrapped to 24
+bits); one more restriction there works around a bug of the reference: Eval
+keeps an Int where a Float is stored and multiplies two such Floats as Ints,
+overflowing, so portable programs never use an Int value as a Float without
+converting it (`x + 0.0`; `Types.intAsFloat`). The kept cases `exec-<seed>`
+are hxmc bugs this lane found: wrong code (a static variable read after a
+later operand's call assigned it; an override's default argument values; a
+method overridden only by a subclass of a subclass, called statically),
+and methods that failed to compile (an abstract method no class
+implements). CI's `fuzz-exec` job runs each lane on the kept cases and 400
+random programs (about a minute and a half each, beside the corpus jobs).
 
 ## hxmc's corpus
 
@@ -208,7 +230,8 @@ cache checks, the
 release binaries and lix for the six targets) and next to it, each with a tool
 of its own from the stage0: `corpus` (`make corpus-stage`: the corpus for
 every target in three jobs, the port as a WebAssembly module, the reference's
-self-compile), `crosshost` (`make crosshost`, the targets in two jobs),
+self-compile), `fuzz-exec` (the fuzzer's exec lanes, a job each),
+`crosshost` (`make crosshost`, the targets in two jobs),
 `memory and time` (`make measure`), `npm-pack` (the npm packages), `site` and
 `gfx` (`make gfx-check` on Linux x86-64, and the programs cross-built for
 `gfx-arm64` to check on ARM64; `gfx-macos`, after `npm-pack`: built from the

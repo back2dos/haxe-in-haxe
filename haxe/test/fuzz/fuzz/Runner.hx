@@ -138,12 +138,22 @@ class Runner {
 		});
 		// the program compiled to a native executable for the host by the hxmc tool
 		// (bin/hxmc/hxmc, with the target's std bin/hxmc/std: `make hxmc std`)
+		// (run with a 64 KB nursery, as hxmc's corpus: frequent collections, so
+		// a missing or stale root shows)
 		add({
 			name: "hxmc",
 			args: ["-cp", root + "/bin/hxmc/std", "--custom-target", "hxmc"],
 			output: "none",
-			run: "{out}/prog",
+			run: "env RT_MINOR_KB=64 {out}/prog",
 			compiler: root + "/bin/hxmc/hxmc {out}/prog"
+		});
+		// the same as a wasm32-wasi module, run by node (hxmc/bootstrap/wasi.mjs)
+		add({
+			name: "hxmc-wasm",
+			args: ["-cp", root + "/bin/hxmc/std", "--custom-target", "hxmc", "-D", "hxmc.target=wasm32-wasi"],
+			output: "none",
+			run: "env RT_MINOR_KB=64 node --no-warnings " + root + "/hxmc/bootstrap/wasi.mjs {out}/prog.wasm",
+			compiler: root + "/bin/hxmc/hxmc {out}/prog.wasm"
 		});
 		return m;
 	}
