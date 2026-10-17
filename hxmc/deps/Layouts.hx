@@ -23,6 +23,9 @@ class Layouts {
 		// the dynamic glibc mode (-D hxmc.libc=glibc): its own layouts (MirBuild.targetCode)
 		{name: "linux-x86_64-glibc", triple: "x86_64-linux-gnu.2.17", code: 7},
 		{name: "linux-arm64-glibc", triple: "aarch64-linux-gnu.2.17", code: 8},
+		// Android (Bionic, API 29: hxmc/deps/deps.sh merges its headers into include/)
+		{name: "android-x86_64", triple: "x86_64-linux-android.29", code: 9},
+		{name: "android-arm64", triple: "aarch64-linux-android.29", code: 10},
 	];
 	// the target whose value is the last alternative (the one every other code gets)
 	static final FALLBACK = 5;

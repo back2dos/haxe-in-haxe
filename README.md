@@ -5,7 +5,8 @@ compiles programs (the compiler included) straight to machine code and
 WebAssembly, with its own code generator and linkers: no C compiler, assembler
 or system linker.
 
-- **Targets:** Linux, macOS and Windows on x86-64 and ARM64, and wasm32-wasi.
+- **Targets:** Linux, macOS and Windows on x86-64 and ARM64, Android (APKs
+  written without the SDK), and wasm32-wasi.
 - **Faithful port:** it behaves exactly like the reference compiler of its
   pinned upstream commit: byte-identical HXB and target output, the same
   `--interp` runs, display and server answers.
@@ -14,7 +15,9 @@ or system linker.
 - **Graphics in pure Haxe:** `@hxmc/os` and `@hxmc/gfx` draw with GL, Metal,
   D3D11, WebGPU or WebGL2 through the system's own APIs.
 
-Website and playground: <https://haxe-in-haxe.ben.mk>
+Website, examples, docs and playground: <https://haxe-in-haxe.ben.mk> (built
+from `site/` with `@hxmc/web`: `make site`, see
+[docs/development.md](docs/development.md#the-site)).
 
 ## Install
 
@@ -42,8 +45,10 @@ editors, lix and rebuilding the compiler from source:
 
 | Option | |
 | --- | --- |
-| `-D hxmc.target=<target>` | `linux-x86_64`, `linux-arm64`, `windows-x86_64`, `windows-arm64`, `macos-x86_64`, `macos-arm64`, `wasm32-wasi` (default: this machine) |
+| `-D hxmc.target=<target>` | `linux-x86_64`, `linux-arm64`, `windows-x86_64`, `windows-arm64`, `macos-x86_64`, `macos-arm64`, `android-arm64`, `android-x86_64`, `wasm32-wasi` (default: this machine) |
 | `-D hxmc.libc=glibc` | Linux: link dynamically against the system's glibc (2.17+) instead of static musl, so shared libraries can be imported (`@:hxmc.lib("libGL.so.1")`) or loaded at run time |
+| `--custom-target hxmc=app.apk` | Android: an APK with the program as its `NativeActivity` (`-D hxmc.android-package=<id>`, ...: [docs/hxmc.md](docs/hxmc.md#android)); a `.so` output: the shared library alone |
+| `-D hxmc.shared` | a shared library (Linux in the glibc mode; Android's always is one), exporting `-D hxmc.exports=<names>` |
 | `-debug`, `-D hxmc.symbols` | a symbol table for profilers (wasm: a name section) |
 | `-D hxmc.jobs=<n>` | parallel module compilations (default: the cores) |
 | `-D hxmc.wasm-eh=legacy` | wasm: legacy exception handling, for older browsers and runtimes |
@@ -69,8 +74,8 @@ npm i -D @hxmc/gfx
 
 | Package | |
 | --- | --- |
-| `@hxmc/os` | windows, input and the app loop: X11, Cocoa, Win32 and the browser canvas |
-| `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser), and shaders written in Haxe (compiled to GLSL, WGSL, MSL, HLSL); see `packages/gfx/examples/Triangle.hx` and `Cube.hx` |
+| `@hxmc/os` | windows, input and the app loop: X11, Cocoa, Win32, Android's NativeActivity and the browser canvas |
+| `@hxmc/gfx` | a portable GPU API with back ends for GL/GLES (Linux, Android), Metal (macOS), D3D11 (Windows), WebGPU and WebGL2 (browser), and shaders written in Haxe (compiled to GLSL, WGSL, MSL, HLSL); see `packages/gfx/examples/Triangle.hx` and `Cube.hx` |
 | `@hxmc/text` | TrueType fonts in pure Haxe: parsing, an anti-aliased rasterizer, shaping with kerning and fallback fonts, bidi and Arabic shaping, line layout, a glyph atlas, the system's fonts |
 | `@hxmc/view` | signals and JSX-like markup for Haxe on every target: fine-grained reactivity as Solid has it, markup compiled to direct calls on a renderer chosen at compile time; components are type-checked calls |
 | `@hxmc/web` | `@hxmc/view` on the web: a DOM renderer (JavaScript), static HTML rendered at build time, hydration, islands in JavaScript or WebAssembly with a small loader, typed calls from JavaScript into wasm32-wasi modules |

@@ -64,7 +64,7 @@ class Os {
 	// ---- errno (kept across the runtime's own calls around blocking natives)
 
 	@:hxmc.noGc static function errnoPtr():Ptr
-		return windows() ? C._errno() : mac() ? C.__error() : C.__errno_location();
+		return windows() ? C._errno() : mac() ? C.__error() : Mem.target() >= 9 ? C.__errno() : C.__errno_location();
 
 	@:hxmc.noGc public static function errno():Int
 		return Mem.getI32(errnoPtr(), 0);
@@ -265,8 +265,18 @@ class Os {
 
 	// ---- the end of the program
 
-	@:hxmc.noGc public static function exit(code:Int)
-		C.exit(code);
+	// (Android: _exit, as PosixSys.exit; a moment first for what was
+	// written to stderr to reach logcat, through hxmc.os's pipe)
+	@:hxmc.noGc public static function exit(code:Int) {
+		if (Mem.target() >= 9) {
+			C.fflush(Ptr.nil());
+			var ts = Mem.stack(16);
+			Mem.setI64(ts, 0, 0);
+			Mem.setI64(ts, 8, 200000000);
+			C.nanosleep(ts, Ptr.nil());
+			C._exit(code);
+		} else C.exit(code);
+	}
 
 	// ---- the runtime's own reports on stderr (bytes as they are, after
 	// whatever the C library's stdout buffers)
@@ -356,6 +366,7 @@ abstract Report(Ptr) {
 @:hxmc.c @:hxmc.fast private extern class C {
 	static function getenv(name:Ptr):Ptr;
 	static function __errno_location():Ptr;
+	static function __errno():Ptr; // (Bionic)
 	static function __error():Ptr;
 	static function _errno():Ptr;
 	static function clock_gettime(clock:Int, ts:Ptr):Int;
@@ -386,6 +397,7 @@ abstract Report(Ptr) {
 	static function pthread_create(t:Ptr, attr:Ptr, entry:Ptr, arg:Ptr):Int;
 	static function poll(fds:Ptr, n:I64, ms:Int):Int;
 	static function exit(code:Int):Void;
+	static function _exit(code:Int):Void;
 	static function fflush(f:Ptr):Int;
 	static function write(fd:Int, p:Ptr, n:I64):I64;
 	static function _write(fd:Int, p:Ptr, n:Int):Int;

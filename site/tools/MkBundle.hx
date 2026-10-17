@@ -6,8 +6,8 @@ import sys.io.File;
 // Writes the std the playground's compiler reads (`make site`): the std's
 // top-level modules and its haxe/, sys/ and eval/ packages (what --interp,
 // macros and HXB need), as one file the page's worker unpacks into its file
-// system at /lib/haxe/std (hxmc/web/src/Worker.hx):
-//   <haxe> -cp hxmc/web --run MkBundle <std dir> <out>
+// system at /lib/haxe/std (site/client/Worker.hx):
+//   <haxe> -cp site/tools --run MkBundle <std dir> <out>
 // Format: a little-endian u32 n, n bytes of UTF-8 JSON [[path, size], ...]
 // (paths relative to the std, sorted), then the files' bytes in that order.
 class MkBundle {

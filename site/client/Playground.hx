@@ -66,7 +66,14 @@ class Playground {
 	static function validates(bytes:Array<Int>):Bool
 		return try js.lib.WebAssembly.validate(new js.lib.Uint8Array(bytes)) catch (_:Dynamic) false;
 
+	// the playground page's island (site/src/Pages.hx): the loader calls
+	// globalThis.hxmcIslands.playground once it scrolls into view
 	static function main() {
+		final islands:Dynamic = js.Syntax.code("globalThis.hxmcIslands || (globalThis.hxmcIslands = {})");
+		islands.playground = (el:Element, props:Dynamic) -> setup();
+	}
+
+	static function setup() {
 		out = document.getElementById("out");
 		state = document.getElementById("state");
 		timing = document.getElementById("timing");
@@ -76,7 +83,7 @@ class Playground {
 		exampleSelect = cast document.getElementById("example");
 
 		saved = try window.localStorage.getItem("hih-code") catch (_:Dynamic) null;
-		window.fetch(Version.url("examples/index.json")).then((r) -> r.json()).then((list:Array<Example>) -> {
+		window.fetch(Version.url("playground/index.json")).then((r) -> r.json()).then((list:Array<Example>) -> {
 			examples = list;
 			final groups = new Map<String, Element>();
 			for (i => ex in list) {
@@ -176,7 +183,7 @@ class Playground {
 	}
 
 	static function loadExample(i:Int) {
-		window.fetch(Version.url("examples/" + examples[i].file)).then((r) -> r.text()).then((code) -> {
+		window.fetch(Version.url("playground/" + examples[i].file)).then((r) -> r.text()).then((code) -> {
 			setCode(code);
 			save();
 		});

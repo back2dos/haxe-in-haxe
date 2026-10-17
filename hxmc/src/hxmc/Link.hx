@@ -15,6 +15,8 @@ import hxmc.Abi;
 // executables (-D hxmc.libc=glibc).
 class Link {
 	static inline var BASE = 0x400000;
+	// the image's address (a shared library's: 0, LinkDyn)
+	var imageBase = BASE;
 
 	var objs:Array<Obj>;
 	// the segment alignment: 4K on x86-64, 64K on aarch64 (the largest page size kernels use)
@@ -31,10 +33,9 @@ class Link {
 		this.objs = objs;
 		this.arm = abi.arm;
 		PAGE = abi.segAlign;
-		// port: position-independent output (PIE, shared libraries: dynamic
-		// relocations, GOT/PLT, DT_NEEDED, a TLS model other than local-exec)
-		// is not written yet
-		if (abi.reloc != Static || abi.output != Executable) throw "hxmc: " + abi.reloc + " " + abi.output + " output is not supported yet";
+		// (position-independent output, shared libraries: LinkDyn; a PIE is
+		// not written yet)
+		if (!abi.linksDynamically() && (abi.reloc != Static || abi.output != Executable)) throw "hxmc: " + abi.reloc + " " + abi.output + " output is not supported yet";
 	}
 
 	// ---- symbols
@@ -75,6 +76,8 @@ class Link {
 	// sections of any object kept only when reached (the runtime's Haxe functions)
 	public static inline var GC_PREFIX = ".text.gc.";
 	var live:Null<Map<Section, Bool>>;
+	// more roots than the entry (a shared library's exports: LinkDyn)
+	var roots:Array<String> = [];
 
 	function gc(entry:String) {
 		if (collect == null) return;
@@ -91,6 +94,10 @@ class Link {
 				if ((collect.indexOf(o) < 0 && !StringTools.startsWith(s.name, GC_PREFIX)) || s.kind == InitArray || s.kind == FiniArray) mark(s);
 		var e = globals.get(entry);
 		if (e != null) mark(e.section);
+		for (r in roots) {
+			var x = globals.get(r);
+			if (x != null && x.section != null) mark(x.section);
+		}
 		while (work.length > 0) {
 			var s = work.pop();
 			for (r in s.relocs) {
@@ -226,7 +233,7 @@ class Link {
 	function unwindHeaders(secs:Array<SecHdr>) {
 		if (ehFrame == null) return;
 		for (s in [ehFrameHdr, ehFrame])
-			secs.push({name: s.name, type: s == ehFrame && !arm ? 0x70000001 : 1, flags: 2, addr: addr.get(s), off: addr.get(s) - BASE, size: s.size(), link: 0, info: 0, align: s.align, entsize: 0});
+			secs.push({name: s.name, type: s == ehFrame && !arm ? 0x70000001 : 1, flags: 2, addr: addr.get(s), off: addr.get(s) - imageBase, size: s.size(), link: 0, info: 0, align: s.align, entsize: 0});
 	}
 
 	// (-debug) the DWARF sections of the live functions
@@ -522,6 +529,11 @@ class Link {
 					buf.set32(r.offset, S + A - P);
 				case RTpOff32:
 					buf.set32(r.offset, tpoff(S) + A);
+				// (the offset in the module's TLS block: LinkDyn's TLSDESC, hxmc_tls_base)
+				case RSecRel32:
+					buf.set32(r.offset, S + A - tlsStart);
+				case RA64SecRelHi12 | RA64SecRelLo12A | RA64SecRelLo12L:
+					A64Reloc.apply(buf, r.offset, r.kind, S + A - tlsStart, P, r.sym.name);
 				case RGotPcRel32:
 					buf.set32(r.offset, gotAddr(r.sym) + A - P);
 				case RA64AdrPage21:

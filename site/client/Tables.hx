@@ -7,7 +7,7 @@ import js.html.Element;
 import js.html.TableCellElement;
 
 // The Benchmarks and Target generators sections: tables of bench.json and
-// targets.json (measured results, hxmc/web/data), copied by `make site`
+// targets.json (measured results, site/data), copied by `make site`
 // (Makefile); the Programs part from the benchmark history (BenchCharts).
 typedef BenchRun = {
 	workload:String,
@@ -89,7 +89,15 @@ class Tables {
 		["self", "The port's own source, about 1,000 modules. Targets without threads or a file system reject it, in both compilers."],
 	];
 
+	// the compiler page's island (site/src/Pages.hx), around its Benchmarks
+	// and Target generators sections: globalThis.hxmcIslands.tables, called by
+	// the loader once they scroll into view
 	static function main() {
+		final islands:Dynamic = js.Syntax.code("globalThis.hxmcIslands || (globalThis.hxmcIslands = {})");
+		islands.tables = (el:Element, props:Dynamic) -> start();
+	}
+
+	static function start() {
 		load("bench.json", "bench-results", renderBench);
 		BenchCharts.load();
 		load("targets.json", "targets-results", renderTargets);

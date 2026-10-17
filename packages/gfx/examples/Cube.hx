@@ -1,3 +1,7 @@
+// title: Cube
+// summary: A textured cube casting a soft shadow, depth-tested, its matrices a uniform block; drag it to turn it
+// tags: gfx, shaders, 3d, input
+// demo: canvas 512x384
 import CubeShader;
 import haxe.io.Bytes;
 import hxmc.gfx.*;
@@ -13,7 +17,9 @@ import hxmc.os.*;
 //   haxe -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -main Cube
 //     --custom-target hxmc=cube -D hxmc.libc=glibc
 //
-// (as Triangle.hx for macOS, Windows and the browser; `--angle a` draws it
+// (as Triangle.hx for macOS, Windows and the browser; an APK for Android:
+// --custom-target hxmc=cube.apk -D hxmc.target=android-arm64, then adb
+// install -r cube.apk; `--angle a` draws it
 // still, turned by a radians plus what a drag turned: the tests' frames).
 // It uses what a program needs from hxmc.gfx: an index buffer of each size
 // (the cube's UInt16, the backdrop's and the shadow's UInt32), uniform

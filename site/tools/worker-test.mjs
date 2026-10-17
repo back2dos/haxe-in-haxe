@@ -1,6 +1,6 @@
 // Runs the playground's worker (bin/site/worker.js) under node, as a page
 // would: the module compiled and posted, then requests, each reply printed.
-// A check of the browser glue (site/src/WasiHost.hx) without a browser:
+// A check of the browser glue (site/client/WasiHost.hx) without a browser:
 //   node --experimental-wasm-exnref site/tools/worker-test.mjs bin/site [Main.hx]
 // (node 22: exception handling with exnref is behind the flag; browsers ship it)
 import { readFile } from 'node:fs/promises';

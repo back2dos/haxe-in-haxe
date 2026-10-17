@@ -117,13 +117,25 @@ class Lower {
 	// called by the runtime's C code: always compiled, under that symbol) and
 	// @:hxmc.host("name") (compiled when called) on static functions of the
 	// hxmc package's classes; generated code's calls of `name` (ECallHost)
-	// become calls of them (bindHosts)
+	// become calls of them (bindHosts). @:hxmc.export on a static function of
+	// any other class: the program's own entry point under that symbol (a
+	// shared library's export, Abi.exports), always compiled.
 	var hostImpls = new Map<String, {c:TClass, cf:TClassField}>();
 
 	function findHosts(types:Array<core.TType.ModuleType>) {
 		for (t in types)
 			switch t {
+				case TClassDecl(c) if (!c.hasClassFlag(CExtern) && !(c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc")):
+					for (cf in c.clOrderedStatics)
+						if (cf.cfMeta.length > 0 && cf.cfKind.match(Method(_)) && hasMeta(":hxmc.export", cf.cfMeta)) {
+							var n = metaString(":hxmc.export", cf.cfMeta);
+							if (hostImpls.exists(n)) fail("two Haxe functions exported as " + n);
+							hostImpls.set(n, {c: c, cf: cf});
+							staticFunc(c, cf);
+						}
 				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
+					// @:hxmc.android: the Android targets' only (Mem.target() 9 and 10)
+					if (hasMeta(":hxmc.android", c.clMeta) && targetCode >= 0 && targetCode < 9) continue;
 					// @:hxmc.wasm: the runtime of WebAssembly only (what C provides elsewhere)
 					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
 					// @:hxmc.native: the runtime of the native targets only (over C libraries)

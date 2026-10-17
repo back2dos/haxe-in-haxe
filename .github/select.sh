@@ -6,10 +6,10 @@
 #             always on main, on tags, nightly (schedule) and on dispatch
 #   libs      a source-only package of packages/ (one with a version of its
 #             own, not cli, wasm, source or platform): build, its checks (the gfx jobs),
-#             the npm packing (the sources packages); os and gfx also web
-#             (the site's triangle)
-#   web       hxmc/web: the website and the playground in the browsers
-#   (none)    only *.md: nothing beyond this job
+#             the npm packing (the sources packages); also web
+#             (the site's examples)
+#   web       site/, or Markdown (the site renders the docs): the website and the
+#             playground in the browsers
 # The base of a push to a branch is the previous head (github.event.before)
 # when build.yml succeeded on it (a run cancelled by a newer push checked
 # nothing), else the branch's merge base with main; without one, everything.
@@ -54,16 +54,16 @@ echo "changed since $base:"
 echo "$files" | sed 's/^/  /'
 for f in $files; do
 	case "$f" in
-	*.md) ;;
-	hxmc/web/*) web=true ;;
+	*.md) web=true ;;
+	site/*) web=true ;;
 	packages/cli/* | packages/wasm/* | packages/source/* | packages/platform/*) all=true ;;
 	packages/*/*)
 		p=${f#packages/}; p=${p%%/*}
 		if [ -f "packages/$p/package.json" ]; then libs=true; else all=true; fi
-		# (the site's triangle is built from os and gfx)
-		case "$p" in os | gfx) web=true ;; esac ;;
+		# (the site is built with view and web, its examples and API from every package)
+		web=true ;;
 	*) all=true ;;
 	esac
 done
-if [ $all = true ]; then emit true true true "a change outside docs, hxmc/web and the source-only packages"; fi
-emit false $libs $web "docs, hxmc/web or source-only packages only"
+if [ $all = true ]; then emit true true true "a change outside docs, site/ and the source-only packages"; fi
+emit false $libs $web "docs, site/ or source-only packages only"

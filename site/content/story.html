@@ -1,27 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>History · Haxe in Haxe</title>
-<meta name="description" content="How the Haxe compiler was ported from OCaml to Haxe and given a C backend.">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<header class="hero story-hero">
-	<div class="wrap">
-		<p class="kicker"><a href="index.html">Haxe in Haxe</a></p>
-		<h1>History</h1>
-		<nav class="links">
-			<a href="index.html">Home</a>
-			<a href="index.html#playground">Playground</a>
-			<a href="index.html#download">Download</a>
-		</nav>
-	</div>
-</header>
-
-<main class="wrap">
-<article class="story">
 
 <h2>Port and oracle</h2>
 <p>Each OCaml module in upstream's <code>haxe/src</code> was translated to a Haxe module at the same path, keeping function order, branch order and data layout. The reference compiler built from the pinned upstream commit is the oracle: for the same arguments, the port must write the same HXB modules, byte for byte. A first attempt that reimplemented parts of the compiler by hand was abandoned in favor of this direct translation.</p>
@@ -47,11 +23,3 @@
 <h2>Keeping up with upstream</h2>
 <p>The pinned commit is moved forward by porting each upstream commit in between and rerunning the full test matrix against the rebuilt reference.</p>
 
-</article>
-</main>
-
-<footer class="wrap story-foot">
-	<p><a href="index.html">Haxe in Haxe</a>, a port of <a href="https://haxe.org">Haxe</a>.</p>
-</footer>
-</body>
-</html>
