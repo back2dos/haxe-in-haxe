@@ -598,8 +598,8 @@ jobs:
         run: |
           set -ex
           make gfx-programs ui-programs GFX_TARGET=linux-arm64
-          cp bin/ui/linux-arm64/UiDrawTest bin/ui/linux-arm64/TodoTest bin/gfx/linux-arm64/
-          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle UiDrawTest TodoTest
+          cp bin/ui/linux-arm64/UiDrawTest bin/ui/linux-arm64/TodoTest bin/ui/linux-arm64/GalleryTest bin/gfx/linux-arm64/
+          tar czf bin/gfx-linux-arm64.tar.gz -C bin/gfx/linux-arm64 GfxTest Triangle UiDrawTest TodoTest GalleryTest
       - uses: actions/upload-artifact@v7
         with: {name: gfx-linux-arm64, path: bin/gfx-linux-arm64.tar.gz, retention-days: 3}
       - name: The Windows programs
@@ -639,6 +639,7 @@ jobs:
           export LIBGL_ALWAYS_SOFTWARE=1
           env -u DISPLAY gfx/UiDrawTest packages/ui/test/draw.png gfx/draw.png
           env -u DISPLAY gfx/TodoTest packages/ui/test/todo.png gfx/todo.png
+          env -u DISPLAY gfx/GalleryTest packages/ui/test/gallery.png gfx/gallery.png
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: gfx-images-linux-arm64, path: gfx/*.png, retention-days: 7}
