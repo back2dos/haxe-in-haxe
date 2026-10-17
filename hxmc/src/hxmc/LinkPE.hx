@@ -8,7 +8,9 @@ import hxmc.Obj;
 // its import directory written directly from the runtime's import list
 // (.hxmc.imports: which DLL exports what), call thunks for imported code,
 // the TLS directory of the C runtime (_tls_used) and the exception
-// directory (.pdata).
+// directory (.pdata: the runtime object's, and the generated functions'
+// with their unwind information in .xdata, from Unwind; sorted by address,
+// as RtlLookupFunctionEntry searches it).
 class LinkPE {
 	// the image base: x86-64 a fixed 0x400000 (addresses are kept absolute);
 	// arm64 0x140000000, relocatable (addresses are kept as RVAs, BASE 0, and
@@ -156,6 +158,7 @@ class LinkPE {
 						sec.name = ".data$hxmc_" + l + "1" + sec.name;
 						sec.kind = Data;
 					}
+		unwindInfo(extra);
 		objs.push(extra);
 		// output sections
 		var groups:Array<{name:String, chars:Int, secs:Array<Section>}> = [
@@ -341,6 +344,7 @@ class LinkPE {
 			if (g.name == ".idata") out.b.blit(at, idata.b, 0, idata.len) else if (g.name == ".reloc") out.b.blit(at, relocBuf.b, 0, relocBuf.len) else
 				for (s in g.secs)
 					if (s.kind != Bss && s.kind != Tbss) out.b.blit(at + addr.get(s) - BASE - starts[gi], s.buf.b, 0, s.buf.len);
+			if (g.name == ".pdata") sortPdata(out, at, sizes[gi]);
 		}
 		// headers
 		var h = new Buf(headers);
@@ -422,6 +426,55 @@ class LinkPE {
 		}
 		out.b.blit(0, h.b, 0, h.len);
 		return out.toBytes();
+	}
+
+	// the .pdata entries and .xdata of the generated functions (Unwind):
+	// x86-64 (begin, end, unwind info), arm64 (begin, .xdata); a function
+	// whose frame needs no description (a leaf leaving the stack alone) has
+	// none. Identical unwind information is shared.
+	function unwindInfo(extra:Obj) {
+		var pdata = new Section(".pdata$hxmc", RoData, 4);
+		var xdata = new Section(".xdata$hxmc", RoData, 4);
+		var xsym = new Symbol(".Lxdata");
+		xsym.global = false;
+		xsym.section = xdata;
+		var shared = new Map<String, Int>();
+		for (o in objs)
+			for (r in o.funcs) {
+				var u = arm ? Unwind.winA64(r.ops, r.sym.size) : Unwind.winX64(r.ops);
+				if (u == null) continue;
+				var key = u.toBytes().toHex();
+				var at = shared.get(key);
+				if (at == null) {
+					at = xdata.buf.len;
+					xdata.buf.buf(u);
+					shared.set(key, at);
+				}
+				pdata.relocs.push(new Reloc(pdata.buf.len, RImgRel32, r.sym, 0));
+				pdata.buf.u32(0);
+				if (!arm) {
+					pdata.relocs.push(new Reloc(pdata.buf.len, RImgRel32, r.sym, r.sym.size));
+					pdata.buf.u32(0);
+				}
+				pdata.relocs.push(new Reloc(pdata.buf.len, RImgRel32, xsym, at));
+				pdata.buf.u32(0);
+			}
+		if (pdata.buf.len == 0) return;
+		extra.sections.push(pdata);
+		extra.sections.push(xdata);
+	}
+
+	// the exception directory's entries in address order (each object's are,
+	// the whole is not: the runtime object's and the generated functions')
+	function sortPdata(out:Buf, at:Int, size:Int) {
+		var n = arm ? 8 : 12;
+		var entries = [for (k in 0...Std.int(size / n)) out.b.sub(at + k * n, n)];
+		entries.sort((a, b) -> {
+			var x = a.getInt32(0), y = b.getInt32(0);
+			x < y ? -1 : x > y ? 1 : 0;
+		});
+		for (k in 0...entries.length)
+			out.b.blit(at + k * n, entries[k], 0, n);
 	}
 
 	// the import directory, ILTs, IATs, hint/name entries and DLL names of

@@ -51,6 +51,7 @@ class Inline {
 			hxmc.ir.Facts.iterEx(ex, e);
 		}
 		function st(s:Stmt) {
+			if (s.match(SPos(_))) return; // (-debug: the same decisions)
 			if (++n > MAX_IR) return;
 			hxmc.ir.Facts.iterStmt(st, ex, s);
 		}
