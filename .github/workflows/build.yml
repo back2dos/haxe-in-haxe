@@ -3,8 +3,8 @@
 #
 # - changes: what the run needs (.github/select.sh): everything, except on a
 #   branch whose changes since the last checked commit are only docs (*.md:
-#   nothing more), hxmc/web (site, playground) or source-only packages of
-#   packages/ (build, gfx, npm-pack); main, tags, the nightly schedule and
+#   the site, which renders them), site/ (site, playground) or source-only
+#   packages of packages/ (build, gfx, npm-pack, the site); main, tags, the nightly schedule and
 #   dispatches always run everything. Also whether the release
 #   rt-<hash of hxmc/deps> exists (hxmc/bootstrap/rt.mjs).
 # - rt-build, rt: only when that release is missing: the runtime objects of
@@ -25,7 +25,8 @@
 #   - measure: peak memory and times (haxe/test/Measure.hx) in the job summary;
 #   - npm-pack: the npm packages (with the compiler as a WebAssembly module;
 #     built with the module cache off);
-#   - site: the website; gfx: packages/gfx on Linux (make gfx-check; on
+#   - site: the website (site/: its pages, the examples built for the browser,
+#     the API read by the compiler, the playground's compiler); gfx: packages/gfx on Linux (make gfx-check; on
 #     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
 #     from the npm packages after npm-pack, gfx-macos), packages/os's audio
@@ -43,7 +44,7 @@
 # - test: on each target's machine, the release binary's smoke test (with a
 #   TLS handshake and libuv), lix, hxmc's corpus and the port's self-compile.
 # - wasm: the corpus and the port's self-compile under node and wasmtime;
-#   playground: the playground in Chromium, Firefox and WebKit.
+#   playground: the website in Chromium, Firefox and WebKit (make site-check).
 # - npm: the nine packages (@hxmc/cli, its six platform packages, @hxmc/wasm,
 #   @hxmc/source) installed in fresh projects on each target's machine: native
 #   at once, -lib from node_modules, --ignore-scripts; and on linux-x64 (on
@@ -536,8 +537,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: npm, path: "bin/npm/*.tgz\nbin/npm/packages/*.tgz\nbin/npm/NodeLibs.hx\nbin/npm/probe.wasm\nbin/npm/VERSION\nbin/npm/sizes.md", retention-days: 7}
 
-  # the website: the playground's WebAssembly, the pages' JavaScript, lix under tools/
-  # (the Programs benchmarks: the history on the bench-data branch, bench.yml)
+  # the website (site/, make site): its pages, the examples built for the
+  # browser, the API reference, the playground's WebAssembly, the pages'
+  # JavaScript, lix under tools/ (the Programs benchmarks: the history on the
+  # bench-data branch, bench.yml); its page weights in the job summary
   site:
     needs: [changes, rt]
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.rt.result == 'success' || needs.rt.result == 'skipped') && (needs.changes.outputs.all == 'true' || needs.changes.outputs.web == 'true') }}
@@ -557,11 +560,13 @@ jobs:
       - name: The website
         run: |
           set -ex
+          [ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ] || { sudo apt-get update -qq && sudo apt-get install -qqy --no-install-recommends fonts-dejavu-core > /dev/null; }
           make lix-dist
           mkdir -p bin/bench-data
           if git fetch --depth 1 origin bench-data; then git archive FETCH_HEAD | tar -x -C bin/bench-data; fi
           make site LIX_DIR=bin/lix-dist BENCH_DATA=bin/bench-data
           ls -l bin/site bin/site/tools
+          { echo '### Page weights'; echo '```'; node site/tools/weights.mjs bin/site; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with: {name: site, path: bin/site/, retention-days: 7}
       - uses: actions/upload-pages-artifact@v5
@@ -1178,13 +1183,16 @@ jobs:
         if: always()
         run: $H -cp hxmc/test -cp haxe/test --run Selfcheck --runner "wasmtime run -W exceptions=y -W max-wasm-stack=67108864 --dir / --env HAXE_STD_PATH --env PWD" --port port/haxe.wasm --src std-x/src --std std-x/std --ref dl/self-ref.hxb --ref-root "$SELF_ROOT" --root "$SELF_ROOT" --summary "$GITHUB_STEP_SUMMARY"
 
-  # the playground's worker (hxmc/web/src/Worker.hx, WasiHost.hx) in the
-  # browsers' engines: --interp, HXB, diagnostics and completion, with both
-  # modules (exnref, legacy exception handling); the page's choice of
-  # module, also in a Chromium without exnref; the Graphics section's
-  # cube against packages/gfx/test/cube.png (WebGPU and WebGL2 in
-  # Chromium, WebGL2 in Firefox and WebKit; Firefox's in a headed Firefox
-  # under Xvfb on Mesa's llvmpipe: headless, it has no WebGL)
+  # the website in the browsers' engines (make site-check,
+  # site/tools/browser-test.mjs): links; every page in Chromium, the key
+  # pages in Firefox and WebKit, at a desktop's and a phone's width
+  # (rendered, islands hydrated, no errors, no horizontal scrolling); the
+  # examples running, the triangle and the cube against packages/gfx/test's
+  # golden images (WebGPU and WebGL2 in Chromium, WebGL2 in Firefox and
+  # WebKit; Firefox's in a headed Firefox under Xvfb on Mesa's llvmpipe:
+  # headless, it has no WebGL); the playground's worker (--interp, HXB,
+  # diagnostics, completion) with both modules, the page's choice of module,
+  # also in a Chromium without exnref
   playground:
     needs: [changes, site]
     if: ${{ !cancelled() && needs.site.result == 'success' }}
@@ -1193,20 +1201,20 @@ jobs:
       - uses: actions/checkout@v7
         with:
           sparse-checkout: |
-            hxmc/web/tools
+            site/tools
             packages/gfx/test
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: actions/download-artifact@v8
         with: {name: site, path: site-dist}
-      - name: Playground in Chromium, Firefox and WebKit
+      - name: The website in Chromium, Firefox and WebKit
         run: |
           set -ex
           npm install --no-save --silent playwright@1.56.1
           npx playwright install --with-deps chromium firefox webkit > /dev/null
           sudo apt-get install -qqy --no-install-recommends libgl1-mesa-dri libegl-mesa0 xvfb xauth > /dev/null
-          xvfb-run -a -s "-screen 0 1280x1024x24" node hxmc/web/tools/browser-test.mjs site-dist chromium firefox webkit
+          xvfb-run -a -s "-screen 0 1280x1024x24" node site/tools/browser-test.mjs site-dist chromium firefox webkit
 
   # the npm packages in fresh projects, on each target's machine (every
   # package installed before publish-npm publishes them): @hxmc/cli with its

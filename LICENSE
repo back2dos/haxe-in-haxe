@@ -37,8 +37,8 @@ and follows its licensing.
 - The haxe/upstream submodule is upstream Haxe with its own LICENSE: the compiler is
   GPL-2.0-or-later and its standard library (haxe/upstream/std) MIT.
 
-- hxmc/web/examples/: some examples are from try.haxe.org (MIT,
-  hxmc/web/examples/LICENSE-try-haxe.txt).
+- site/playground/: some examples are from try.haxe.org (MIT,
+  site/playground/LICENSE-try-haxe.txt).
 
 - Programs built by hxmc that use sys.ssl or libuv (the port's release binaries
   and lix among them) link mbedtls (Apache-2.0) and libuv (MIT); their licenses

@@ -15,7 +15,9 @@ or system linker.
 - **Graphics in pure Haxe:** `@hxmc/os` and `@hxmc/gfx` draw with GL, Metal,
   D3D11, WebGPU or WebGL2 through the system's own APIs.
 
-Website and playground: <https://haxe-in-haxe.ben.mk>
+Website, examples, docs and playground: <https://haxe-in-haxe.ben.mk> (built
+from `site/` with `@hxmc/web`: `make site`, see
+[docs/development.md](docs/development.md#the-site)).
 
 ## Install
 
