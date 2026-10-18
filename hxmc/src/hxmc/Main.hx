@@ -6,7 +6,8 @@ package hxmc;
 // code:
 //   hxmc <out> <haxe arguments...> -cp bin/hxmc/std --custom-target hxmc
 // With a first argument that starts with `-` it is the compiler's command
-// line (HaxeMain), e.g. for scripts: `hxmc -cp hxmc/src --run hxmc.MkStd`.
+// line (HaxeMain), e.g. for scripts: `hxmc -cp hxmc/src --run hxmc.MkStd`;
+// `hxmc dev <arguments>` is the dev loop (docs/dev.md).
 // Options (defines, or the environment for development):
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
@@ -61,6 +62,9 @@ class Main {
 		}
 		if (args.length == 0 || StringTools.startsWith(args[0], "-"))
 			Sys.exit(HaxeMain.run(args));
+		// the dev loop: `hxmc dev [build.hxml | arguments]` (docs/dev.md)
+		if (args[0] == "dev")
+			Sys.exit(HaxeMain.dev(args.slice(1)));
 		var out = args.shift();
 		var failed = null;
 		var key = UpToDate.key(args, out);
