@@ -25,6 +25,10 @@ class Facts {
 	public var types:Array<TypeEntry> = [];
 	public var boundTypes = new Map<Int, Int>(); // sig -> type index of its bound-method closures
 	public var closureSigs = new Map<Int, Bool>(); // the signatures of closures (lambdas, bound methods)
+	// (findNoGc's walk: the functions taking raw heap addresses, in order, and
+	// the names of structural fields the bodies use)
+	var takesAddr:Array<FuncInfo> = [];
+	var bodyNames = new Map<String, Bool>();
 
 	// Function bodies refer to program-wide numbers (type indices, field ids,
 	// signature ids, globals, dispatch selectors) by name: TY_*, FID_*, SIG_*,
@@ -344,40 +348,8 @@ class Facts {
 			if (c.statics != null)
 				for (s in c.statics)
 					names.set(s.name, true);
-		function ex(e:Ex) {
-			switch e {
-				case EAnonGet(n, _, o, _):
-					names.set(n, true);
-					ex(o);
-				case ECallAnon(n, _, o, args):
-					names.set(n, true);
-					ex(o);
-					for (a in args)
-						ex(a);
-				case ECallHost("hx_dyn_get" | "hx_dyn_set" | "hx_dyn_call_field", args, _) if (args[1].match(EStr(_))):
-					switch args[1] {
-						case EStr(n): names.set(n, true);
-						case _:
-					}
-					for (a in args)
-						ex(a);
-				case _:
-					iterEx(ex, e);
-			}
-		}
-		function st(s:Stmt) {
-			switch s {
-				case SAnonSet(n, _, o, v):
-					names.set(n, true);
-					ex(o);
-					ex(v);
-				case _:
-					iterStmt(st, ex, s);
-			}
-		}
-		for (f in p.funcs)
-			for (s in f.body)
-				st(s);
+		for (n in bodyNames.keys())
+			names.set(n, true);
 		fieldNames = [for (k in names.keys()) k];
 		fieldNames.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
 		for (i in 0...fieldNames.length)
@@ -495,64 +467,81 @@ class Facts {
 	// candidates are dropped until none calls a dropped one, so recursion
 	// stays in). A call to one keeps the caller's references in registers. They also never stop at a safepoint (Threads.hx),
 	// so another thread's collection cannot move objects under them.
+	//
+	// One walk of the bodies finds what the other passes ask of them too: the
+	// functions taking raw addresses (checkRawAddresses) and the names of
+	// structural fields (collectNames).
 	function findNoGc() {
 		var cand = new Map<FuncInfo, Bool>();
 		for (f in p.funcs)
 			if (!f.hasTry && !f.collects) cand.set(f, true);
-		function exOk(e:Ex):Bool {
-			var ok = switch e {
-				case ECall(g, _): cand.exists(g);
-				case _: GcPoints.gcPoint(e) == 0;
-			}
-			if (ok) Facts.iterEx(x -> if (ok && !exOk(x)) ok = false, e);
-			return ok;
-		}
-		function stOk(s:Stmt):Bool {
-			var ok = switch s {
-				case SArrSet(_) | SArrPush(_) | SAnonSet(_) | SThrow(_) | STry(_): false;
-				case _: true;
-			}
-			if (ok) Facts.iterStmt(x -> if (ok && !stOk(x)) ok = false, x -> if (ok && !exOk(x)) ok = false, s);
-			return ok;
-		}
-		var changed = true;
-		while (changed) {
-			changed = false;
-			for (f in p.funcs)
-				if (cand.exists(f) && !Lambda.foreach(f.body, stOk)) {
-					cand.remove(f);
-					changed = true;
-				}
-		}
-		for (f in p.funcs)
-			f.noGc = cand.exists(f);
-		// the functions that enter a safe region, or call one that does (one
-		// walk of the bodies: the direct ones and the callers, then the
-		// callers' closure)
+		// per function: whether it has a GC point of its own or calls a
+		// function that is no candidate (dropped), whether it enters a safe
+		// region; per callee its callers
 		var callers = new Map<FuncInfo, Array<FuncInfo>>();
-		var work:Array<FuncInfo> = [];
+		var dropped:Array<FuncInfo> = [];
+		var blocking:Array<FuncInfo> = [];
 		for (f in p.funcs) {
-			var here = false;
+			var gc = false, here = false, addr = false;
 			function ex(e:Ex) {
 				switch e {
-					case ECallHost("rt_blocking_enter", _, _): here = true;
 					case ECall(g, _):
 						var cs = callers.get(g);
 						if (cs == null) callers.set(g, cs = []);
 						if (cs.length == 0 || cs[cs.length - 1] != f) cs.push(f);
+						if (!cand.exists(g)) gc = true;
+					case EAnonGet(n, _, _, _) | ECallAnon(n, _, _, _):
+						bodyNames.set(n, true);
+						gc = gc || GcPoints.gcPoint(e) != 0;
+					case ECallHost("hx_dyn_get" | "hx_dyn_set" | "hx_dyn_call_field", args, _) if (args[1].match(EStr(_))):
+						switch args[1] {
+							case EStr(n): bodyNames.set(n, true);
+							case _:
+						}
+						gc = gc || GcPoints.gcPoint(e) != 0;
+					case ECallHost(n, _, _):
+						if (n == "rt_blocking_enter") here = true;
+						if (n == "hxmc_unsafe_Mem_addr") addr = true;
+						gc = gc || GcPoints.gcPoint(e) != 0;
+					case EFieldAddr(_):
+						addr = true;
+						gc = gc || GcPoints.gcPoint(e) != 0;
 					case _:
+						gc = gc || GcPoints.gcPoint(e) != 0;
 				}
 				Facts.iterEx(ex, e);
 			}
-			function st(s:Stmt)
+			function st(s:Stmt) {
+				switch s {
+					case SArrSet(_) | SArrPush(_) | SThrow(_) | STry(_): gc = true;
+					case SAnonSet(n, _, _, _):
+						bodyNames.set(n, true);
+						gc = true;
+					case _:
+				}
 				Facts.iterStmt(st, ex, s);
+			}
 			for (s in f.body)
 				st(s);
+			if (gc && cand.remove(f)) dropped.push(f);
 			if (here) {
 				f.blocksHere = f.blocks = true;
-				work.push(f);
+				blocking.push(f);
 			}
+			if (addr) takesAddr.push(f);
 		}
+		// the callers of a dropped function are dropped
+		while (dropped.length > 0) {
+			var g = dropped.pop();
+			var cs = callers.get(g);
+			if (cs != null)
+				for (c in cs)
+					if (cand.remove(c)) dropped.push(c);
+		}
+		for (f in p.funcs)
+			f.noGc = cand.exists(f);
+		// the functions that enter a safe region, or call one that does
+		var work = blocking;
 		while (work.length > 0) {
 			var g = work.pop();
 			var cs = callers.get(g);
@@ -646,25 +635,12 @@ class Facts {
 	// none may be live across a GC point, nor be passed to a call that is one.
 	function checkRawAddresses() {
 		var errors = [];
-		for (f in p.funcs) {
-			if (f.noGc || !usesAddr(f)) continue;
+		for (f in takesAddr) {
+			if (f.noGc) continue;
 			for (v in Roots.rawViolations(f))
 				errors.push(where(f) + '${displayName(f)}: a raw heap address (Mem.addr) $v; take the address after the GC point, or move the work into a @:hxmc.noGc function');
 		}
 		if (errors.length > 0) throw errors.join("\n");
-	}
-
-	static function usesAddr(f:FuncInfo):Bool {
-		var r = false;
-		function ex(e:Ex) {
-			if (r) return;
-			if (e.match(ECallHost("hxmc_unsafe_Mem_addr", _, _) | EFieldAddr(_))) r = true else Facts.iterEx(ex, e);
-		}
-		function st(s:Stmt)
-			if (!r) Facts.iterStmt(st, ex, s);
-		for (s in f.body)
-			st(s);
-		return r;
 	}
 
 	// Wraps the statements whose only GC point is an allocation or an array
