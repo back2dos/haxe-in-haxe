@@ -47,15 +47,16 @@ class GcBytes {
 	}
 
 	// UTF-8 to UTF-16 (invalid sequences as U+FFFD)
-	// UTF-8 to UTF-16: the length counted, then the string written
+	// UTF-8 to UTF-16, into a string of a unit a byte (no sequence makes more),
+	// then cut to the units written
 	@:hxmc.host("haxe_io_Bytes_getString") static function getString(b:Bytes, pos:Int, len:Int, encoding:Dynamic):String {
-		var s = W.strNew(utf16(b, pos, pos + len, null));
-		utf16(b, pos, pos + len, s);
-		return s;
+		var s = W.strNew(len);
+		var n = utf16(b, pos, pos + len, s);
+		return n == len ? s : GcStr.sub(s, 0, n);
 	}
 
-	// the UTF-16 units of the bytes [i, end), written to s unless null
-	static function utf16(b:Bytes, i:Int, end:Int, s:Null<String>):Int {
+	// the UTF-16 units of the bytes [i, end), written to s
+	static function utf16(b:Bytes, i:Int, end:Int, s:String):Int {
 		var o = 0;
 		while (i < end) {
 			var c = W.bytesGet(b, i++);
@@ -66,17 +67,14 @@ class GcBytes {
 					for (_ in 0...n)
 						c = (c << 6) | (W.bytesGet(b, i++) & 0x3F);
 					if (c >= 0x10000) {
-						if (s != null) {
-							W.strSet(s, o, 0xD800 | ((c - 0x10000) >> 10));
-							W.strSet(s, o + 1, 0xDC00 | ((c - 0x10000) & 0x3FF));
-						}
+						W.strSet(s, o, 0xD800 | ((c - 0x10000) >> 10));
+						W.strSet(s, o + 1, 0xDC00 | ((c - 0x10000) & 0x3FF));
 						o += 2;
 						continue;
 					}
 				}
 			}
-			if (s != null) W.strSet(s, o, c);
-			o++;
+			W.strSet(s, o++, c);
 		}
 		return o;
 	}
@@ -99,7 +97,16 @@ class GcBytes {
 
 	// UTF-16 to UTF-8
 	@:hxmc.host("haxe_io_Bytes_ofString") static function ofString(s:String, encoding:Dynamic):Bytes {
-		var n = W.strLen(s), size = 0, i = 0;
+		// (ASCII: a byte a unit, in one pass)
+		var n = W.strLen(s), ascii:Bytes = W.bytesNew(n), i = 0;
+		while (i < n) {
+			var c = W.strGet(s, i);
+			if (c >= 0x80) break;
+			W.bytesSet(ascii, i++, c);
+		}
+		if (i == n) return ascii;
+		var size = 0;
+		i = 0;
 		while (i < n) {
 			var c = codePoint(s, i, n);
 			size += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
