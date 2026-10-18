@@ -29,6 +29,9 @@ class Lower {
 	var root:ClassInfo;
 	var usedSelectors = new Map<String, Int>();
 	public var defaults = new Map<FuncInfo, Array<Null<TExpr>>>();
+	// the variables of the arguments `defaults` belong to (null: the
+	// receiver): a default value may read the arguments before it (FnLower.defaultValue)
+	public var argVars = new Map<FuncInfo, Array<Null<TVar>>>();
 
 	public function new() {
 		root = new ClassInfo("Object", "Object", null);
@@ -689,8 +692,13 @@ class Lower {
 			fi.sret = true;
 		}
 		var ds = [for (a in tf.tfArgs) a.defaultValue];
-		if (self != null) ds.unshift(null);
+		var vs:Array<Null<TVar>> = [for (a in tf.tfArgs) a.variable];
+		if (self != null) {
+			ds.unshift(null);
+			vs.unshift(null);
+		}
 		defaults.set(fi, ds);
+		argVars.set(fi, vs);
 	}
 
 	public function staticFunc(c:TClass, cf:TClassField):FuncInfo {
@@ -852,6 +860,7 @@ class Lower {
 			signature(fi, dtf, TRef(RObj(root)));
 			// (the default values are the method's own: an override may declare others)
 			defaults.set(fi, [null].concat([for (a in tf.tfArgs) a.defaultValue]));
+			argVars.set(fi, [null].concat([for (a in tf.tfArgs) a.variable]));
 		} else if (decl != null && dtf == null) {
 			// interface or abstract declaration without a body: use its type
 			switch followFun(decl.cfType) {
@@ -868,6 +877,7 @@ class Lower {
 					var ds:Array<Null<TExpr>> = [null];
 					for (a in tf.tfArgs) ds.push(a.defaultValue);
 					defaults.set(fi, ds);
+					argVars.set(fi, [null].concat([for (a in tf.tfArgs) a.variable]));
 				case _: signature(fi, tf, TRef(RObj(root)));
 			}
 		} else signature(fi, tf, TRef(RObj(root)));
