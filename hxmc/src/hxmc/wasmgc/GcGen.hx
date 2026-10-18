@@ -4,21 +4,28 @@ import hxmc.ir.Ir;
 
 // -D hxmc.wasm-gc: the program's IR (after Lower) as a WasmGC module, an
 // experiment to compare with the linear-memory target (docs/plans/targets.md,
-// "WasmGC"). Only what main and the static initializers reach is emitted.
+// "WasmGC"). What is emitted is what the program-wide reachability keeps
+// (hxmc.ir.Reach, as for linear memory: method-level, by name), the runtime's
+// exports where this target's code calls them (runtimeCalls).
 class GcGen {
-	// HXMC_GC_SURVEY=1: what is reached, then what the module would lack (each
+	// HXMC_GC_SURVEY=1: what is emitted, then what the module would lack (each
 	// unsupported construct, the functions with it); =2: also the module
 	// written, those functions trapping (to measure the rest)
 	public static function run(prog:Program, out:String, o:Options) {
-		var r = new Reach(prog, o.opt);
+		// (twice: then over the bodies as emitted, without what IrOpt inlined everywhere)
+		var calls:hxmc.ir.Reach.RuntimeCalls = {ex: runtimeCalls, stmt: s -> s.match(SAnonSet(_)) ? "gc_anon_set" : null};
+		hxmc.ir.Reach.run(prog, o.stats, calls);
+		var u = new Uses(prog, o.opt);
+		hxmc.ir.Reach.run(prog, o.stats, calls, f -> u.bodies.get(f).body);
+		u.scan();
 		var survey = Sys.getEnv("HXMC_GC_SURVEY");
 		if (survey != "1" && survey != "2") {
-			sys.io.File.saveBytes(out, new GcModule(prog, r).build());
+			sys.io.File.saveBytes(out, new GcModule(prog, u, !o.strip).build());
 			return;
 		}
-		r.report();
+		u.report();
 		GcModule.survey = new Map();
-		var bytes = try new GcModule(prog, r).build() catch (e:Dynamic) {
+		var bytes = try new GcModule(prog, u, !o.strip).build() catch (e:Dynamic) {
 			GcModule.note(Std.string(e), "(the module)");
 			null;
 		}
@@ -31,127 +38,78 @@ class GcGen {
 		}
 		if (survey == "2" && bytes != null) sys.io.File.saveBytes(out, bytes);
 	}
+
+	// the runtime's exports this target's code calls for an expression
+	// (FuncGen: structural access it does not know the layout of, enum comparisons)
+	static function runtimeCalls(e:Ex):Null<String>
+		return switch e {
+			case EAnonGet(_): "gc_anon_get";
+			case ECallAnon(_): "gc_anon_call";
+			case ECallHost("hxmc_rt_gc_W_enumEq", _, _): "gc_dyn_eq";
+			case _: null;
+		}
 }
 
-// what main and the initializers reach: functions, classes, selectors, host calls
-class Reach {
+// What the emitted functions use: each one's body as emitted (IrOpt: inlined,
+// objects scalar-replaced), the host functions it calls, the classes it
+// makes (or has the class value of), the selectors it dispatches on, the
+// closures and anonymous structures it makes
+class Uses {
 	public final prog:Program;
 	public final funcs:Array<FuncInfo> = [];
-	public final seen = new Map<FuncInfo, Bool>();
 	public final hosts = new Map<String, Int>();
 	public final sels = new Map<Int, Bool>();
 	public final classes = new Map<ClassInfo, Bool>();
 	public final lambdas = new Map<LambdaInfo, Bool>();
-	public final shapes = new Map<ShapeInfo, Bool>(); // the anonymous structures' layouts made
-	// the names called through structural types (ECallAnon): the classes' methods of these names
-	public final anonNames = new Map<String, Bool>();
-	// the functions' bodies and locals as emitted (IrOpt: inlined, objects scalar-replaced)
+	public final shapes = new Map<ShapeInfo, Bool>();
 	public final bodies = new Map<FuncInfo, {body:Array<Stmt>, locals:Array<Local>}>();
-	final opt:IrOpt;
-	final optimize:Bool;
-	var queue:Array<FuncInfo> = [];
+	// the program works on linear memory (hxmc.unsafe, C functions: GcModule.memory)
+	public var memory = false;
 
 	public function new(prog:Program, optimize:Bool) {
 		this.prog = prog;
-		this.optimize = optimize;
-		opt = new IrOpt();
-		for (f in prog.inits)
-			add(f);
-		add(prog.main);
-		while (queue.length > 0 || pendingDispatch()) {
-			while (queue.length > 0)
-				scan(queue.pop());
+		var opt = new IrOpt();
+		for (f in prog.funcs) {
+			var b = opt.run(f, optimize);
+			bodies.set(f, {body: IrOpt.live(b.body), locals: b.locals});
 		}
 	}
 
-	function add(f:FuncInfo) {
-		if (f == null || seen.exists(f)) return;
-		seen.set(f, true);
-		funcs.push(f);
-		queue.push(f);
+	// (the functions the program keeps: what they use)
+	public function scan() {
+		for (f in prog.funcs) {
+			funcs.push(f);
+			for (s in bodies.get(f).body)
+				stmt(s);
+		}
 	}
 
 	function cls(c:ClassInfo) {
 		var k = c;
 		while (k != null && !classes.exists(k)) {
 			classes.set(k, true);
-			if (k.ctor != null) add(k.ctor);
 			k = k.sup;
 		}
 	}
 
-	// a selector's implementations in the classes made so far
-	var done = new Map<String, Bool>();
-
-	function pendingDispatch():Bool {
-		var more = false;
-		for (n in anonNames.keys())
-			for (c in classes.keys()) {
-				var key = n + ":" + c.id;
-				if (done.exists(key)) continue;
-				done.set(key, true);
-				var m = c.findMethod(n);
-				if (m != null && !seen.exists(m)) {
-					add(m);
-					more = true;
-				}
-			}
-		for (s in sels.keys())
-			for (c in classes.keys()) {
-				var key = s + ":" + c.id;
-				if (done.exists(key)) continue;
-				done.set(key, true);
-				var m = c.findMethod(prog.selectors[s].name);
-				if (m != null && !seen.exists(m)) {
-					add(m);
-					more = true;
-				}
-			}
-		return more;
-	}
-
-	function scan(f:FuncInfo) {
-		var b = opt.run(f, optimize);
-		bodies.set(f, b);
-		for (s in b.body)
-			stmt(s);
-	}
-
-	// the runtime's function exported under the symbol
-	function export(sym:String) {
-		for (f in prog.funcs)
-			if (f.cSymbol == sym) {
-				add(f);
-				return;
-			}
-	}
-
-	function stmt(s:Stmt) {
-		if (s.match(SAnonSet(_))) export("gc_anon_set");
+	function stmt(s:Stmt)
 		hxmc.ir.Facts.iterStmt(stmt, ex, s);
-	}
 
 	function ex(e:Ex) {
 		switch e {
-			case ECall(f, _): add(f);
 			case ECallDispatch(sel, _, _): sels.set(sel, true);
 			case ECallHost(n, args, _):
 				hosts.set(n, (hosts.exists(n) ? hosts.get(n) : 0) + 1);
-				if (n == "hxmc_rt_gc_W_enumEq") export("gc_dyn_eq");
+				if (StringTools.startsWith(n, "hxmc_unsafe_Mem_") || n == "hxmc_rt_gc_W_memToBytes" || n == "hxmc_rt_gc_W_bytesToMem"
+					|| hxmc.ir.CInterop.SIGS.exists(n)) memory = true;
 				if (n == "Type_createEmptyInstance") switch args[0] {
 					case EType(TRClass(c)): cls(c);
 					case _:
 				}
 			case ENewObj(c): cls(c);
 			case ENewAnon(s, _): shapes.set(s, true);
-			case EAnonGet(_): export("gc_anon_get");
-			case ECallAnon(n, _, _, _):
-				export("gc_anon_get");
-				anonNames.set(n, true);
 			case EType(TRClass(c)) if (!c.isInterface): cls(c);
-			case ENewClos(l, _):
-				lambdas.set(l, true);
-				add(l.fn);
+			case ENewClos(l, _): lambdas.set(l, true);
 			case _:
 		}
 		hxmc.ir.Facts.iterEx(ex, e);

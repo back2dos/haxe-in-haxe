@@ -103,7 +103,68 @@ class GcNative {
 		return x;
 	}
 
+	// a structural call the generated code finds no method for (Helpers.anonCall,
+	// FuncGen: an object of no class): an Array's or a String's method (as
+	// hxmc.rt.Dyn.callBuiltin: Iterable<T>'s iterator()), else a closure field
+	@:hxmc.export("gc_anon_call") static function anonCall(o:Dynamic, name:String, args:Array<Dynamic>):Dynamic {
+		var k = W.kind(o);
+		if (k != 4 && k != 7) return W.dynCall(getField(o, name), args);
+		var a0:Dynamic = args.length > 0 ? args[0] : null, a1:Dynamic = args.length > 1 ? args[1] : null;
+		if (k == 4) {
+			var s:String = o;
+			return switch name {
+				case "charAt": s.charAt(a0);
+				case "charCodeAt": s.charCodeAt(a0);
+				case "indexOf": s.indexOf(a0, a1);
+				case "lastIndexOf": s.lastIndexOf(a0, a1);
+				case "substr": s.substr(a0, a1);
+				case "substring": s.substring(a0, a1);
+				case "toLowerCase": s.toLowerCase();
+				case "toUpperCase": s.toUpperCase();
+				case "toString": s;
+				case "split": s.split(a0);
+				case _: throw "String has no method " + name;
+			}
+		}
+		var a:Array<Dynamic> = o;
+		return switch name {
+			case "iterator": new haxe.iterators.ArrayIterator(a);
+			case "keyValueIterator": new haxe.iterators.ArrayKeyValueIterator(a);
+			case "join": a.join(a0);
+			case "push": a.push(a0);
+			case "pop": a.pop();
+			case "shift": a.shift();
+			case "copy": a.copy();
+			case "concat": a.concat(a0);
+			case "indexOf": a.indexOf(a0, a1);
+			case "lastIndexOf": a.lastIndexOf(a0, a1);
+			case "contains": a.contains(a0);
+			case "remove": a.remove(a0);
+			case "insert": a.insert(a0, a1); null;
+			case "unshift": a.unshift(a0); null;
+			case "reverse": a.reverse(); null;
+			case "resize": a.resize(a0); null;
+			case "slice": a.slice(a0, a1);
+			case "splice": a.splice(a0, a1);
+			case "toString": a.toString();
+			case "sort": a.sort(a0); null;
+			case "filter": a.filter(a0);
+			case "map": a.map(a0);
+			case _: throw "Array has no method " + name;
+		}
+	}
+
+	// (the iterators of an Array taken as values: linear memory's are the runtime's hx_array_iterator)
+	@:hxmc.host("Array_iterator") static function arrayIterator(a:Array<Dynamic>):Dynamic
+		return new haxe.iterators.ArrayIterator(a);
+
+	@:hxmc.host("Array_keyValueIterator") static function arrayKeyValueIterator(a:Array<Dynamic>):Dynamic
+		return new haxe.iterators.ArrayKeyValueIterator(a);
+
 	public static function getField(o:Dynamic, name:String):Dynamic {
+		// (an Array's or a String's length: structural access)
+		var k = W.kind(o);
+		if (k == 4 || k == 7) return name == "length" ? (k == 4 ? (o : String).length : (o : Array<Dynamic>).length) : null;
 		var names:Array<String> = W.fieldNames(o);
 		if (names != null) {
 			var i = find(names, name);
@@ -194,7 +255,7 @@ class GcNative {
 }
 
 // the fields added to an anonymous structure (Reflect.setField of a name its layout lacks)
-@:keep @:hxmc.wasmgc
+@:hxmc.wasmgc
 class GcFields {
 	public final names:Array<String> = [];
 	public final values:Array<Dynamic> = [];

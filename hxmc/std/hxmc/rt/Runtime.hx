@@ -26,12 +26,8 @@ import hxmc.rt.wasm.Threads;
 #if (hxmc.wasm_gc)
 import hxmc.rt.gc.GcStr;
 import hxmc.rt.gc.GcSys;
-import hxmc.rt.gc.GcArr;
 import hxmc.rt.gc.GcDyn;
-import hxmc.rt.gc.GcBytes;
-import hxmc.rt.gc.GcBuf;
 import hxmc.rt.gc.GcNative;
-import hxmc.rt.gc.GcDate;
 #end
 #else
 // the native targets' runtime over the C library (@:hxmc.native): the

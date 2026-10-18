@@ -36,6 +36,16 @@ class FuncGen {
 	final castUses = new Map<Int, Map<Int, Bool>>();
 	final otherUses = new Map<Int, Bool>();
 	var castUse = false;
+	// the frame areas (Mem.stack, struct slots) in the linear memory: their
+	// size, the frame's base and the stack pointer on entry (restored on return)
+	// the locals set from a Dynamic cast to their type (Haxe's unchecked
+	// casts, `t = any` for a String t): of no wasm type (a value of another
+	// type may be held, as in linear memory, cast only where used as one)
+	final loose = new Map<Int, Bool>();
+	var hasFrame = false;
+	var frameSize = 0;
+	var fp = -1;
+	var spEntry = -1;
 
 	public function new(m:GcModule, f:FuncInfo, ?refined:Map<Int, Int>) {
 		this.m = m;
@@ -47,7 +57,7 @@ class FuncGen {
 	public function refine():Null<Map<Int, Int>> {
 		var r = null;
 		for (id => ts in castUses) {
-			if (otherUses.exists(id)) continue;
+			if (otherUses.exists(id) || loose.exists(id)) continue;
 			var t = -1, n = 0;
 			for (k in ts.keys()) {
 				t = k;
@@ -87,17 +97,43 @@ class FuncGen {
 			local.set(s.id, i);
 			localKey.set(s.id, s.key);
 		}
-		var code = m.reach.bodies.get(f);
+		var code = m.uses.bodies.get(f);
+		function setSt(s:Stmt) {
+			switch s {
+				case SSet(l, ECast(TRef(_), x) | x) if (!l.ty.match(TRef(RAny)) && dynamicTyped(x)): loose.set(l.id, true);
+				case _:
+			}
+			hxmc.ir.Facts.iterStmt(setSt, _ -> {}, s);
+		}
+		for (s in code.body)
+			setSt(s);
+		function frameEx(e:Ex) {
+			switch e {
+				case ECallHost("hxmc_unsafe_Mem_stack" | "hxmc_unsafe_Mem_structSlot", _, _): hasFrame = true;
+				case _:
+			}
+			hxmc.ir.Facts.iterEx(frameEx, e);
+		}
+		function frameSt(s:Stmt)
+			hxmc.ir.Facts.iterStmt(frameSt, frameEx, s);
+		for (s in code.body)
+			frameSt(s);
+		if (hasFrame) {
+			fp = nparams + extra.length;
+			extra.push("i");
+			spEntry = nparams + extra.length;
+			extra.push("i");
+		}
 		for (l in code.locals)
 			if (!local.exists(l.id) && repr(l.ty) != "v") {
 				local.set(l.id, nparams + extra.length);
-				var k = refined.exists(l.id) ? "t" + refined.get(l.id) : keyOf(l.ty);
+				var k = refined.exists(l.id) ? "t" + refined.get(l.id) : loose.exists(l.id) ? repr(l.ty) : keyOf(l.ty);
 				extra.push(k);
 				localKey.set(l.id, k);
 			}
 		for (s in code.body)
 			stmt(s);
-		if (repr(f.ret) != "v") b.u8(0x00); // (a value-returning function ends with a return)
+		if (repr(f.ret) != "v") b.u8(0x00) else leave(); // (a value-returning function ends with a return)
 		b.u8(0x0B);
 		// the locals' declarations in front
 		var out = new Buf();
@@ -114,9 +150,42 @@ class FuncGen {
 					Enc.sleb(out, Std.parseInt(r.substr(1)));
 			}
 		}
+		if (hasFrame) {
+			// (the frame: below the caller's)
+			out.u8(0x23);
+			Enc.uleb(out, m.spGlobal);
+			out.u8(0x22);
+			Enc.uleb(out, spEntry);
+			out.u8(0x41);
+			Enc.sleb(out, (frameSize + 15) & ~15);
+			out.u8(0x6B);
+			out.u8(0x22);
+			Enc.uleb(out, fp);
+			out.u8(0x24);
+			Enc.uleb(out, m.spGlobal);
+		}
 		out.buf(b);
 		return out;
 	}
+
+	// (before a return: the frame given back)
+	function leave() {
+		if (!hasFrame) return;
+		localGet(spEntry);
+		op(0x24);
+		Enc.uleb(b, m.spGlobal);
+	}
+
+	// an expression of the IR's Dynamic (Any, type parameters)
+	static function dynamicTyped(e:Ex):Bool
+		return switch e {
+			case ELocal(l): l.ty.match(TRef(RAny));
+			case ECall(fn, _): fn.ret.match(TRef(RAny));
+			case ECallHost(_, _, t) | EAnonGet(_, t, _, _) | EArrGet(t, _, _) | EArrGetU(t, _, _) | EBoxGet(t, _): t.match(TRef(RAny));
+			case ECallClos(s, _, _) | ECallDispatch(_, s, _) | ECallAnon(_, s, _, _): s.ret.match(TRef(RAny));
+			case EField(c, idx, _): c.fields[idx].ty.match(TRef(RAny));
+			case _: false;
+		}
 
 	function unsupported(what:String):Dynamic
 		throw 'hxmc: -D hxmc.wasm-gc: ${f.display != null ? f.display : f.name}: $what is not supported yet';
@@ -332,6 +401,7 @@ class FuncGen {
 					var rk = m.retKey(f);
 					if (rk.charAt(0) == "t") exprAs(e, Std.parseInt(rk.substr(1))) else expr(e);
 				}
+				leave();
 				op(0x0F);
 			case SThrow(e):
 				expr(e);
@@ -564,7 +634,7 @@ class FuncGen {
 			return k > 0 && repr(s.fields[k - 1].ty) == r;
 		}
 		var out = hint != null && has(hint) ? [hint] : [];
-		for (s in m.reach.shapes.keys())
+		for (s in m.uses.shapes.keys())
 			if (s != hint && has(s)) out.push(s);
 		if (out.length > ANON_CANDS) out = hint != null && has(hint) ? [hint] : [];
 		return out;
@@ -583,12 +653,27 @@ class FuncGen {
 	var excCount = 0;
 
 	function tryStmt(body:Array<Stmt>, catches:Array<{test:Null<Ex->Ex>, l:Local, body:Array<Stmt>}>) {
+		// (with a linear memory: the stack pointer as here again where an
+		// exception is caught, the frames it left without returning given back)
+		var sp = -1;
+		if (m.memory) {
+			sp = temp("i");
+			op(0x23);
+			Enc.uleb(b, m.spGlobal);
+			localSet(sp);
+		}
 		block(FPlain, 0x06);
 		stmts(body);
 		op(0x07);
 		op(0);
 		var t = temp("p");
 		localSet(t);
+		if (sp >= 0) {
+			localGet(sp);
+			op(0x24);
+			Enc.uleb(b, m.spGlobal);
+			release("i", sp);
+		}
 		var exc = new Local(-1000 - excCount++, "exc", TRef(RAny));
 		local.set(exc.id, t);
 		var opened = 0, all = false;
@@ -829,7 +914,7 @@ class FuncGen {
 				release("t" + ct, t);
 			case ECallAnon(name, s, o, args):
 				// a class instance's method of that name (Helpers.anonCall: by its
-				// class), else the field through the runtime, called with its arguments boxed
+				// class), else the runtime's (gc_anon_call), the arguments boxed
 				var tmp = temp("p");
 				var vals = [for (k in 0...args.length) temp(repr(s.args[k]))];
 				expr(o);
@@ -851,7 +936,6 @@ class FuncGen {
 				op(0x05);
 				localGet(tmp);
 				expr(EStr(name));
-				call(m.exportOf("gc_anon_get"));
 				i32(args.length);
 				for (k in 0...args.length) {
 					localGet(vals[k]);
@@ -859,7 +943,7 @@ class FuncGen {
 				}
 				gc(0x08, m.dataType("p"), args.length);
 				gc(0x00, m.arrType("p"));
-				call(m.dynCall());
+				call(m.exportOf("gc_anon_call"));
 				if (repr(s.ret) == "v") op(0x1A) else unboxTop(s.ret);
 				op(0x0B);
 				for (k in 0...args.length)
@@ -1057,6 +1141,10 @@ class FuncGen {
 		inline function all()
 			for (a in args)
 				expr(a);
+		if (StringTools.startsWith(name, "hxmc_unsafe_Mem_")) {
+			mem(name.substr(16), args);
+			return;
+		}
 		var w = "hxmc_rt_gc_W_";
 		if (StringTools.startsWith(name, w)) {
 			switch name.substr(w.length) {
@@ -1191,6 +1279,9 @@ class FuncGen {
 				case "arrSet":
 					all();
 					call(Helpers.arrSetDyn(m));
+				case "arrGetI" | "arrGetB" | "arrGetF" | "arrGetL" | "arrGetP":
+					all();
+					call(Helpers.arrGet(m, name.substr(w.length + 6).toLowerCase()));
 				case "arrNew":
 					all();
 					call(Helpers.arrNew(m));
@@ -1234,6 +1325,18 @@ class FuncGen {
 				case "bytesSetI32":
 					all();
 					call(Helpers.bytesSet(m, false));
+				case "memToBytes":
+					all();
+					call(Helpers.memToBytes(m));
+				case "bytesToMem":
+					all();
+					call(Helpers.bytesToMem(m));
+				case "bytesGetI64":
+					all();
+					call(Helpers.bytesGet(m, true));
+				case "bytesSetI64":
+					all();
+					call(Helpers.bytesSet(m, true));
 				case "f32Bits":
 					all();
 					op(0xB6);
@@ -1477,11 +1580,209 @@ class FuncGen {
 			case "Math_random":
 				call(m.importOf("hxmc.random"));
 			case "rt_blocking_enter" | "rt_blocking_leave":
+			// (the linker's builtins of linear memory: hxmc.rt.wasm.Wasm)
+			case "memcpy" | "memmove" | "memset" if (m.memory):
+				var t = temp("l");
+				expr(args[0]);
+				localTee(t);
+				op(0xA7);
+				expr(args[1]);
+				if (name != "memset") op(0xA7);
+				expr(args[2]);
+				op(0xA7);
+				op(0xFC);
+				if (name == "memset") {
+					op(11);
+					op(0);
+				} else {
+					op(10);
+					op(0);
+					op(0);
+				}
+				localGet(t);
+				release("l", t);
+			case "wasm_memory_size" if (m.memory):
+				op(0x3F);
+				op(0);
+			case "wasm_memory_grow" if (m.memory):
+				expr(args[0]);
+				op(0x40);
+				op(0);
 			case _ if (m.foreignOf(name) != null):
-				all();
+				// (wasm32's C ABI: pointers as i32, floats as f32)
+				var sig = hxmc.CAbi.wasmSig(hxmc.ir.CInterop.SIGS.get(name));
+				for (k in 0...args.length) {
+					expr(args[k]);
+					switch sig.args[k] {
+						case CPtr: op(0xA7);
+						case CF32: op(0xB6);
+						case _:
+					}
+				}
 				call(m.foreignOf(name));
+				switch sig.ret {
+					case CPtr: op(0xAD);
+					case CF32: op(0xBB);
+					case _:
+				}
 			case _:
 				unsupported("the runtime function " + name);
+		}
+	}
+
+	// ---- the linear memory (hxmc.unsafe.Mem: as MirBuild expands it for linear memory)
+
+	// p + off (+ i * scale) as an i32 on the stack; the constant part left for the instruction (its offset)
+	function address(p:Ex, off:Ex, ?i:Ex, scale = 1):Int {
+		expr(p);
+		op(0xA7);
+		var disp = 0;
+		switch off {
+			case EInt(v) if (v >= 0): disp = v;
+			case _:
+				expr(off);
+				op(0x6A);
+		}
+		if (i != null) {
+			expr(i);
+			if (scale > 1) {
+				i32(scale == 2 ? 1 : scale == 4 ? 2 : 3);
+				op(0x74);
+			}
+			op(0x6A);
+		}
+		return disp;
+	}
+
+	inline function memarg(disp:Int) {
+		op(0);
+		Enc.uleb(b, disp);
+	}
+
+	function mem(name:String, args:Array<Ex>) {
+		inline function load(opcode:Int) {
+			var d = address(args[0], args[1]);
+			op(opcode);
+			memarg(d);
+		}
+		inline function store(opcode:Int, ?demote = false) {
+			var d = address(args[0], args[1]);
+			expr(args[2]);
+			if (demote) op(0xB6);
+			op(opcode);
+			memarg(d);
+		}
+		inline function loadAt(opcode:Int, scale:Int) {
+			var d = address(args[0], args[1], args[2], scale);
+			op(opcode);
+			memarg(d);
+		}
+		inline function storeAt(opcode:Int, scale:Int) {
+			var d = address(args[0], args[1], args[2], scale);
+			expr(args[3]);
+			op(opcode);
+			memarg(d);
+		}
+		inline function slot(size:Int, align:Int) {
+			frameSize = (frameSize + align - 1) & ~(align - 1);
+			localGet(fp);
+			i32(frameSize);
+			op(0x6A);
+			op(0xAD);
+			frameSize += size;
+		}
+		inline function literal(e:Ex):String
+			return switch e {
+				case EStr(s): s;
+				case _: unsupported("Mem." + name + " of a value that is not a literal");
+			}
+		inline function intLit(e:Ex):Int
+			return switch e {
+				case EInt(v): v;
+				case _: unsupported("Mem." + name + " of a size that is not a constant");
+			}
+		switch name {
+			case "getI8": load(0x2C);
+			case "getU8": load(0x2D);
+			case "getI16": load(0x2E);
+			case "getU16": load(0x2F);
+			case "getI32": load(0x28);
+			case "getI64" | "getPtr": load(0x29);
+			case "getF32":
+				load(0x2A);
+				op(0xBB);
+			case "getF64": load(0x2B);
+			case "setI8": store(0x3A);
+			case "setI16": store(0x3B);
+			case "setI32": store(0x36);
+			case "setI64" | "setPtr": store(0x37);
+			case "setF32": store(0x38, true);
+			case "setF64": store(0x39);
+			case "getU8At": loadAt(0x2D, 1);
+			case "getU16At": loadAt(0x2F, 2);
+			case "getI32At": loadAt(0x28, 4);
+			case "getI64At": loadAt(0x29, 8);
+			case "getF64At": loadAt(0x2B, 8);
+			case "setU8At": storeAt(0x3A, 1);
+			case "setU16At": storeAt(0x3B, 2);
+			case "setI32At": storeAt(0x36, 4);
+			case "setI64At": storeAt(0x37, 8);
+			case "setF64At": storeAt(0x39, 8);
+			case "stack": slot(intLit(args[0]), 16);
+			case "structSlot": slot((intLit(args[0]) + 7) & ~7, intLit(args[1]));
+			case "cstr":
+				op(0x42);
+				Enc.sleb(b, m.cstr(literal(args[0])));
+			case "sym":
+				var s = literal(args[0]);
+				if (s == "__heap_base") {
+					op(0x23);
+					Enc.uleb(b, m.heapGlobal);
+					op(0xAD);
+				} else {
+					var cb = m.symbolFunc(s);
+					if (cb == null) unsupported("the symbol " + s);
+					op(0x42);
+					Enc.sleb(b, m.callbackOf(cb));
+				}
+			case "ult":
+				expr(args[0]);
+				expr(args[1]);
+				op(0x54);
+			case "f64Bits":
+				expr(args[0]);
+				op(0xBD);
+			case "bitsF64":
+				expr(args[0]);
+				op(0xBF);
+			case "zero":
+				expr(args[0]);
+				op(0xA7);
+				i32(0);
+				expr(args[1]);
+				op(0xA7);
+				op(0xFC);
+				op(11);
+				op(0);
+			case "call0":
+				expr(args[0]);
+				op(0xA7);
+				op(0x11);
+				Enc.uleb(b, m.callbackType("_v"));
+				op(1);
+			case "os":
+				i32(3);
+			case "arm":
+				i32(0);
+			case "frame":
+				op(0x42);
+				op(0);
+			case "target":
+				i32(6);
+			case "platform":
+				i32(0);
+			case x:
+				unsupported("Mem." + x + " (a reference in the linear memory)");
 		}
 	}
 }

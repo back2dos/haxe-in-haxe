@@ -81,7 +81,7 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	}
 
 	inline function hashOf(k:String):Int {
-		return #if (hxmc.wasm_gc) hxmc.rt.gc.GcStr.strHash(k) #else hxmc.rt.Str.strHash(k) #end;
+		return hxmc.rt.Str.strHash(k);
 	}
 
 	inline function find(k:String, h:Int):Int {

@@ -182,7 +182,8 @@ help:
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
 ##             GFX_TARGET=windows-x86_64: D3D11 and Win32 under Wine
 ## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
-##             canvas, in headless Chromium (packages/gfx/test/web.mjs; Playwright with Chromium)
+##             canvas, in headless Chromium (packages/gfx/test/web.mjs; Playwright with Chromium);
+##             then built with -D hxmc.wasm-gc (the hybrid module)
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
@@ -219,7 +220,8 @@ help:
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
 ## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
 ##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans);
-##             the native form (native-web.mjs); native text editors in a drawn window (web-field.mjs)
+##             the native form (native-web.mjs); native text editors in a drawn window (web-field.mjs);
+##             each also built with -D hxmc.wasm-gc
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -602,6 +604,8 @@ ios-sim-check:
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/gfx/test/web.mjs bin/gfx/WebTest.wasm bin/gfx
+	$(call hxmc,bin/gfx/gc/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
+	$(NODE) packages/gfx/test/web.mjs bin/gfx/gc/WebTest.wasm bin/gfx/gc
 
 # packages/os's audio (Linux: the glibc mode, which loads libasound.so.2)
 OS_CP := -cp packages/os/src -cp packages/os/examples -cp packages/os/test
@@ -734,6 +738,12 @@ ui-web-check: $(TOOL) $(STD)
 	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
 	$(call hxmc,bin/ui/WebField.wasm,$(UI_CP) -main WebField $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/ui/test/web-field.mjs bin/ui/WebField.wasm
+	$(call hxmc,bin/ui/gc/WebTodo.wasm,$(UI_CP) -main WebTodo $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
+	$(NODE) packages/ui/test/web.mjs bin/ui/gc/WebTodo.wasm bin/ui/gc
+	$(call hxmc,bin/ui/gc/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
+	$(NODE) packages/ui/test/native-web.mjs bin/ui/gc/NativeForm.wasm bin/ui/gc
+	$(call hxmc,bin/ui/gc/WebField.wasm,$(UI_CP) -main WebField $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
+	$(NODE) packages/ui/test/web-field.mjs bin/ui/gc/WebField.wasm
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
 MACROS ?= verify

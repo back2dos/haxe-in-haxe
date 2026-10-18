@@ -1,56 +1,34 @@
 package hxmc.rt;
 
 import hxmc.I64;
-import hxmc.rt.C;
-import hxmc.rt.Types.*;
+import hxmc.rt.Repr;
 import hxmc.unsafe.LibC;
 import hxmc.unsafe.Mem;
-import hxmc.unsafe.Ptr;
 
 // The Array natives (formerly in rt_std.c): generic natives over arrays of
-// any element kind (rt.h: slot 0 the length and the element kind, slot 1
-// the data, null while empty; Int and Bool elements take 4 bytes, others 8). The
-// element access, growth and kind conversion themselves stay in rt.c with
-// the collector (hx_arr_*); here they are the language's own array
+// any element kind, written over hxmc.rt.Repr for both runtimes
+// (@:hxmc.anyHeap): the arguments' meaning here, the elements' storage
+// there (in linear memory rt.h's: slot 0 the length and the element kind,
+// slot 1 the data, null while empty; Int and Bool elements take 4 bytes,
+// others 8; the element access, growth and kind conversion themselves stay
+// with the collector, hx_arr_*). The rest are the language's own array
 // operations on Array<Dynamic>, which go through them.
-@:keep @:allow(hxmc.rt)
+@:keep @:allow(hxmc.rt) @:hxmc.anyHeap
 class Arr {
 	static inline function len(a:Dynamic):Int
-		return Mem.getI32(Mem.addr(a), 0);
-
-	static inline function setLen(a:Dynamic, n:Int)
-		Mem.setI32(Mem.addr(a), 0, n);
+		return Repr.arrLen(a);
 
 	static inline function kindOf(a:Dynamic):Int
-		return Mem.getI32(Mem.addr(a), 4);
-
-	static inline function data(a:Dynamic):Ptr
-		return Mem.getPtr(Mem.addr(a), 8);
-
-	static inline function elemSize(a:Dynamic):Int
-		return ak4(kindOf(a)) ? 4 : 8;
+		return Repr.arrKind(a);
 
 	// a new array of this kind and length (elements zero)
-	static function make(kind:Int, n:Int):Dynamic {
-		if (n == 0) {
-			// `[]`: the data is allocated by the first store
-			var a = Mem.alloc(2, T_ARRAY, K_OBJ);
-			Mem.setI32(Mem.addr(a), 4, kind);
-			return a;
-		}
-		return Rt.hx_arr_new_n(kind, n);
-	}
-
-	// the data of a fresh reference array was written without the barrier
-	static inline function barrierAll(a:Dynamic, n:Int) {
-		if (kindOf(a) == AK_PTR && n > 0) Leaf.rt_barrier_range(Mem.obj(data(a)), data(a), n);
-	}
+	static function make(kind:Int, n:Int):Dynamic
+		return Repr.arrMake(kind, n);
 
 	@:hxmc.host("Array_copy") static function copy(a:Dynamic):Dynamic {
 		var n = len(a);
 		var r = make(kindOf(a), n);
-		if (n > 0) LibC.memcpy(data(r), data(a), (elemSize(a) * n : I64));
-		barrierAll(r, n);
+		Repr.arrCopy(r, a, n);
 		return r;
 	}
 
@@ -59,12 +37,7 @@ class Arr {
 			// same element kind: one allocation, two copies
 			var na = len(a), nb = len(b);
 			var r = make(kindOf(a), na + nb);
-			if (na + nb > 0) {
-				var es = elemSize(a);
-				if (na > 0) LibC.memcpy(data(r), data(a), (es * na : I64));
-				if (nb > 0) LibC.memcpy(data(r).add(es * na), data(b), (es * nb : I64));
-				barrierAll(r, na + nb);
-			}
+			Repr.arrCopy2(r, a, na, b, nb);
 			return r;
 		}
 		var r:Array<Dynamic> = copy(a);
@@ -84,35 +57,35 @@ class Arr {
 			if (from < 0) from = 0;
 		}
 		switch kindOf(a) {
-			case AK_I32:
-				if (Str.isNull(x)) return -1;
-				if (tindex(x) == T_BOXFLOAT) {
-					var f = Mem.getF64(Mem.addr(x), 0);
+			case Repr.AK_I32:
+				if (Repr.isNull(x)) return -1;
+				if (Repr.isBoxedFloat(x)) {
+					var f = Repr.unboxedFloat(x);
 					if (f != Math.ffloor(f)) return -1;
 				}
 				var v:Int = x;
-				var d = data(a);
+				var d = Repr.elems(a);
 				for (i in from...n)
-					if (Mem.getI32At(d, 0, i) == v) return i;
+					if (d.getInt(i) == v) return i;
 				return -1;
-			case AK_BOOL:
-				if (Str.isNull(x) || tindex(x) != T_BOXBOOL) return -1;
-				var v = Mem.getI32(Mem.addr(x), 0);
-				var d = data(a);
+			case Repr.AK_BOOL:
+				if (Repr.isNull(x) || !Repr.isBoxedBool(x)) return -1;
+				var v = Repr.unboxedBool(x);
+				var d = Repr.elems(a);
 				for (i in from...n)
-					if (Mem.getI32At(d, 0, i) == v) return i;
+					if (d.getBool(i) == v) return i;
 				return -1;
-			case AK_F64:
-				if (Str.isNull(x)) return -1;
+			case Repr.AK_F64:
+				if (Repr.isNull(x)) return -1;
 				var v:Float = x;
-				var d = data(a);
+				var d = Repr.elems(a);
 				for (i in from...n)
-					if (Mem.getF64At(d, 0, i) == v) return i;
+					if (d.getFloat(i) == v) return i;
 				return -1;
 			case _:
 				for (i in from...n) {
-					var e = Mem.getRefAt(data(a), 0, i);
-					if (Mem.addr(e) == Mem.addr(x) || Dyn.dynEq(e, x)) return i;
+					var e = Repr.elems(a).getRef(i);
+					if (Repr.same(e, x) || Repr.dynEq(e, x)) return i;
 				}
 				return -1;
 		}
@@ -128,15 +101,15 @@ class Arr {
 		if (f >= n) f = n - 1;
 		var i = f;
 		while (i >= 0) {
-			if (kindOf(a) == AK_PTR) {
-				var e = Mem.getRefAt(data(a), 0, i);
-				if (Mem.addr(e) == Mem.addr(x) || Dyn.dynEq(e, x)) return i;
-			} else if (kindOf(a) == AK_BOOL) {
-				if (!Str.isNull(x) && tindex(x) == T_BOXBOOL && Mem.getI32At(data(a), 0, i) == Mem.getI32(Mem.addr(x), 0)) return i;
-			} else if (!Str.isNull(x)) {
+			if (kindOf(a) == Repr.AK_PTR) {
+				var e = Repr.elems(a).getRef(i);
+				if (Repr.same(e, x) || Repr.dynEq(e, x)) return i;
+			} else if (kindOf(a) == Repr.AK_BOOL) {
+				if (!Repr.isNull(x) && Repr.isBoxedBool(x) && Repr.elems(a).getBool(i) == Repr.unboxedBool(x)) return i;
+			} else if (!Repr.isNull(x)) {
 				var v:Float = x;
-				var e = kindOf(a) == AK_I32 ? (Mem.getI32At(data(a), 0, i) : Float) : kindOf(a) == AK_F64 ? Mem.getF64At(data(a), 0, i) : {
-					var l:Float = cast Mem.getI64At(data(a), 0, i);
+				var e = kindOf(a) == Repr.AK_I32 ? (Repr.elems(a).getInt(i) : Float) : kindOf(a) == Repr.AK_F64 ? Repr.elems(a).getFloat(i) : {
+					var l:Float = cast Repr.elems(a).getI64(i);
 					l;
 				};
 				if (e == v) return i;
@@ -150,14 +123,8 @@ class Arr {
 		return indexFrom(a, x, 0) >= 0;
 
 	// removes element i, shifting the rest down
-	static function removeAt(a:Dynamic, i:Int) {
-		var n = len(a), es = elemSize(a);
-		var d = data(a);
-		LibC.memmove(d.add(es * i), d.add(es * (i + 1)), (es * (n - i - 1) : I64));
-		LibC.memset(d.add(es * (n - 1)), 0, es);
-		if (kindOf(a) == AK_PTR && n - i - 1 > 0) Leaf.rt_barrier_range(Mem.obj(d), d.add(8 * i), n - i - 1);
-		setLen(a, n - 1);
-	}
+	static function removeAt(a:Dynamic, i:Int)
+		Repr.arrRemoveAt(a, i);
 
 	@:hxmc.host("Array_remove") static function remove(a:Dynamic, x:Dynamic):Bool {
 		var i = indexFrom(a, x, 0);
@@ -170,8 +137,7 @@ class Arr {
 		var n = len(a);
 		if (n == 0) return null;
 		var v = (a : Array<Dynamic>)[n - 1];
-		LibC.memset(data(a).add(elemSize(a) * (n - 1)), 0, elemSize(a));
-		setLen(a, n - 1);
+		Repr.arrRemoveLast(a, n);
 		return v;
 	}
 
@@ -194,12 +160,8 @@ class Arr {
 		arr.push(x);
 		n = len(a) - 1;
 		if (pos > n) pos = n;
-		var es = elemSize(a);
-		var d = data(a);
-		var tmp = es == 4 ? (Mem.getI32(d, 4 * n) : I64) : Mem.getI64(d, 8 * n);
-		LibC.memmove(d.add(es * (pos + 1)), d.add(es * pos), (es * (n - pos) : I64));
-		if (es == 4) Mem.setI32(d, 4 * pos, tmp.toInt()) else Mem.setI64(d, 8 * pos, tmp);
-		if (kindOf(a) == AK_PTR) Leaf.rt_barrier_range(Mem.obj(d), d.add(8 * pos), n - pos + 1);
+		// the last element (x) moved to pos, those from pos one up
+		Repr.arrRotate(a, pos, n);
 	}
 
 	@:hxmc.host("Array_unshift") static function unshift(a:Dynamic, x:Dynamic):Void
@@ -208,29 +170,30 @@ class Arr {
 	@:hxmc.host("Array_resize") @:access(hxmc.rt.Boxes) static function resize(a:Dynamic, n:Int):Void {
 		var m = len(a);
 		if (n < m) {
-			LibC.memset(data(a).add(elemSize(a) * n), 0, (elemSize(a) * (m - n) : I64));
-			setLen(a, n);
+			Repr.arrCut(a, n, m);
 			return;
 		}
 		if (n == m) return;
+		#if !(hxmc.wasm_gc)
 		// past the capacity (haxe.ds.Vector's constructor: from empty), the data
 		// allocated at the new length, the elements copied once (the new ones
 		// zero, the kind kept), unless another thread changed the array meanwhile
 		var kind = kindOf(a);
 		if (n > Boxes.arrCap(a)) {
-			var d0 = data(a);
+			var d0 = MemRepr.arrData(a);
 			var nd:Dynamic = Boxes.dataAlloc(kind, n);
 			var k = len(a);
-			if (data(a) == d0 && kindOf(a) == kind && k <= n) {
+			if (MemRepr.arrData(a) == d0 && kindOf(a) == kind && k <= n) {
 				if (k > 0) {
-					LibC.memcpy(Mem.addr(nd), data(a), (elemSize(a) * k : I64));
-					if (kind == AK_PTR && !Boxes.inYoungObj(nd)) Boxes.Gc_barrierRange(nd, k);
+					LibC.memcpy(Mem.addr(nd), MemRepr.arrData(a), (MemRepr.elemSize(a) * k : I64));
+					if (kind == Repr.AK_PTR && !Boxes.inYoungObj(nd)) Boxes.Gc_barrierRange(nd, k);
 				}
 				Mem.setRefBarrier(a, 8, nd);
-				setLen(a, n);
+				MemRepr.arrSetLen(a, n);
 				return;
 			}
 		}
+		#end
 		// a store past the end grows the array (zeros in between, the kind kept)
 		var arr:Array<Dynamic> = a;
 		arr[n - 1] = null;
@@ -239,25 +202,7 @@ class Arr {
 	@:hxmc.host("Array_reverse") @:hxmc.noGc static function reverse(a:Dynamic):Void {
 		var n = len(a);
 		if (n < 2) return;
-		var d = data(a);
-		var i = 0, j = n - 1;
-		if (elemSize(a) == 4)
-			while (i < j) {
-				var t = Mem.getI32At(d, 0, i);
-				Mem.setI32At(d, 0, i, Mem.getI32At(d, 0, j));
-				Mem.setI32At(d, 0, j, t);
-				i++;
-				j--;
-			}
-		else
-			while (i < j) {
-				var t = Mem.getI64At(d, 0, i);
-				Mem.setI64At(d, 0, i, Mem.getI64At(d, 0, j));
-				Mem.setI64At(d, 0, j, t);
-				i++;
-				j--;
-			}
-		if (kindOf(a) == AK_PTR) Leaf.rt_barrier_range(Mem.obj(d), d, n);
+		Repr.arrReverse(a, n);
 	}
 
 	@:hxmc.host("Array_slice") static function slice(a:Dynamic, pos:Int, endp:Null<Int>):Dynamic {
@@ -271,8 +216,7 @@ class Arr {
 		if (end > n) end = n;
 		var l = end > pos ? end - pos : 0;
 		var r = make(kindOf(a), l);
-		if (l > 0) LibC.memcpy(data(r), data(a).add(elemSize(a) * pos), (elemSize(a) * l : I64));
-		barrierAll(r, l);
+		Repr.arrCopyFrom(r, a, pos, l);
 		return r;
 	}
 
@@ -286,18 +230,7 @@ class Arr {
 		if (l < 0) l = 0;
 		if (pos + l > n) l = n - pos;
 		var r = make(kindOf(a), l);
-		var es = elemSize(a);
-		var d = data(a);
-		if (l > 0) LibC.memcpy(data(r), d.add(es * pos), (es * l : I64));
-		if (n > 0) {
-			LibC.memmove(d.add(es * pos), d.add(es * (pos + l)), (es * (n - pos - l) : I64));
-			LibC.memset(d.add(es * (n - l)), 0, (es * l : I64));
-		}
-		setLen(a, n - l);
-		if (kindOf(a) == AK_PTR) {
-			barrierAll(r, l);
-			if (n - pos - l > 0) Leaf.rt_barrier_range(Mem.obj(d), d.add(8 * pos), n - pos - l);
-		}
+		Repr.arrSplice(a, r, pos, l, n);
 		return r;
 	}
 
@@ -314,7 +247,7 @@ class Arr {
 	}
 
 	@:hxmc.host("Array_toString") static function toString(a:Dynamic):String
-		return Dyn.stdString(a);
+		return Repr.stdString(a);
 
 	// a stable merge sort over boxed copies (the comparator may allocate);
 	// the result written back through the array's own stores (its kind kept)
