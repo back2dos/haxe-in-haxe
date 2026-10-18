@@ -81,8 +81,9 @@ class Layout {
 		var bh = bareH && (s.height != DimValue.Auto || s.minHeight != DimValue.Auto || s.maxHeight != DimValue.Auto);
 		var bare = (bw ? 1 : 0) | (bh ? 2 : 0);
 		bareW = bareH = false;
-		// (measured bare, a column still breaks its lines at its own height)
-		var bareBreak = bh ? s.height.resolve(parentH) : Math.NaN;
+		// (measured bare, a column still breaks its lines at its own height, else its max-height, in pixels)
+		var bareBreak = bh && s.height.match(DimValue.Px(_)) ? s.height.resolve(parentH) : Math.NaN;
+		if (bh && !known(bareBreak) && s.maxHeight.match(DimValue.Px(_))) bareBreak = s.maxHeight.resolve(parentH);
 		// (cached by how bare it was measured; not when that height, of its parent's, breaks it)
 		var cached = !known(bareBreak);
 		// (its height definite for its children: given so, or its own)
@@ -210,11 +211,15 @@ class Layout {
 			var contentBasis = !known(b);
 			if (!known(b) && cs.aspectRatio > 0 && known(it.styleCross)) b = row ? it.styleCross * cs.aspectRatio : it.styleCross / cs.aspectRatio;
 			if (!known(b)) {
-				// the content's main size, its cross size known when stretched in a known line
+				// the content's main size, its cross size known when stretched in a known line (a
+				// wrapping column in a row that is a column's item not, as Chromium sizes it: its
+				// max-content, its lines unbroken but at its max-height; a wrapping column's basis its
+				// max-content, not the room's)
 				var kc = it.styleCross;
-				if (!known(kc) && it.align == Stretch && !multi && known(innerCross))
+				var columns = row && looseColumns(c) && columnItem(n);
+				if (!known(kc) && it.align == Stretch && !multi && known(innerCross) && !columns)
 					kc = clamp(Math.max(0, innerCross - it.mCrossStart - it.mCrossEnd), it.minCross, it.maxCross);
-				var am = known(availMain) ? Math.max(0, availMain - it.mMainStart - it.mMainEnd) : Math.NaN;
+				var am = known(availMain) && !(row && cs.wrap && (cs.direction == Column || cs.direction == ColumnReverse)) ? Math.max(0, availMain - it.mMainStart - it.mMainEnd) : Math.NaN;
 				var ac = known(kc) ? kc : known(availCross) ? Math.max(0, availCross - it.mCrossStart - it.mCrossEnd) : Math.NaN;
 				// (the base size: not clamped by its own min or max, which the hypothetical size is)
 				if (row) bareW = true else bareH = true;
@@ -251,7 +256,9 @@ class Layout {
 		// (where lines break: the main size, else a row's room within its min and max, else the max:
 		// a column of auto height breaks only at its max-height)
 		var finiteMax = maxMain < Math.POSITIVE_INFINITY ? maxMain : Math.NaN;
-		var breakAt = known(innerMain) ? innerMain : row && known(availMain) ? clamp(availMain, Math.max(0, minMain), maxMain) : !row
+		// (a wrapping row's room: no narrower than its min-content, its widest item, as fit-content has it)
+		var room = row && multi && !known(innerMain) && known(availMain) ? Math.max(availMain, minContentWidth(n, Math.NaN, false) - padH) : availMain;
+		var breakAt = known(innerMain) ? innerMain : row && known(room) ? clamp(room, Math.max(0, minMain), maxMain) : !row
 			&& known(bareBreak) ? Math.max(0, bareBreak - padV) : finiteMax;
 		for (i in first...itemTop) {
 			var it = items[i];
@@ -284,8 +291,11 @@ class Layout {
 					t += contribution(items[i], row, innerW, pctH) + items[i].mMainStart + items[i].mMainEnd + (i > first ? gapMain : 0);
 				content = t;
 			}
+			// (a wrapping row's max-content no less than its min-content, its widest item's, which an item's basis can
+			// make it, as Chromium keeps it)
+			if (row && multi && basisItems(n)) content = Math.max(content, minContentWidth(n, Math.NaN, false) - padH);
 			// (a row shrinks to fit the room; a column's auto height is its content's, the room or not)
-			mainSize = known(availMain) && row ? Math.min(content, availMain) : content;
+			mainSize = known(room) && row ? Math.min(content, room) : content;
 			mainSize = clamp(mainSize, Math.max(0, minMain), maxMain);
 			// (a row whose items' widths are percentages of its own: laid out again at the width
 			// found, which they resolve against then, their lines broken there, as Chromium does)
@@ -314,12 +324,12 @@ class Layout {
 						// (a column's item's flexed height: definite when the column's is)
 						if (row) size(it.node, it.main, Math.NaN, innerW, pctH, it.main, ac, false) else {
 							looseH = !known(pctH);
-							// (a wrapping column in a column of unknown width: as wide as on one line, unless
+							// (a wrapping column in a column of unknown width, or loose (looseColumns): as wide as on one line, unless
 							// its own height is fixed (pixels: a percentage is not, sizing it), as Chromium sizes
 							// it; its flexed height then wraps it)
 							var ics = it.node.style;
-							var oneLine = !known(innerCross) && ics.wrap && (ics.direction == Column || ics.direction == ColumnReverse)
-								&& !ics.height.match(DimValue.Px(_));
+							var oneLine = ics.wrap && (ics.direction == Column || ics.direction == ColumnReverse) && !ics.height.match(DimValue.Px(_))
+								&& (!known(innerCross) || looseColumns(it.node));
 							size(it.node, Math.NaN, oneLine ? Math.NaN : it.main, innerW, pctH, ac, oneLine ? Math.NaN : it.main, false);
 						}
 						// (a column's item across: fit-content, its min-content when the room is less)
@@ -491,8 +501,9 @@ class Layout {
 				if (cs.position == Sticky) dx = dy = Math.NaN;
 				c.lx = cx + (known(dx) ? dx : 0);
 				c.ly = cy + (known(dy) ? dy : 0);
-				// (its height definite: stretched, a column's item when the column's is, or its own)
-				looseH = row ? !(it.align == Stretch && !known(it.styleCross)) : !known(pctH);
+				// (its height definite: stretched, a column's item when the column's is or its basis is
+				// in pixels, as Chromium has it, or its own)
+				looseH = row ? !(it.align == Stretch && !known(it.styleCross)) : !known(pctH) && !cs.basis.match(DimValue.Px(_));
 				size(c, cwid, chei, innerW, pctH, cwid, chei, true);
 				c.lw = cwid;
 				c.lh = chei;
@@ -1307,12 +1318,45 @@ class Layout {
 	}
 
 	// an item for c from the pool
+	// (whether a node's item has a basis of its own)
+	static function basisItems(n:Node):Bool {
+		for (c in n.children)
+			if (c.style.basis != DimValue.Auto && c.style.display != None && c.style.position != Absolute) return true;
+		return false;
+	}
+
 	// (whether a row's item has a width or basis that is a percentage of the row's)
 	static function percentItems(n:Node):Bool {
 		for (c in n.children) {
 			var cs = c.style;
 			if (cs.display == None || cs.position == Absolute) continue;
 			if (percent(cs.basis) || percent(cs.width) || percent(cs.minWidth) || percent(cs.maxWidth)) return true;
+		}
+		return false;
+	}
+
+	// (whether a node is a flex column's item, its height that column's to share)
+	static function columnItem(n:Node):Bool {
+		var p = n.parent;
+		if (p == null || n.style.position == Absolute) return false;
+		var ps = p.style;
+		return ps.display != Grid && (ps.direction == Column || ps.direction == ColumnReverse);
+	}
+
+	// (a wrapping column whose width Chromium finds with its height left indefinite: no height of
+	// its own, no min or max that is a percentage, nor its items' heights)
+	static function looseColumns(n:Node):Bool {
+		var s = n.style;
+		return s.wrap && (s.direction == Column || s.direction == ColumnReverse) && !s.height.match(DimValue.Px(_)) && !percent(s.height)
+			&& !percent(s.minHeight) && !percent(s.maxHeight) && !percentHeights(n);
+	}
+
+	// (whether a column's item has a height or basis that is a percentage of the column's)
+	static function percentHeights(n:Node):Bool {
+		for (c in n.children) {
+			var cs = c.style;
+			if (cs.display == None || cs.position == Absolute) continue;
+			if (percent(cs.basis) || percent(cs.height) || percent(cs.minHeight) || percent(cs.maxHeight)) return true;
 		}
 		return false;
 	}

@@ -1061,5 +1061,110 @@
 		[0, 0, 75, 20],
 		[0, 0, 26, 10],
 		[0, 10, 75, 10]
+	],
+	"wrapping column basis in a row": [
+		[0, 0, 300, 43],
+		[0, 0, 18, 43],
+		[0, 0, 2, 30],
+		[2, 0, 16, 30]
+	],
+	"wrapping column basis in a row item": [
+		[0, 0, 300, 200],
+		[0, 0, 18, 43],
+		[0, 0, 18, 43],
+		[0, 0, 2, 30],
+		[2, 0, 16, 30]
+	],
+	"wrapping column basis in a column item": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 43],
+		[0, 0, 16, 43],
+		[0, 0, 2, 30],
+		[2, 0, 16, 30]
+	],
+	"wrapping column basis in a column item, percentage heights": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 43],
+		[0, 0, 18, 43],
+		[0, 0, 2, 2],
+		[2, 0, 16, 43]
+	],
+	"wrapping column basis in a column item, its min-height": [
+		[0, 0, 300, 200],
+		[0, 0, 72, 43],
+		[0, 0, 169, 43],
+		[0, 0, 85, 43],
+		[85, 0, 2, 29],
+		[95, 8, 89, 27]
+	],
+	"wrapping column basis in a column item, a min-height in pixels": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 43],
+		[0, 0, 58, 43],
+		[0, 0, 58, 43],
+		[58, 0, 6, 6]
+	],
+	"wrapping column fit-content, its min-height": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 26],
+		[121, 0, 58, 31],
+		[121, 0, 58, 31],
+		[179, 0, 6, 6]
+	],
+	"wrapping column fit-content, its max-height": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 31],
+		[118, 0, 64, 31],
+		[118, 0, 58, 31],
+		[176, 0, 6, 6]
+	],
+	"wrapping column basis at its max-height": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 68],
+		[0, 0, 300, 68],
+		[0, 0, 0, 45],
+		[0, 0, 0, 68]
+	],
+	"wrapping column basis, a percentage max-height": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 70],
+		[0, 0, 300, 34],
+		[0, 34, 300, 35],
+		[3, 37, 16, 16],
+		[2, 58, 18, 2],
+		[22, 34, 8, 8]
+	],
+	"wrapping column minimum, a percentage height": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 113],
+		[0, 0, 300, 113],
+		[0, 0, 0, 76],
+		[4, 4, 0, 30]
+	],
+	"wrapping row narrower than its widest item": [
+		[0, 0, 300, 200],
+		[0, 0, 10, 28],
+		[0, 0, 16, 28],
+		[0, 0, 16, 16],
+		[10, 22, 0, 0],
+		[2, 16, 2, 12]
+	],
+	"basis in pixels definite in a column of auto height": [
+		[0, 0, 300, 200],
+		[0, 0, 20, 115],
+		[0, 0, 20, 115],
+		[0, 0, 20, 29]
+	],
+	"basis in pixels, shrunk in a wrapping column: percentages of the size it shrank to": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 39],
+		[0, 0, 10, 39],
+		[0, 29, 10, 10]
+	],
+	"wrapping row basis, its min-content": [
+		[0, 0, 300, 200],
+		[113, 0, 187, 200],
+		[206, 0, 94, 10],
+		[206, 0, 94, 10]
 	]
 }

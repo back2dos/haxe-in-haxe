@@ -5972,5 +5972,555 @@
 				}
 			]
 		}
+	},
+	{
+		"name": "wrapping column basis in a row",
+		"width": 300,
+		"height": 43,
+		"tree": {
+			"style": {
+				"direction": "Row"
+			},
+			"children": [
+				{
+					"style": {
+						"wrap": true
+					},
+					"children": [
+						{
+							"style": {
+								"width": 2,
+								"height": 30
+							}
+						},
+						{
+							"style": {
+								"width": 16,
+								"height": 30
+							}
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis in a row item",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"style": {
+				"direction": "Row"
+			},
+			"children": [
+				{
+					"style": {
+						"direction": "Row",
+						"height": 43
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true
+							},
+							"children": [
+								{
+									"style": {
+										"width": 2,
+										"height": 30
+									}
+								},
+								{
+									"style": {
+										"width": 16,
+										"height": 30
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis in a column item",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"direction": "Row",
+						"height": 43
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true
+							},
+							"children": [
+								{
+									"style": {
+										"width": 2,
+										"height": 30
+									}
+								},
+								{
+									"style": {
+										"width": 16,
+										"height": 30
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis in a column item, percentage heights",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"direction": "Row",
+						"height": 43
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true
+							},
+							"children": [
+								{
+									"style": {
+										"width": 2,
+										"height": 2
+									}
+								},
+								{
+									"style": {
+										"width": 16,
+										"height": "100%"
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis in a column item, its min-height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"direction": "Row",
+						"width": 72,
+						"height": 43
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true,
+								"shrink": 0,
+								"minHeight": "50%"
+							},
+							"children": [
+								{
+									"style": {
+										"width": "50%",
+										"height": 88,
+										"basis": 62,
+										"minWidth": 62
+									}
+								},
+								{
+									"style": {
+										"width": 2,
+										"height": 29
+									}
+								},
+								{
+									"style": {
+										"width": 89,
+										"height": 90,
+										"margin": 8
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis in a column item, a min-height in pixels",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"direction": "Row",
+						"height": 43
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true,
+								"minHeight": 31
+							},
+							"children": [
+								{
+									"style": {
+										"width": 58,
+										"height": 112
+									}
+								},
+								{
+									"style": {
+										"width": 6,
+										"height": 6
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column fit-content, its min-height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"alignItems": "Center",
+						"height": 26
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true,
+								"minHeight": 31
+							},
+							"children": [
+								{
+									"style": {
+										"width": 58,
+										"height": 112
+									}
+								},
+								{
+									"style": {
+										"width": 6,
+										"height": 6
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column fit-content, its max-height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"alignItems": "Center"
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true,
+								"maxHeight": 31
+							},
+							"children": [
+								{
+									"style": {
+										"width": 58,
+										"height": 112
+									}
+								},
+								{
+									"style": {
+										"width": 6,
+										"height": 6
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis at its max-height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"children": [
+						{
+							"style": {
+								"wrap": true,
+								"maxHeight": 105
+							},
+							"children": [
+								{
+									"style": {
+										"basis": 45
+									}
+								},
+								{
+									"style": {
+										"basis": 68
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column basis, a percentage max-height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"children": [
+						{
+							"style": {
+								"minHeight": 34
+							}
+						},
+						{
+							"style": {
+								"wrap": true,
+								"maxHeight": "50%"
+							},
+							"children": [
+								{
+									"style": {
+										"padding": 8,
+										"margin": 3
+									}
+								},
+								{
+									"style": {
+										"padding": 1,
+										"margin": 2
+									}
+								},
+								{
+									"style": {
+										"padding": 4
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping column minimum, a percentage height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"height": 113
+					},
+					"children": [
+						{
+							"style": {
+								"wrap": true,
+								"basis": 4,
+								"height": "100%"
+							},
+							"children": [
+								{
+									"style": {
+										"height": 76
+									}
+								},
+								{
+									"style": {
+										"height": 30,
+										"margin": 4
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping row narrower than its widest item",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"alignItems": "Start",
+						"maxWidth": 10
+					},
+					"children": [
+						{
+							"style": {
+								"direction": "RowReverse",
+								"wrap": true
+							},
+							"children": [
+								{
+									"style": {
+										"padding": 8
+									}
+								},
+								{
+									"style": {
+										"margin": 6
+									}
+								},
+								{
+									"style": {
+										"borderWidth": 1
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "basis in pixels definite in a column of auto height",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"style": {
+				"direction": "Row"
+			},
+			"children": [
+				{
+					"style": {
+						"alignSelf": "Start"
+					},
+					"children": [
+						{
+							"style": {
+								"basis": 115
+							},
+							"children": [
+								{
+									"style": {
+										"height": "25%",
+										"width": 20
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "basis in pixels, shrunk in a wrapping column: percentages of the size it shrank to",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"children": [
+				{
+					"style": {
+						"wrap": true,
+						"height": 39
+					},
+					"children": [
+						{
+							"style": {
+								"direction": "Row",
+								"alignItems": "End",
+								"basis": 66,
+								"minHeight": "100%"
+							},
+							"children": [
+								{
+									"style": {
+										"minHeight": "25%",
+										"width": 10
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		"name": "wrapping row basis, its min-content",
+		"width": 300,
+		"height": 200,
+		"tree": {
+			"style": {
+				"direction": "RowReverse"
+			},
+			"children": [
+				{
+					"style": {
+						"direction": "RowReverse",
+						"wrap": true,
+						"grow": 0.5
+					},
+					"children": [
+						{
+							"style": {
+								"basis": 39,
+								"minWidth": "50%"
+							},
+							"children": [
+								{
+									"style": {
+										"minWidth": 75,
+										"height": 10
+									}
+								}
+							]
+						}
+					]
+				}
+			]
+		}
 	}
 ]
