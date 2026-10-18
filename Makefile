@@ -679,7 +679,8 @@ gfx-shader-check: $(TOOL)
 
 # packages/3d (docs/plans/3d.md) on gfx: the unit tests on Eval, natively and as wasm32-wasi, then
 # the renderer's frames against golden images, natively (GFX_TARGET) and in Chromium
-SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test -cp packages/physics/src -cp packages/physics/examples -cp packages/physics/test
+SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test -cp packages/physics/src -cp packages/physics/examples -cp packages/physics/test \
+	-cp packages/text/src -cp packages/ui/src
 3d-check: $(TOOL) $(STD) $(HOST_RT)
 	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest PhysicsTest; do $(TOOL) $(SCENE_CP) --run $$t; done
 	$(call hxmc,bin/3d/SceneTest,$(SCENE_CP) -main SceneTest $(HXMC_ARGS))
