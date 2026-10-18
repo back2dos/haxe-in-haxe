@@ -132,7 +132,7 @@ class VectorBlit {
 		for (i in 0...8)
 			mixed[i] = i * 1.25;
 		gblit(mixed, 0, mixed, 2, 6);
-		Sys.println("m: " + show(mixed) + " " + (mixed[7] * 2));
+		Sys.println("m: " + show(mixed) + " " + ((mixed[7] : Float) * 2));
 
 		// references moved into an old vector and within it, then collections
 		var old = new Vector<String>(64);

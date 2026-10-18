@@ -1801,7 +1801,8 @@ class FnLower {
 		switch [ta, tb] {
 			case [TRef(RStr), TRef(RStr)]:
 				return ECallHost("hx_str_eq", [xa, xb], TBool);
-			case [TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RAnon | RType | RNative(_)), TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RAnon | RType | RNative(_))]:
+			// (a NativeArray: its identity, as hx_dyn_eq has it)
+			case [TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RNativeArr(_) | RAnon | RType | RNative(_)), TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RNativeArr(_) | RAnon | RType | RNative(_))]:
 				return EBin(RefEq, xa, xb);
 			case _:
 				var da = coerce(xa, ta, TRef(RAny)), db = coerce(xb, tb, TRef(RAny));
