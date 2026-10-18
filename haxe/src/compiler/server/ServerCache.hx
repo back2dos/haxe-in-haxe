@@ -52,6 +52,10 @@ class ServerCache {
 	public static var dependencyDirtyHook:Null<(com:CommonContext, mPath:GlobalTypePath, mExtra:ModuleDefExtra, dep:ModuleDep,
 		reason:ModuleSkipReason) -> Bool> = null;
 	public static var loadDirtyModuleHook:Null<(com:CommonContext, path:GlobalTypePath, p:Pos) -> Null<ModuleDef>> = null;
+	// port: and checks there a module a reader finds in the binary cache as a dependency of the module it reads,
+	// ... which the checks of that module do not reach when they leave out the dependencies (partial typing):
+	// ... a reason makes it typed from its source (loadDirtyModuleHook); always null in the compiler itself.
+	public static var readerFindModuleHook:Null<(com:CommonContext, mPath:GlobalTypePath) -> Null<ModuleSkipReason>> = null;
 
 	public static function parseFile(sctx:ServerCompilationContext, com:CommonContext, rfile:ResolvedFile, p:Pos):ParseResult<Package> {
 		var cc = CommonCache.getCache(com);
@@ -820,6 +824,10 @@ class HxbReaderApiServer implements HxbReaderApi {
 		try {
 			return GoodModule(com.moduleLut.find(mPath));
 		} catch (_:NotFound) {
+			if (ServerCache.readerFindModuleHook != null) switch ServerCache.readerFindModuleHook(com, mPath) {
+				case null:
+				case reason: return BadModule(reason);
+			}
 			return ServerCache.getHxbModule(com, cc, mPath, typingMode);
 		}
 	}

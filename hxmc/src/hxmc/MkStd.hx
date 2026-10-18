@@ -12,16 +12,36 @@ import sys.io.File;
 // upstream module keeps the original source for Eval:
 //   package ...;  #if eval <original> #else <hxmc implementation> #end
 // Modules of hxmc's own (the `hxmc` package: the runtime's externs) are
-// copied as they are. Files are rewritten only when their content changes.
+// copied as they are. Files are rewritten only when their content changes;
+// a file of <out> no longer made from hxmc/std (its source deleted) is removed.
 class MkStd {
+	static var made:Map<String, Bool>;
+
 	static function main() {
 		var a = Sys.args();
 		run(a.length > 0 ? a[0] : "hxmc/std", a.length > 1 ? a[1] : "haxe/upstream/std", a.length > 2 ? a[2] : "bin/hxmc/std");
 	}
 
 	public static function run(src:String, std:String, out:String) {
+		made = [out + "/.stamp" => true];
 		walk(src, "", std, out);
+		prune(out);
 		File.saveContent(out + "/.stamp", "");
+	}
+
+	// what an earlier run made from a source since deleted: removed, with
+	// the directories it leaves empty
+	static function prune(dir:String):Bool {
+		if (!FileSystem.exists(dir)) return true;
+		var empty = true;
+		for (n in FileSystem.readDirectory(dir)) {
+			var path = dir + "/" + n;
+			if (FileSystem.isDirectory(path)) {
+				if (prune(path)) FileSystem.deleteDirectory(path) else empty = false;
+			} else if (made.exists(path)) empty = false;
+			else FileSystem.deleteFile(path);
+		}
+		return empty;
 	}
 
 	static function walk(src:String, rel:String, std:String, out:String) {
@@ -58,6 +78,7 @@ class MkStd {
 	}
 
 	static function write(path:String, text:String) {
+		made[path] = true;
 		if (FileSystem.exists(path) && File.getContent(path) == text) return;
 		FileSystem.createDirectory(haxe.io.Path.directory(path));
 		File.saveContent(path, text);
