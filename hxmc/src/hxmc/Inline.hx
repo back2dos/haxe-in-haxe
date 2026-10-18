@@ -42,9 +42,12 @@ class Inline {
 	}
 	public static inline var DEPTH = 2; // levels of inlining (Fingerprint keys callers to that depth)
 
-	// whether f may be inlined (the IR test)
+	// whether f may be inlined (the IR test); not a function that runs the
+	// collector (@:hxmc.collects): the calls in its body are to the
+	// collector's own no-GC code, during which its callers' shadow-stack
+	// slots would be taken to keep their values (MIns.keepsFrame)
 	public static function candidate(f:FuncInfo):Bool {
-		if (f.hasTry) return false;
+		if (f.hasTry || f.collects) return false;
 		var n = 0;
 		function ex(e:Ex) {
 			if (++n > MAX_IR) return;
