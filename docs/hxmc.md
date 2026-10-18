@@ -295,7 +295,8 @@ generated `_start` calling `__libc_start_main`; runtime objects of their own,
 imports written from the import libraries), macOS (Mach-O against
 libSystem, ad-hoc signed), each on x86-64 and ARM64, Android (a shared
 library of position-independent code against Bionic, in an APK hxmc writes:
-Android, below), and wasm32-wasi (the
+Android, below), iOS and its simulator on ARM64 (macOS's Mach-O and
+runtime, in an app bundle hxmc writes: iOS, below), and wasm32-wasi (the
 whole runtime in Haxe; exception handling with `exnref`, or with
 `-D hxmc.wasm-eh=legacy` the legacy `try`/`catch_all`/`rethrow`, which node 22
 runs without flags and wasmtime not at all; run with
@@ -450,6 +451,97 @@ cube in a `GpuView` among views, its surface taken by Home and given back;
 the soft keyboard for a drawn window, keys, a composition and a commit). Not yet: one ABI per APK,
 release signing (a keystore), icons and resources, the clipboard
 ([plans/targets.md](plans/targets.md#android)).
+
+## iOS
+
+`-D hxmc.target=ios-arm64` (devices) or `ios-sim-arm64` (the simulator on
+Apple silicon): iOS 15 and later. Darwin is macOS's: the same libSystem,
+struct layouts and runtime objects as `macos-arm64` (`Mem.os()` 1,
+`Mem.target()` 3; `Mem.platform()` 1 or 2 tells iOS and the simulator
+apart, for packages), Mach-O with the iOS or the simulator's platform in
+`LC_BUILD_VERSION` (minimum 15.0, SDK 18.0), TLV descriptors as on macOS,
+the system's frameworks (UIKit, Foundation, Metal, ...) loaded by their
+install names from dyld's shared cache. The output is an executable, or with
+an output ending in `.app` an app bundle, `.ipa` the bundle zipped (no
+Xcode or SDK at build time):
+
+```sh
+haxe -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -main Cube \
+  --custom-target hxmc=bin/Cube.app -D hxmc.target=ios-sim-arm64 -D hxmc.ios-bundle-id=org.example.cube
+xcrun simctl install booted bin/Cube.app
+xcrun simctl launch --console-pty booted org.example.cube   # what the app prints
+```
+
+| Option | |
+| --- | --- |
+| `-D hxmc.ios-bundle-id=<id>` | `CFBundleIdentifier`, the code signature's identifier (default `org.hxmc.<the output's name>`) |
+| `-D hxmc.ios-name=<text>` | the home screen's label (the output's name) |
+| `-D hxmc.ios-version=<n>`, `-D hxmc.ios-version-name=<text>` | `CFBundleVersion` (1), `CFBundleShortVersionString` (1.0) |
+| `-D hxmc.ios-min-version=<major.minor>` | `MinimumOSVersion` and the build version's minimum (15.0, the floor) |
+| `-D hxmc.ios-entitlements=<file>` | entitlements (an XML plist) signed with the code |
+
+Why 15.0: `UILaunchScreen` (the screen's own size without a storyboard) is
+iOS 14's, current Xcodes and the App Store start at 15, which runs on every
+device since the A9; nothing here needs more.
+
+The bundle (`hxmc/src/hxmc/ios/Bundle.hx`): `<name>.app` holds the
+executable `<name>`, `Info.plist` (XML, `Plist.hx`: the bundle id, the
+executable, an empty `UILaunchScreen`, the platform, `MinimumOSVersion`, the
+orientations) and `_CodeSignature/CodeResources` (the other files' SHA-1 and
+SHA-256 with codesign's default rules). The executable's code signature is
+written by the linker (`hxmc/src/hxmc/CodeSign.hx`, shared with macOS, where
+it is the linker-signed ad hoc signature ld64 writes): for a bundle, ad hoc,
+identified by the bundle id, its CodeDirectory's special slots binding the
+`Info.plist`, an empty requirement set and `CodeResources` (and the
+entitlements), as `codesign -s -` signs, which `codesign --verify` accepts
+and the simulator runs. An `.ipa` is the bundle under `Payload/`, stored,
+the executable with mode 0755. The cube's executable: 269 KB, its `.ipa`
+273 KB; a hello world's 134 KB; IosTest's 651 KB.
+
+The app (`packages/os`, `hxmc.os.uikit`): UIKit wants `UIApplicationMain`
+on the main thread before any window, and it never returns. A program
+that uses the os package has `UIKitApp`'s export `hxmc_ui_main`, which
+hxmc's generated `main` runs instead of the program's body (DataGen, on
+the big stack the body would have had): it makes the app delegate's class
+at run time and calls `UIApplicationMain`; once the app has launched, a
+timer on the main run loop runs the program's body (its static
+initializers, then `main`) inside UIKit's loop, and `App.run` turns that
+loop itself without waiting (`CFRunLoopRunInMode`, as SDL does). Nothing
+runs before the body that needs a static's initializer. `UIKitWindow` is
+the one `UIWindow`, its root view controller's view an `HxmcView` (a
+`UIView` subclass made at run time, `+layerClass` `CAMetalLayer`): gfx's
+Metal back end draws to the layer as on macOS (Surface kind `Cocoa`).
+Touches are the left button (MouseDown, MouseMove, MouseUp at the first
+finger down) and their drags `Scroll` too, as on Android; the view's size
+and the safe area (`Window.safeTop`, `safeLeft`, `safeBottom`,
+`safeRight`, in pixels) are measured in `layoutSubviews` and
+`safeAreaInsetsDidChange` (a Resize event when either changes,
+ScaleChange when the scale does); the app delegate's background and
+foreground callbacks are Suspend and Resume (no frames are drawn in the
+background: iOS refuses GPU work there; the layer stays, so the Surface is
+not lost). `UIPasteboard` is the clipboard and the trait collection the
+dark mode. Not yet: keys and text input (a `UIKeyInput` view, as macOS's
+text view), multiple touches, UIScene (the app delegate's lifecycle is
+what the declared SDK gets).
+
+Checks: `hxmc/test/IosCheck.hx` (`make ios-check IOS_TARGET=ios-arm64|ios-sim-arm64`:
+the bundle, `Info.plist` read back, the Mach-O's header and load commands,
+the code signature's CodeDirectory with its page hashes and special slots
+recomputed, `CodeResources`; `llvm-objdump` where installed, `codesign` and
+`plutil` on a Mac), and on a Mac with Xcode `make ios-sim-check`
+(`packages/gfx/test/ios.sh`: `codesign --verify`, a new simulator booted,
+IosTest installed and launched with its stdout in a file, the cube headless
+on the simulator's Metal against `cube.png`, frames in the window and its
+pixels lit, a tap posted on the Simulator's window (`SimTap.hx`, an hxmc
+program for macOS) as MouseDown and MouseUp, a screenshot, Settings and back
+as Suspend and Resume; CI's `ios` and `ios-simulator` jobs, the latter on
+an iPhone 17 simulator of iOS 26.2, Xcode 16.4's runner). Devices need
+what is left ([plans/targets.md](plans/targets.md#ios)): a signature by the
+developer's certificate (a CMS blob over the CodeDirectory), the
+provisioning profile (`embedded.mobileprovision`) and its entitlements
+(`application-identifier`, `com.apple.developer.team-identifier`,
+`get-task-allow`, also in DER), the designated requirement; `CodeSign.Identity`
+is where they go.
 
 ## WebAssembly
 

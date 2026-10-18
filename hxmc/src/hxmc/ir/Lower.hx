@@ -136,6 +136,8 @@ class Lower {
 				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
 					// @:hxmc.android: the Android targets' only (Mem.target() 9 and 10)
 					if (hasMeta(":hxmc.android", c.clMeta) && targetCode >= 0 && targetCode < 9) continue;
+					// @:hxmc.ios: the iOS targets' only (Mem.platform() 1 and 2)
+					if (hasMeta(":hxmc.ios", c.clMeta) && targetPlatform >= 0 && targetPlatform < 1) continue;
 					// @:hxmc.wasm: the runtime of WebAssembly only (what C provides elsewhere)
 					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
 					// @:hxmc.native: the runtime of the native targets only (over C libraries)
@@ -175,6 +177,7 @@ class Lower {
 	public static var targetOs = -1;
 	public static var targetArm = -1;
 	public static var targetCode = -1;
+	public static var targetPlatform = -1; // (Mem.platform: Abi.platformCode)
 	// -D hxmc.wasm-gc (hxmc.wasmgc): the runtime's Haxe implementations are those of @:hxmc.wasmgc classes
 	public static var wasmGc = false;
 
@@ -188,6 +191,7 @@ class Lower {
 				case ECallHost("hxmc_unsafe_Mem_os", [], _) if (targetOs >= 0): targetOs;
 				case ECallHost("hxmc_unsafe_Mem_arm", [], _) if (targetArm >= 0): targetArm;
 				case ECallHost("hxmc_unsafe_Mem_target", [], _) if (targetCode >= 0): targetCode;
+				case ECallHost("hxmc_unsafe_Mem_platform", [], _) if (targetPlatform >= 0): targetPlatform;
 				case ENot(a):
 					var x = v(a);
 					x == null ? null : x == 0 ? 1 : 0;
@@ -235,6 +239,7 @@ class Lower {
 				case ECallHost("hxmc_unsafe_Mem_os", [], _) if (targetOs >= 0): EInt(targetOs);
 				case ECallHost("hxmc_unsafe_Mem_arm", [], _) if (targetArm >= 0): EInt(targetArm);
 				case ECallHost("hxmc_unsafe_Mem_target", [], _) if (targetCode >= 0): EInt(targetCode);
+				case ECallHost("hxmc_unsafe_Mem_platform", [], _) if (targetPlatform >= 0): EInt(targetPlatform);
 				case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
 				// (Float's %: hxmc.rt.LibM.fmod, as Math's natives)
 				case EBin(FMod, a, b) if (hostImpls.exists("fmod")): ECall(hostImpl("fmod"), [ex(a), ex(b)]);
