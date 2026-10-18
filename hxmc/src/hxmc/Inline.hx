@@ -17,12 +17,14 @@ class Inline {
 	public static inline var MAX_IR = 40; // IR nodes of a candidate
 	// instructions outside slow paths: of a callee inlined anywhere, at a
 	// call in a loop, and of the runtime's Haxe functions (hxmc.rt) outside
-	// loops: none (inlining hx_str_or_null at every concatenation costs 1% of
-	// the port's size for no measurable speed) (size against speed;
+	// loops: 3, those no bigger than their call (Bytes.get, set and length:
+	// the tool 0.2% smaller, its self-compile 1% less CPU; 16 inlines
+	// hx_str_or_null at every concatenation too: 0.5% faster still, the
+	// port 1.2% larger) (size against speed;
 	// HXMC_INLINE=<flat>,<loop>,<runtime flat>, for every target)
 	public static var MAX_FLAT = limit(0, 16);
 	public static var MAX_LOOP = limit(1, 48);
-	public static var MAX_FLAT_RT = limit(2, 0);
+	public static var MAX_FLAT_RT = limit(2, 3);
 	// WebAssembly (wasm32-wasi): an engine inlines again, and modules are
 	// downloaded: 4 and 16 take 6% off the playground's module (828 KB raw,
 	// 269 KB gzipped) with its self-compile under node and the benchmarks'
