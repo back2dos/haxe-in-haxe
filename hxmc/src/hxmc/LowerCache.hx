@@ -623,10 +623,11 @@ class CachedLower extends Lower {
 				if (superOf(obj(ci)) != (r == null ? null : tc(r))) mismatch("superclass changed");
 			case CRoot(r):
 				bindClass(r, rootClass());
+			// (bound already: the program has it, found again by the same key, with no effect)
 			case CSig(args, ret, r):
-				bindSig(r, prog.sig([for (a in args) mapTy(a)], mapTy(ret)));
+				if (!map.exists(r)) bindSig(r, prog.sig([for (a in args) mapTy(a)], mapTy(ret)));
 			case CShape(fields, r):
-				bindShape(r, prog.shape([for (f in fields) {name: f.name, ty: mapTy(f.ty)}]));
+				if (!map.exists(r)) bindShape(r, prog.shape([for (f in fields) {name: f.name, ty: mapTy(f.ty)}]));
 		}
 	}
 

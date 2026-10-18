@@ -182,6 +182,7 @@ const serverEnv = {
 	// (a resident compiler keeps what it makes: a large nursery and old space spare it collections)
 	RT_OLD_MB: process.env.RT_OLD_MB ?? '4096',
 	RT_MINOR_KB: process.env.RT_MINOR_KB ?? '32768',
+	HXMC_DEV_PROGRESS: '1',
 };
 // (--server-connect: the server connects here and takes its requests on that
 // connection, each one length-prefixed: where a connection per request
@@ -210,8 +211,22 @@ const linkedPromise = new Promise((r) => (linked = r));
 await new Promise((r) => linkServer.listen(0, '127.0.0.1', r));
 const server = spawn(compiler, ['--server-connect', '127.0.0.1:' + linkServer.address().port], { env: serverEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverOutput = '';
-server.stdout.on('data', (d) => (serverOutput += d));
-server.stderr.on('data', (d) => (serverOutput += d));
+// the build in progress (the module is served once it ends), and whether
+// the page was told to load again before it ended; the pages connected
+let building = false, again = false, early = false, built = Promise.resolve();
+const clients = new Set();
+// (in the browser, the page loads again once the program is typed, while its
+// code is made: HXMC_DEV_PROGRESS has the server say so, "hxmc dev:
+// generating"; the page's module is held back until the build ends)
+const output = (d) => {
+	serverOutput = (serverOutput + d).slice(-65536);
+	if (browser && building && !early && clients.size > 0 && serverOutput.indexOf('hxmc dev: generating\n', serverOutput.length - String(d).length - 32) >= 0) {
+		early = true;
+		sendAll({ type: 'reload' });
+	}
+};
+server.stdout.on('data', output);
+server.stderr.on('data', output);
 server.on('exit', (code) => {
 	console.error('hxmc dev: the compilation server stopped (' + code + ')\n' + serverOutput.slice(-2000));
 	process.exit(1);
@@ -349,7 +364,6 @@ async function reloadNative() {
 
 // --- the page (browser) ---
 
-const clients = new Set();
 function sendAll(m) {
 	for (const c of clients) wsSend(c, JSON.stringify(m));
 }
@@ -435,7 +449,7 @@ const httpServer = http.createServer((req, res) => {
 	if (p === '/' || p === '/index.html') {
 		res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
 		res.end(page());
-	} else if (p === '/__hxmc/app.wasm') serveFile(res, out);
+	} else if (p === '/__hxmc/app.wasm') built.then(() => serveFile(res, out));
 	else if (p === '/__hxmc/os/browser.mjs' && osPackage) serveFile(res, path.join(osPackage.dir, 'browser.mjs'));
 	else if (p.startsWith('/__hxmc/pkg/')) {
 		const [name, ...rest] = p.slice(12).split('/');
@@ -512,13 +526,15 @@ function onPageMessage(text) {
 
 // --- the loop ---
 
-let building = false, again = false;
 async function rebuild(seen) {
 	if (building) {
 		again = true;
 		return;
 	}
 	building = true;
+	early = false;
+	let ended;
+	built = new Promise((r) => (ended = r));
 	const t0 = performance.now();
 	// (natively: the running program's file moved aside, as a running executable cannot be written over)
 	const aside = out + '.running';
@@ -532,6 +548,7 @@ async function rebuild(seen) {
 	if (!r.ok) {
 		lastError = r.messages || 'the build failed';
 		log(`hxmc dev: error (build ${ms} ms); the last good build keeps running`);
+		// (a page that loaded again early gets the last good build, the overlay as it connects)
 		if (browser) sendAll({ type: 'error', message: lastError });
 	} else {
 		const wasError = lastError !== null;
@@ -539,12 +556,13 @@ async function rebuild(seen) {
 		timing = seen === null ? null : { seen, build: ms };
 		if (browser) {
 			if (wasError) sendAll({ type: 'ok' });
-			if (clients.size > 0) sendAll({ type: 'reload' });
+			if (early) {} else if (clients.size > 0) sendAll({ type: 'reload' });
 			else timing = null;
 		} else await reloadNative();
 		if (seen === null) log(`hxmc dev: built in ${ms} ms`);
 	}
 	building = false;
+	ended();
 	if (again) {
 		again = false;
 		rebuild(performance.now());
@@ -566,7 +584,7 @@ function changed(file) {
 		const seen = firstSeen;
 		firstSeen = null;
 		rebuild(seen);
-	}, 20);
+	}, 10);
 }
 const watched = new Set();
 for (const d of [...new Set(classPaths)].filter((d) => fs.existsSync(d))) {

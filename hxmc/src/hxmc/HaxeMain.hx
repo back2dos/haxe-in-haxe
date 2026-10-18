@@ -62,6 +62,11 @@ class HaxeMain {
 					if (host == null) throw "hxmc: the host is unknown (HXMC_HOST): name the target with -D hxmc.target=<target>";
 					core.Define.rawDefineValue(com.defines, "hxmc.target", host);
 				}
+				// (hxmc dev: the program typed, its code next; the page may load again meanwhile, dev.mjs)
+				if (Driver.resident && devProgress) {
+					Sys.println("hxmc dev: generating");
+					Sys.stdout().flush();
+				}
 				@:privateAccess Main.generate(com, com.file);
 			} catch (e:Dynamic) {
 				// (a compilation server's client gets it as an error: hxmc dev)
@@ -90,6 +95,8 @@ class HaxeMain {
 		}
 		return code;
 	}
+
+	static var devProgress = Sys.getEnv("HXMC_DEV_PROGRESS") == "1";
 
 	// `haxe --dev <arguments>`, `hxmc dev <arguments>`: the dev loop (docs/dev.md),
 	// node running dev.mjs (beside this binary in the npm package, HXMC_DEV_SCRIPT
