@@ -429,6 +429,8 @@ class Lower {
 	// ---- types
 
 	public function ty(t:T):Ty {
+		// (a typedef, expanded below: unfolding)
+		if (t.match(TType(_))) return unfolding(t, () -> ty(TFunctions.followWithoutNull(t)));
 		var t = TFunctions.followWithoutNull(t);
 		return switch t {
 			case TMono(_): TRef(RAny);
@@ -457,7 +459,7 @@ class Lower {
 						}
 					case _:
 						if (core.Meta.has(CoreType, a.aMeta)) fail("core type " + a.aPath.pack.join(".") + "." + a.aPath.name);
-						ty(core.Abstract.getUnderlyingType(a, params));
+						unfolding(t, () -> ty(core.Abstract.getUnderlyingType(a, params)));
 				}
 			case TInst(c, params):
 				switch c.clKind {
@@ -485,6 +487,47 @@ class Lower {
 			case TDynamic(_): TRef(RAny);
 			case _: TRef(RAny);
 		}
+	}
+
+	// the abstracts and typedefs (with their type parameters) `ty` is
+	// lowering the underlying type or expansion of, innermost last
+	var unfolded:Array<T> = [];
+
+	// t, an abstract or a typedef, as `f()` lowers its underlying type or
+	// expansion. A recursive one (`abstract Rec(Array<Rec>)`, upstream's
+	// unit test Issue8243; `typedef Rec<F> = Rec<F> -> F`, Issue12539) is
+	// in it, endlessly: where it occurs in itself (the same type parameters,
+	// compared as Abstract.getUnderlyingType compares them for its chains:
+	// fastEq) it is Dynamic. That occurrence is within a reference: an
+	// abstract over itself, also through Null, is an error (the typer's
+	// "Abstract underlying type cannot be recursive", Abstract's chains), as
+	// is a typedef of itself, so the cycle passes an Array's element or a
+	// function's argument or result; the values there are references (an
+	// Array, a function), which convert to and from Dynamic as they are, a
+	// closure through an adapter (FnLower.coerce).
+	function unfolding(t:T, f:() -> Ty):Ty {
+		for (u in unfolded)
+			if (core.TUnification.fastEq(u, t)) return TRef(RAny);
+		unfolded.push(t);
+		var r = try f() catch (e:Dynamic) {
+			unfolded.pop();
+			throw e;
+		}
+		unfolded.pop();
+		return r;
+	}
+
+	// `f()` (the types of a class's fields, of an enum's arguments) lowered
+	// outside of any abstract or typedef: the same wherever the class or
+	// enum is first seen
+	function outsideUnfolding(f:() -> Void) {
+		var saved = unfolded;
+		unfolded = [];
+		try f() catch (e:Dynamic) {
+			unfolded = saved;
+			throw e;
+		}
+		unfolded = saved;
 	}
 
 	// An optional argument of a function type (`?x:Int`, or `x:Int = 1`) is
@@ -539,6 +582,10 @@ class Lower {
 			return ci;
 		}
 		var sup = c.clSuper != null ? classInfo(c.clSuper.cls) : root;
+		// (the superclass's field types may name this class, which has its
+		// ClassInfo then: `class Node extends Base<Node>`, upstream's unit test TestGeneric)
+		ci = classes.get(c);
+		if (ci != null) return ci;
 		ci = new ClassInfo(core.Globals.sTypePath(c.clPath), nativeName(c), sup);
 		classes.set(c, ci);
 		tclasses.push(c);
@@ -570,8 +617,8 @@ class Lower {
 				case _:
 			}
 		// field types may refer back to this class
-		for (o in own)
-			o.slot.ty = ty(o.f.cfType);
+		outsideUnfolding(() -> for (o in own)
+			o.slot.ty = ty(o.f.cfType));
 		return ci;
 	}
 
@@ -603,7 +650,7 @@ class Lower {
 			ei.ctors.push(new CtorInfo(ei, name, ef.efIndex, []));
 		}
 		ei.ctors.sort((a, b) -> a.tag - b.tag);
-		for (name in e.eNames) {
+		outsideUnfolding(() -> for (name in e.eNames) {
 			var ef = e.eConstrs.get(name);
 			var ci = ei.ctors[ef.efIndex];
 			switch TFunctions.follow(ef.efType) {
@@ -614,7 +661,7 @@ class Lower {
 					ci.global = prog.globals.length;
 					prog.globals.push({ty: TRef(RCtor(ci)), init: ci, name: ei.ident + "_" + ci.name});
 			}
-		}
+		});
 		return ei;
 	}
 
