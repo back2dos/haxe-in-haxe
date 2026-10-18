@@ -126,6 +126,7 @@ class ModuleCache {
 		typing.TyperEntry.createdHook = onTyper;
 		ServerCache.dependencyDirtyHook = onDependencyDirty;
 		ServerCache.loadDirtyModuleHook = loadDirty;
+		ServerCache.readerFindModuleHook = onReaderFind;
 		typing.TypeloadModule.typeFromSourceHook = onTypeFromSource;
 		typing.TypeloadModule.buildClassHook = onBuildClass;
 		compiler.hxb.HxbReader.missingFieldHook = onMissingField;
@@ -837,6 +838,22 @@ class ModuleCache {
 		return typing.TypeloadModule.loadModulePrime(com, g, path, p);
 	}
 
+	// ServerCache.readerFindModuleHook: a module of the store a reader reaches
+	// from the one it reads (a type its declarations or expressions name),
+	// checked as one the typer loads (the checks of the module read leave its
+	// dependencies out: partial typing): not decoded as the variant chosen
+	// is, which may be one typed with other defines in a dependency (an
+	// inline function of another variant of an imported module, inlined)
+	static function onReaderFind(com:CommonContext, path:GlobalTypePath):Null<ModuleSkipReason> {
+		var s = state;
+		if (s == null) return null;
+		var v = s.variantOf(context.CommonCache.getCacheSign(com), path);
+		if (v == null || v.mc == null) return null;
+		var mc = try context.CommonCache.getCache(com).getHxbModule(path) catch (_:Dynamic) null;
+		if (mc == null) return null;
+		return ServerCache.checkModule(com.sctx, com, path, mc.mcExtra, core.Globals.nullPos);
+	}
+
 	// ServerCache.dependencyDirtyHook: a module checked good by its
 	// dependencies' hashes stays good
 	static function onDependencyDirty(com:CommonContext, mPath:GlobalTypePath, mExtra:ModuleDefExtra, dep:ModuleDep, reason:ModuleSkipReason):Bool {
@@ -1400,18 +1417,26 @@ class ModuleCache {
 		var wrote = false;
 		if (code == 0 && s.volatileReason == null && s.kept != null && s.kept.length > 0) {
 			// the build's modules, then the other variants (not those it
-			// superseded: the same module with the same reads), at most
-			// MAX_VARIANTS per module
+			// superseded: the same module with the same reads, typed with
+			// the same defines, or the one it was restored from), at most
+			// MAX_VARIANTS per module. (A variant typed with other defines
+			// stays although its reads are the same: they are its own, and
+			// another build's dependencies can make its typing another, as
+			// -D hxmc.wasm-gc makes Std's, which reads no define of it.)
 			var list = s.kept.copy();
 			var count = new Map<String, Int>();
 			var same = new Map<String, Bool>();
+			inline function supersedes(v:Variant)
+				return v.roleKey() + "\x00" + ModuleStore.readsKey(v.reads.concat(v.buildReads)) + "\x00" + v.signs[v.role];
 			for (v in list) {
 				count.set(v.roleKey(), 1);
-				same.set(v.roleKey() + "\x00" + ModuleStore.readsKey(v.reads.concat(v.buildReads)), true);
+				same.set(supersedes(v), true);
+				var from = v.prev != null ? v.prev : v.fresh ? null : v;
+				if (from != null) same.set(v.roleKey() + "\x00" + from.blob + "\x00" + from.blobOff, true);
 			}
 			for (v in s.index.variants) {
 				var k = v.roleKey();
-				if (same.exists(k + "\x00" + ModuleStore.readsKey(v.reads.concat(v.buildReads)))) continue;
+				if (same.exists(supersedes(v)) || same.exists(k + "\x00" + v.blob + "\x00" + v.blobOff)) continue;
 				var n = count.exists(k) ? count.get(k) : 0;
 				if (n >= MAX_VARIANTS) continue;
 				count.set(k, n + 1);
@@ -1763,9 +1788,16 @@ class ModuleCacheState {
 	}
 
 	// the variants of a role that match the build's defines chosen: per
-	// module, the newest whose reads match (of those, one whose file has
-	// the content it has now: a file edited back), else the newest (checked
-	// dirty)
+	// module, of those whose reads match, one whose file has the content it
+	// has now (a file edited back), of those one typed with this build's
+	// defines (the signature of its context), of those the newest; else the
+	// newest (checked dirty). The reads of a module are its own (its file's
+	// conditions, its macros'): one whose typing depends on defines through a
+	// module it depends on (an inline function of a module whose file reads
+	// -D hxmc.wasm-gc, inlined; the fields a build macro makes for the
+	// target) has a variant per build that matches every such build, the one
+	// typed with the build's defines the one whose dependencies are as they
+	// were (the checks decide; reselect for a module a macro defined)
 	public function register(role:Int) {
 		var first = new Map<String, Variant>();
 		var more = new Map<String, Array<Variant>>();
@@ -1775,24 +1807,29 @@ class ModuleCacheState {
 			if (!first.exists(v.key)) first.set(v.key, v);
 			if (!matches(v)) continue;
 			v.matched = true;
-			if (!c.exists(v.key)) c.set(v.key, v) else {
+			var w = c.get(v.key);
+			if (w == null) c.set(v.key, v) else {
 				var l = more.get(v.key);
-				if (l == null) more.set(v.key, l = []);
+				if (l == null) more.set(v.key, l = [w]);
 				l.push(v);
 			}
 		}
 		for (k => l in more) {
 			var v = c.get(k);
-			if (v.file == null || v.fileRec == null) continue;
-			var time = Common.fileTime(v.file);
-			if (v.fileRec.mtime == time && v.fileRec.size == ModuleCache.size(v.file)) continue;
-			var h = fileHash(v.file);
-			if (h == null || h == v.fileRec.hash) continue;
-			for (w in l)
-				if (w.fileRec != null && w.fileRec.hash == h) {
-					c.set(k, w);
-					break;
+			// (the content its file has now)
+			var h = v.file == null || v.fileRec == null ? null : {
+				var time = Common.fileTime(v.file);
+				v.fileRec.mtime == time && v.fileRec.size == ModuleCache.size(v.file) ? v.fileRec.hash : fileHash(v.file);
+			}
+			var best = v, rank = -1;
+			for (w in l) {
+				var r = (h != null && w.fileRec != null && w.fileRec.hash == h ? 2 : 0) + (w.signs[role] == signs[role] ? 1 : 0);
+				if (r > rank) {
+					best = w;
+					rank = r;
 				}
+			}
+			c.set(k, best);
 		}
 		for (k => v in first)
 			if (!c.exists(k)) c.set(k, v);
@@ -1809,7 +1846,7 @@ class ModuleCacheState {
 			}
 	}
 
-	// per role, the other variants whose reads match, per module
+	// per role, the variants whose reads match, per module that has several
 	var alternatives:Array<Map<String, Array<Variant>>> = [new Map(), new Map()];
 
 	// a module without a file of its own, which a macro defined: of its
