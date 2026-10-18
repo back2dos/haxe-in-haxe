@@ -249,7 +249,7 @@ class Driver {
 	// the processors (asked once: TaskPool runs getconf, 10-15 ms a build of the resident compiler)
 	static var domainCount = 0;
 
-	static function domains():Int {
+	public static function domains():Int {
 		if (domainCount == 0) domainCount = core.ds.TaskPool.recommendedDomainCount();
 		return domainCount;
 	}
