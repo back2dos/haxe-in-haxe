@@ -315,7 +315,8 @@ no threads, sockets or processes). mbedtls 2.28 and libuv 1.48
 use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 `HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
 `HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `HXMC_FRAME_POINTERS=0`,
-`RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_STATS`, `RT_VERIFY`.
+`RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_STATS`, `RT_VERIFY`,
+`RT_STACK_MB` (wasm32: the shadow stack; WebAssembly, Memory).
 
 ## Android
 
@@ -566,6 +567,50 @@ intact after `_start` returns, and JavaScript calls a `@:hxmc.callback` by
 its index in the exported `__indirect_function_table` (corpus case
 `WasmCallback`): `@hxmc/os`'s canvas window runs its loop from
 `requestAnimationFrame` that way, paused while the canvas is out of view.
+
+### Memory
+
+A wasm32 module's linear memory only grows, and browsers (phones above all,
+and several islands on one page) refuse it early, so the runtime
+(`hxmc/std/hxmc/rt/wasm/Heap.hx`, `Gc.hx`) takes only what it uses: the
+nursery's region is as large as the nursery (4 MB, then doubled by the
+adaptive sizing up to 32 MB: grown in place when it is the last region,
+else moved to a new one right after a minor collection, when it is empty;
+it stays as it is when memory cannot grow); the old space is chunks of 1 MB
+taken as objects are promoted (`RT_OLD_MB`, 32, is when the first major
+collection comes, not a reservation); the shadow stack is `RT_STACK_MB`
+(4 MB; `wasi.mjs` sets it from node's `--stack-size`, as deep as node's
+stack: 64 MB for the compiler under `--stack-size=65500`). There is no guard
+page: the first time a frame goes deeper than the shadow stack has been
+since the last collection (the slow path that raises `rt_sp_hw`), it is
+compared with the end, `rt_sp_limit`, and an overflow exits with "stack
+overflow: the shadow stack's 4 MB are full". A browser's wasm stack (about
+1 MB) runs out first: a recursion of frames of a few references fills 1 MB
+of shadow stack where node's 8 MB stack is full at 2 to 4 MB. Memory
+memory.grow gave is zero, so only what was handed out before and freed is
+zeroed (`Heap.freshFrom`: the highest the regions reached): the nursery, the
+shadow stack and the 64 KB granule table cost address space, not pages,
+until they are used. When memory.grow fails the runtime writes "out of
+memory: linear memory is N MB, growing it by M MB failed" and exits;
+`packages/os/browser.mjs` turns a RangeError of the browser's (a new
+instance's memory, an ArrayBuffer) into "out of memory: the browser refused
+N MB ...", which the islands' loader shows (`data-error`).
+
+The examples' memory (`memory.buffer.byteLength`, Chromium with a phone's
+emulation, after they start and after a few seconds of taps; the playground's
+compiler after `--version` and after running a hello world with `--interp`),
+and the renderer's resident memory (the examples page alone: about 108 MB):
+
+| | before | after | renderer RSS before | after |
+| --- | --- | --- | --- | --- |
+| gfx-cube | 98.3 MB | 10.3 MB | 229 MB | 134 MB |
+| ui-counter | 101.6 MB | 21.6 MB | 240 MB | 151 MB |
+| ui-gallery | 100.8, then 105.5 MB | 20.8 MB | 252 MB | 169 MB |
+| os-tone | 98.3 MB | 10.3 MB | 232 MB | 135 MB |
+| hih (playground) | 99.6, then 111.6 MB | 11.6, then 28.6 MB | 381 MB | 221 MB |
+
+Before, every instance reserved and zeroed the nursery's largest size (32
+MB) and a 64 MB shadow stack at startup.
 
 ### WasmGC (-D hxmc.wasm-gc, an experiment)
 

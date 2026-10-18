@@ -21,7 +21,11 @@ class Heap {
 	static inline var ARENA = 1 << 20;
 
 	static var top:Ptr; // the end of the regions handed out
+	// the highest `top` has been: memory above it was never handed out, and
+	// holds the zeros memory.grow gave it (zeroing it would only commit pages)
+	static var fresh:Ptr;
 	static var memEnd:Ptr; // the end of linear memory
+	static var refused:I64; // the size memory.grow last refused (pages * 64 KB)
 	static var freeTab:Ptr; // MAX_FREE (start, size) pairs, then the size classes' free lists
 	static var nfree:Int;
 	static var arena:Ptr;
@@ -36,16 +40,22 @@ class Heap {
 		freeTab = top;
 		top = top.add((bytes + 15) & ~15);
 		ensure(top);
-		Wasm.memset(freeTab, 0, bytes);
+		fresh = top;
 	}
 
 	// memory up to p (grows it): false when it cannot grow so far
 	@:hxmc.noGc static function tryEnsure(p:Ptr):Bool {
 		if (!memEnd.ult(p)) return true;
 		var need = p.diff(memEnd);
-		if (need > ((1 : I64) << 32)) return false;
+		if (need > ((1 : I64) << 32)) {
+			refused = need;
+			return false;
+		}
 		var pages = ((need + (PAGE - 1)) >>> 16).toInt();
-		if (Wasm.wasm_memory_grow(pages) < 0) return false;
+		if (Wasm.wasm_memory_grow(pages) < 0) {
+			refused = (pages : I64) * PAGE;
+			return false;
+		}
 		memEnd = memEnd.add(pages * PAGE);
 		return true;
 	}
@@ -54,11 +64,34 @@ class Heap {
 		if (!tryEnsure(p)) outOfMemory();
 	}
 
+	// what the host refused: "out of memory: linear memory is 37 MB, growing
+	// it by 32 MB failed" (the last line of stderr: what a browser's island
+	// loader shows)
 	// (Wasi.exit: with no current handler, the pads of the frames below do not
 	// take proc_exit's host exception for a Haxe exception and run on)
 	@:hxmc.noGc public static function outOfMemory() {
-		Wasi.writeLit(2, "out of memory\n");
+		Wasi.writeLit(2, "out of memory: linear memory is ");
+		Wasi.writeInt(2, ((memEnd.toI64() + (1 << 20) - 1) >> 20).toInt());
+		if (refused > 0) {
+			Wasi.writeLit(2, " MB, growing it by ");
+			Wasi.writeInt(2, ((refused + (1 << 20) - 1) >> 20).toInt());
+			Wasi.writeLit(2, " MB failed\n");
+		} else
+			Wasi.writeLit(2, " MB\n");
 		Wasi.exit(2);
+	}
+
+	// the end of what was ever handed out (memory above it holds zeros)
+	@:hxmc.noGc public static function freshFrom():Ptr
+		return fresh;
+
+	// zeroes [p, p + bytes) where it may not hold zeros: below `before`
+	// (freshFrom() from before p was handed out)
+	@:hxmc.noGc public static function zeroBelow(p:Ptr, bytes:Int, before:Ptr) {
+		if (!p.ult(before)) return;
+		var n:I64 = before.diff(p);
+		if (n > (bytes : I64)) n = bytes;
+		Wasm.memset(p, 0, n.toInt());
 	}
 
 	// the size of linear memory in bytes
@@ -90,6 +123,7 @@ class Heap {
 		var p = top;
 		if (!tryEnsure(top.add(bytes))) return Ptr.nil();
 		top = top.add(bytes);
+		if (fresh.ult(top)) fresh = top;
 		return p;
 	}
 
@@ -116,6 +150,7 @@ class Heap {
 		var gap = a.diff(top);
 		var q = top;
 		top = a.add(bytes);
+		if (fresh.ult(top)) fresh = top;
 		if (gap > 0) addFree(q, gap);
 		return a;
 	}
@@ -127,11 +162,24 @@ class Heap {
 		nfree++;
 	}
 
-	// a region of `bytes`, zeroed
+	// a region of `bytes`, zeroed (only what was handed out before: memory
+	// fresh from memory.grow is zero, and stays uncommitted until touched)
 	@:hxmc.noGc public static function regionZero(bytes:Int):Ptr {
+		var before = fresh;
 		var p = region(bytes);
-		Wasm.memset(p, 0, (bytes + 15) & ~15);
+		zeroBelow(p, (bytes + 15) & ~15, before);
 		return p;
+	}
+
+	// grows the region [p, p + bytes) in place to `to` bytes when it is the
+	// last one (false: it is not, or memory cannot grow so far)
+	@:hxmc.noGc public static function tryExtend(p:Ptr, bytes:Int, to:Int):Bool {
+		bytes = (bytes + 15) & ~15;
+		to = (to + 15) & ~15;
+		if (p.add(bytes) != top || !tryEnsure(p.add(to))) return false;
+		top = p.add(to);
+		if (fresh.ult(top)) fresh = top;
+		return true;
 	}
 
 	@:hxmc.noGc static function removeFree(i:Int) {
@@ -244,8 +292,9 @@ class Heap {
 
 	@:hxmc.export("calloc") @:hxmc.noGc public static function calloc(n:I64, size:I64):Ptr {
 		var bytes = n * size;
+		var before = fresh;
 		var p = malloc(bytes);
-		if (!p.isNull()) Wasm.memset(p, 0, bytes);
+		if (!p.isNull()) zeroBelow(p, bytes.toInt(), before);
 		return p;
 	}
 
