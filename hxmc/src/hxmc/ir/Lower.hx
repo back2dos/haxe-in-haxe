@@ -142,8 +142,9 @@ class Lower {
 					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
 					// @:hxmc.native: the runtime of the native targets only (over C libraries)
 					if (hasMeta(":hxmc.native", c.clMeta) && targetOs == 3) continue;
-					// @:hxmc.wasmgc: the runtime of -D hxmc.wasm-gc only, which has no other
-					if (hasMeta(":hxmc.wasmgc", c.clMeta) != wasmGc) continue;
+					// @:hxmc.wasmgc: the runtime of -D hxmc.wasm-gc only; @:hxmc.anyHeap: of
+					// both (written over hxmc.rt.Repr); the others of linear memory only
+					if (hasMeta(":hxmc.wasmgc", c.clMeta) != wasmGc && !hasMeta(":hxmc.anyHeap", c.clMeta)) continue;
 					// @:hxmc.os("windows"): the runtime of one system only
 					var os = metaString(":hxmc.os", c.clMeta);
 					if (os != null && targetOs >= 0 && ["linux", "macos", "windows", "wasm"].indexOf(os) != targetOs) continue;

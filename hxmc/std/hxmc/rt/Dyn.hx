@@ -42,7 +42,7 @@ class Dyn {
 	// any other unit answers false, and the caller asks the C table)
 	@:hxmc.noGc static function nameIs(p:Ptr, s:String):Bool {
 		var n = Str.len(s);
-		var c = Str.chars(s);
+		var c = Str.unitsAddr(s);
 		for (i in 0...n) {
 			var u = Mem.getU16At(c, 0, i);
 			if (u >= 0x80 || Mem.getU8At(p, 0, i) != u) return false;

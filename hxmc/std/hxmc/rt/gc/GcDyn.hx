@@ -1,5 +1,7 @@
 package hxmc.rt.gc;
 
+import hxmc.rt.Str;
+
 // -D hxmc.wasm-gc: Dynamic's comparisons and printing (W.kind), as hxmc.rt.Dyn's
 @:keep @:hxmc.wasmgc
 class GcDyn {
@@ -21,7 +23,7 @@ class GcDyn {
 			var x = W.unboxFloat(a), y = W.unboxFloat(b);
 			return x < y ? -1 : x > y ? 1 : 0;
 		}
-		if (ka == 4 && kb == 4) return GcStr.cmp(a, b);
+		if (ka == 4 && kb == 4) return @:privateAccess Str.cmp(a, b);
 		return eq(a, b) ? 0 : -1;
 	}
 
@@ -29,6 +31,27 @@ class GcDyn {
 	@:hxmc.export("gc_dyn_eq") static function dynEqExport(a:Dynamic, b:Dynamic):Bool
 		return eq(a, b);
 
-	public static function string(v:Dynamic):String
-		return GcStr.dynString(v);
+	@:hxmc.host("Std_string") public static function string(v:Dynamic):String
+		return switch W.kind(v) {
+			case 0: "null";
+			case 1: @:privateAccess Str.ofInt(W.unboxInt(v));
+			case 2: @:privateAccess Str.ofFloat(W.unboxFloat(v));
+			case 3: W.unboxBool(v) ? "true" : "false";
+			case 4: (v : String);
+			case 7:
+				var b = new StringBuf();
+				b.addChar("[".code);
+				for (i in 0...W.arrLen(v)) {
+					if (i > 0) b.addChar(",".code);
+					b.add(string(W.arrGet(v, i)));
+				}
+				b.addChar("]".code);
+				b.toString();
+			case 8: "<function>";
+			case 9: @:privateAccess Str.ofI64(W.unboxI64(v));
+			case _: "[object]";
+		}
+
+	@:hxmc.host("hx_std_string") static function stdString(v:Dynamic):String
+		return string(v);
 }

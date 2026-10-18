@@ -540,7 +540,10 @@ Included:
    can move during it. GC objects' memory can be passed directly
    (`Mem.addr(bytes)` to `memcpy`, `qsort`, hashing, codecs). The call must
    be short, must not block and must not call back. Calls that block copy
-   their data through a scoped arena instead.
+   their data through a scoped arena instead. Packages hand a Bytes to C
+   through `hxmc.unsafe.BytesPtr` (`of`, `written`, `copyIn`): the
+   address here, a copy through the module's linear memory under
+   `-D hxmc.wasm-gc`, where a Bytes is an array of the engine's collector.
 
 Deferred: `Segment` checks, `Arena.auto`/`Arena.global`, the `Allocator`
 family, `Debug`, containers, struct values, specialized generics, value

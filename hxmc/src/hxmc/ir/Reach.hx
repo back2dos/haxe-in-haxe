@@ -26,6 +26,14 @@ import hxmc.ir.Ir;
 // classes whose class value live code has, every class when it can also
 // resolve a class by its name (Type.resolveClass).
 //
+// A target that transforms the bodies first (WasmGC's IrOpt inlines) runs it
+// again over them: what was inlined everywhere is dropped.
+//
+// A target whose code calls the runtime's exported functions only for some
+// constructs (WasmGC: GcGen.runtimeCalls) names them per construct: the
+// runtime's exports are then live where live code has such a construct, not
+// roots.
+//
 // The program keeps its classes, enums and globals (type indices, layouts);
 // what the analysis drops: the functions no live code can reach (Program.funcs
 // keeps the live ones, Program.live tells), the closure types of dead
@@ -58,14 +66,26 @@ class Reach {
 	var why = new Map<FuncInfo, {from:Null<FuncInfo>, how:String}>();
 	var instBy = new Map<Int, Null<FuncInfo>>();
 
-	function new(p:Program, stats:Bool) {
+	// the runtime functions the target's code for an expression or statement calls (by symbol), or null
+	var calls:Null<RuntimeCalls>;
+	var bySymbol = new Map<String, FuncInfo>();
+
+	// the body analyzed (a target's own form of it: WasmGC's after IrOpt), else the function's
+	var bodyOf:Null<FuncInfo->Array<Stmt>>;
+
+	function new(p:Program, stats:Bool, calls:Null<RuntimeCalls>, bodyOf:Null<FuncInfo->Array<Stmt>>) {
 		this.p = p;
 		this.stats = stats;
+		this.calls = calls;
+		this.bodyOf = bodyOf;
 	}
 
+	inline function body(f:FuncInfo):Array<Stmt>
+		return bodyOf == null ? f.body : bodyOf(f);
+
 	// (HXMC_REACH=0: every function stays, as the lowering made them)
-	public static function run(p:Program, stats:Bool) {
-		var r = new Reach(p, stats);
+	public static function run(p:Program, stats:Bool, ?calls:RuntimeCalls, ?bodyOf:FuncInfo->Array<Stmt>) {
+		var r = new Reach(p, stats, calls, bodyOf);
 		r.analyze();
 		if (r.whyName != null) r.explain();
 		if (Sys.getEnv("HXMC_REACH") == "0") return;
@@ -107,7 +127,10 @@ class Reach {
 		for (f in p.roots)
 			mark(f);
 		for (f in p.funcs)
-			if (f.cSymbol != null) mark(f);
+			if (f.cSymbol != null) {
+				// (the runtime's, with RuntimeCalls: where live code needs them)
+				if (calls != null && StringTools.startsWith(f.module, "hxmc.rt.")) bySymbol.set(f.cSymbol, f) else mark(f);
+			}
 		for (c in p.classes)
 			for (name => m in c.methods)
 				if (!live.exists(m)) pending.push({name: name, m: m});
@@ -202,7 +225,7 @@ class Reach {
 			}
 			Facts.iterStmt(st, _ -> {}, s);
 		}
-		for (s in f.body)
+		for (s in body(f))
 			st(s);
 		return gs;
 	}
@@ -258,7 +281,7 @@ class Reach {
 				}
 				function st(s:Stmt)
 					Facts.iterStmt(st, ex, s);
-				for (s in f.body)
+				for (s in body(f))
 					st(s);
 			}
 		}
@@ -339,7 +362,7 @@ class Reach {
 			}
 			Facts.iterStmt(st, _ -> {}, s);
 		}
-		for (s in f.body)
+		for (s in body(f))
 			st(s);
 		defsCache.set(f, m);
 		return m;
@@ -451,12 +474,15 @@ class Reach {
 	function scan(f:FuncInfo) {
 		cur = f;
 		switch f.name {
-			case "hxmc_rt_Dyn_createEmpty": emptyInstance = true;
-			case "hxmc_rt_Dyn_resolveType": resolveType = true;
-			case "hxmc_rt_Dyn_getClass": typeOfValue = true;
+			case "hxmc_rt_Dyn_createEmpty" | "hxmc_rt_gc_GcNative_createEmpty": emptyInstance = true;
+			case "hxmc_rt_Dyn_resolveType" | "hxmc_rt_gc_GcNative_resolveType": resolveType = true;
+			case "hxmc_rt_Dyn_getClass" | "hxmc_rt_gc_GcNative_getClass": typeOfValue = true;
 			case _:
 		}
+		inline function runtime(sym:Null<String>)
+			if (sym != null) mark(bySymbol.get(sym));
 		function ex(e:Ex) {
+			if (calls != null) runtime(calls.ex(e));
 			switch e {
 				case ECall(g, args):
 					mark(g);
@@ -494,6 +520,7 @@ class Reach {
 			Facts.iterEx(ex, e);
 		}
 		function st(s:Stmt) {
+			if (calls != null) runtime(calls.stmt(s));
 			switch s {
 				case SSetGlobal(g, _):
 					setBy(g, f);
@@ -501,7 +528,10 @@ class Reach {
 			}
 			Facts.iterStmt(st, ex, s);
 		}
-		for (s in f.body)
+		for (s in body(f))
 			st(s);
 	}
 }
+
+// the symbols of the runtime functions a target's code calls for an expression, a statement (null: none)
+typedef RuntimeCalls = {ex:Ex->Null<String>, stmt:Stmt->Null<String>};

@@ -2,40 +2,28 @@ package hxmc.rt;
 
 import hxmc.I64;
 import hxmc.rt.C;
+import hxmc.rt.Repr;
 import hxmc.unsafe.LibC;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// The Date natives and Math.random (formerly in rt_std.c). A Date is a
-// T_NATIVE K_RAW object holding the milliseconds since the epoch (a
-// double); calendar fields come from the C library (mktime, localtime_r,
-// gmtime_r; the UCRT's _mktime64, _localtime64_s, _gmtime64_s on Windows),
-// whose struct tm starts with nine ints on every target.
-@:keep
+// The Date natives and Math.random (formerly in rt_std.c), written over
+// hxmc.rt.Repr for both runtimes (@:hxmc.anyHeap). A Date holds the
+// milliseconds since the epoch (a double); its calendar fields come from
+// the C library in linear memory (mktime, localtime_r, gmtime_r; the UCRT's
+// _mktime64, _localtime64_s, _gmtime64_s on Windows), whose struct tm
+// starts with nine ints on every target, and from the host's Date under
+// -D hxmc.wasm-gc.
+@:keep @:hxmc.anyHeap
 class Date {
-	static inline var T_NATIVE = 16;
-	static inline var K_RAW = 2;
-	// struct tm's int fields
-	static inline var SEC = 0;
-	static inline var MIN = 4;
-	static inline var HOUR = 8;
-	static inline var MDAY = 12;
-	static inline var MON = 16;
-	static inline var YEAR = 20;
-	static inline var WDAY = 24;
-	static inline var ISDST = 32;
-
 	static inline function windows():Bool
 		return Mem.os() == 2;
 
-	static function of(ms:Float):Dynamic {
-		var d = Mem.allocRaw(1, T_NATIVE, K_RAW);
-		Mem.setF64(Mem.addr(d), 0, ms);
-		return d;
-	}
+	static function of(ms:Float):Dynamic
+		return Repr.dateOf(ms);
 
 	static inline function ms(d:Dynamic):Float
-		return Mem.getF64(Mem.addr(d), 0);
+		return Repr.dateMs(d);
 
 	@:hxmc.noGc static function mktime(tm:Ptr):I64
 		return windows() ? LibC._mktime64(tm) : LibC.mktime(tm);
@@ -52,27 +40,11 @@ class Date {
 		}
 	}
 
-	@:hxmc.host("Date_new") static function make(y:Int, m:Int, d:Int, h:Int, mi:Int, s:Int):Dynamic {
-		var tm = Mem.stack(64);
-		LibC.memset(tm, 0, 64);
-		Mem.setI32(tm, YEAR, y - 1900);
-		Mem.setI32(tm, MON, m);
-		Mem.setI32(tm, MDAY, d);
-		Mem.setI32(tm, HOUR, h);
-		Mem.setI32(tm, MIN, mi);
-		Mem.setI32(tm, SEC, s);
-		Mem.setI32(tm, ISDST, -1);
-		var t:Float = cast mktime(tm);
-		return of(t * 1000.0);
-	}
+	@:hxmc.host("Date_new") static function make(y:Int, m:Int, d:Int, h:Int, mi:Int, s:Int):Dynamic
+		return of(Repr.dateLocal(y, m, d, h, mi, s));
 
-	@:hxmc.host("Date_now") static function now():Dynamic {
-		var ts = Mem.stack(16);
-		LibC.clock_gettime(0, ts); // CLOCK_REALTIME
-		var sec:Float = cast Mem.getI64(ts, 0);
-		var nsec:Float = Mem.getI32(ts, 8);
-		return of(sec * 1000.0 + nsec / 1e6);
-	}
+	@:hxmc.host("Date_now") static function now():Dynamic
+		return of(Repr.dateNow());
 
 	@:hxmc.host("Date_fromTime") static function fromTime(t:Float):Dynamic
 		return of(t);
@@ -101,72 +73,64 @@ class Date {
 		if (n == 19 && digitsAt(0, 4, 0) && sep(4, "-".code) && digitsAt(5, 2, 1) && sep(7, "-".code) && digitsAt(8, 2, 2) && sep(10, " ".code)
 			&& digitsAt(11, 2, 3) && sep(13, ":".code) && digitsAt(14, 2, 4) && sep(16, ":".code) && digitsAt(17, 2, 5))
 			return make(f[0], f[1] - 1, f[2], f[3], f[4], f[5]);
-		Rt.rt_throw(Str.concat("Invalid date format : ", n > 60 ? Str.substr(s, 0, 60) : s));
+		Repr.fail(Str.concat("Invalid date format : ", n > 60 ? Str.substr(s, 0, 60) : s));
 		return null;
 	}
 
 	@:hxmc.host("Date_getTime") @:hxmc.noGc static function getTime(d:Dynamic):Float
 		return ms(d);
 
-	@:hxmc.noGc static function field(d:Dynamic, utc:Bool, off:Int):Int {
-		var tm = Mem.stack(64);
-		breakDown(ms(d), utc, tm);
-		return Mem.getI32(tm, off);
-	}
+	@:hxmc.noGc static function field(d:Dynamic, utc:Bool, f:Int):Int
+		return Repr.dateField(d, utc, f);
 
 	@:hxmc.host("Date_getFullYear") @:hxmc.noGc static function getFullYear(d:Dynamic):Int
-		return field(d, false, YEAR) + 1900;
+		return field(d, false, Repr.F_YEAR) + Repr.YEAR_BASE;
 
 	@:hxmc.host("Date_getMonth") @:hxmc.noGc static function getMonth(d:Dynamic):Int
-		return field(d, false, MON);
+		return field(d, false, Repr.F_MON);
 
 	@:hxmc.host("Date_getDate") @:hxmc.noGc static function getDate(d:Dynamic):Int
-		return field(d, false, MDAY);
+		return field(d, false, Repr.F_MDAY);
 
 	@:hxmc.host("Date_getDay") @:hxmc.noGc static function getDay(d:Dynamic):Int
-		return field(d, false, WDAY);
+		return field(d, false, Repr.F_WDAY);
 
 	@:hxmc.host("Date_getHours") @:hxmc.noGc static function getHours(d:Dynamic):Int
-		return field(d, false, HOUR);
+		return field(d, false, Repr.F_HOUR);
 
 	@:hxmc.host("Date_getMinutes") @:hxmc.noGc static function getMinutes(d:Dynamic):Int
-		return field(d, false, MIN);
+		return field(d, false, Repr.F_MIN);
 
 	@:hxmc.host("Date_getSeconds") @:hxmc.noGc static function getSeconds(d:Dynamic):Int
-		return field(d, false, SEC);
+		return field(d, false, Repr.F_SEC);
 
 	@:hxmc.host("Date_getUTCFullYear") @:hxmc.noGc static function getUTCFullYear(d:Dynamic):Int
-		return field(d, true, YEAR) + 1900;
+		return field(d, true, Repr.F_YEAR) + Repr.YEAR_BASE;
 
 	@:hxmc.host("Date_getUTCMonth") @:hxmc.noGc static function getUTCMonth(d:Dynamic):Int
-		return field(d, true, MON);
+		return field(d, true, Repr.F_MON);
 
 	@:hxmc.host("Date_getUTCDate") @:hxmc.noGc static function getUTCDate(d:Dynamic):Int
-		return field(d, true, MDAY);
+		return field(d, true, Repr.F_MDAY);
 
 	@:hxmc.host("Date_getUTCDay") @:hxmc.noGc static function getUTCDay(d:Dynamic):Int
-		return field(d, true, WDAY);
+		return field(d, true, Repr.F_WDAY);
 
 	@:hxmc.host("Date_getUTCHours") @:hxmc.noGc static function getUTCHours(d:Dynamic):Int
-		return field(d, true, HOUR);
+		return field(d, true, Repr.F_HOUR);
 
 	@:hxmc.host("Date_getUTCMinutes") @:hxmc.noGc static function getUTCMinutes(d:Dynamic):Int
-		return field(d, true, MIN);
+		return field(d, true, Repr.F_MIN);
 
 	@:hxmc.host("Date_getUTCSeconds") @:hxmc.noGc static function getUTCSeconds(d:Dynamic):Int
-		return field(d, true, SEC);
+		return field(d, true, Repr.F_SEC);
 
-	@:hxmc.host("Date_getTimezoneOffset") @:hxmc.noGc static function getTimezoneOffset(d:Dynamic):Int {
-		var l = Mem.stack(64), u = Mem.stack(64);
-		breakDown(ms(d), false, l);
-		breakDown(ms(d), true, u);
-		return ((mktime(u) - mktime(l)) / 60).toInt();
-	}
+	@:hxmc.host("Date_getTimezoneOffset") @:hxmc.noGc static function getTimezoneOffset(d:Dynamic):Int
+		return Repr.timezoneOffset(d);
 
 	// "%04d-%02d-%02d %02d:%02d:%02d" of the local time
 	@:hxmc.host("Date_toString") static function toString(d:Dynamic):String {
-		var tm = Mem.stack(64);
-		breakDown(ms(d), false, tm);
+		var tm = Repr.dateFields(d);
 		var b = new StringBuf();
 		inline function pad(v:Int, w:Int) {
 			if (v < 0) {
@@ -179,23 +143,25 @@ class Date {
 				b.addChar("0".code);
 			b.add(s);
 		}
-		pad(Mem.getI32(tm, YEAR) + 1900, 4);
+		pad(tm.get(Repr.F_YEAR) + Repr.YEAR_BASE, 4);
 		b.addChar("-".code);
-		pad(Mem.getI32(tm, MON) + 1, 2);
+		pad(tm.get(Repr.F_MON) + 1, 2);
 		b.addChar("-".code);
-		pad(Mem.getI32(tm, MDAY), 2);
+		pad(tm.get(Repr.F_MDAY), 2);
 		b.addChar(" ".code);
-		pad(Mem.getI32(tm, HOUR), 2);
+		pad(tm.get(Repr.F_HOUR), 2);
 		b.addChar(":".code);
-		pad(Mem.getI32(tm, MIN), 2);
+		pad(tm.get(Repr.F_MIN), 2);
 		b.addChar(":".code);
-		pad(Mem.getI32(tm, SEC), 2);
+		pad(tm.get(Repr.F_SEC), 2);
 		return b.toString();
 	}
 
+	#if !(hxmc.wasm_gc)
 	// ---- Math.random: [0, 1) from rand() (the UCRT's has 15 bits: two make 30)
 	@:hxmc.host("Math_random") @:hxmc.noGc static function random():Float {
 		if (windows()) return ((LibC.rand() << 15) ^ LibC.rand()) / 1073741824.0;
 		return LibC.rand() / 2147483648.0;
 	}
+	#end
 }
