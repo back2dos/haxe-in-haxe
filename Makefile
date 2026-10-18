@@ -704,6 +704,7 @@ SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp 
 	$(MAKE) --no-print-directory 3d-programs
 	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/$(GFX_TARGET)/Showroom$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Showroom $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Falling$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Falling $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Walker$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Walker $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Chains$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Chains $(HXMC_ARGS) $(GFX_ARGS))
