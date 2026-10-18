@@ -950,6 +950,15 @@ jobs:
           # (hxmc.ui.native on AppKit's controls)
           npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
           gfx/NativeTest gfx/native-macos.png
+      - name: hxmc dev's host (two builds swapped into the running process, docs/dev.md)
+        if: ${{ !cancelled() }}
+        run: |
+          set -ex
+          cd "$RUNNER_TEMP/app"
+          g="$GITHUB_WORKSPACE/repo/packages/gfx"
+          npx haxe -lib hxmc.os -main hxmc.dev.DevHost --custom-target hxmc=dev/host
+          for v in 1 2 3; do npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main DevHostTest -D hxmc.dev -D hxmc.dev-host -D hxmc.shared -D hxmc.exports=hxmc_dev_run,hxmc_dev_state -D devhost_version=$v --custom-target hxmc=dev/DevHost$v.dylib; done
+          sh "$g/test/mac-dev.sh" dev
       - name: audio (CoreAudio)
         run: |
           set -ex

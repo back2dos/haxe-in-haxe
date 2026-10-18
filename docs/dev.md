@@ -117,6 +117,84 @@ A program that ends by itself (its window closed) starts again with the
 next build. A native program without hxmc.os's app loop (a command-line
 program) cannot hand its state over: it is stopped and started again.
 
+## The dev host on macOS, Android and iOS
+
+The same host and handover as Linux's, with what each system keeps:
+
+- **macOS.** hxmc writes Mach-O dylibs (`-D hxmc.shared`: `MH_DYLIB`,
+  the image at 0, `LC_ID_DYLIB @rpath/<name>`, the exports in the export
+  trie, ad-hoc linker-signed), so `hxmc dev` runs a native program on
+  macOS in the dev host as on Linux (each build `<out>.dev/<n>.dylib`).
+  The program runs on the host's main thread (AppKit's); the first build
+  makes the `NSWindow`, its layer's view, text view and `CAMetalLayer` and
+  the window's delegate, and each next build takes them (`hxmc.dev.Hosted`
+  slots) and replaces the methods of the Objective-C classes the first
+  build made (`HxmcWindowDelegate`, `HxmcTextView`) with its own, so the
+  window's callbacks reach the running build. The Metal back end leaves
+  the layer its device. Checked in CI (gfx-macos: `mac-dev.sh`, the host
+  and three builds of `DevHostTest` as dylibs: the count kept, the same
+  process and window). Windows' DLLs are not written yet: a process per
+  build there.
+- **Android.** The APK is the dev host: `hxmc dev` builds it for its own
+  socket (`-D hxmc.dev-server=127.0.0.1:<port>`, the port beside the
+  page's, `HXMC_DEV_ANDROID_PORT`; it asks for the `INTERNET` permission,
+  `-D hxmc.android-permissions`), installs it (`adb install`, `adb
+  reverse`) and starts it once. Its activity glue keeps the window, the
+  input queue, the looper and the EGL context: the statics of
+  `hxmc.os.android.Activity` and `AndroidWindow` live in the host's state
+  block (`hxmc.dev.HostedMacro`, under `-D hxmc.dev-host` only), shared
+  with every build loaded later. Each later build is the library of its
+  APK (`lib/<abi>/libmain.so`, taken by the dev server): the running build
+  fetches it over a connection of its own (`lib <n>`) into the app's files
+  directory, writes its snapshot there, hands over and returns from main,
+  and the program's thread loads the new library there and runs its
+  program, with the same looper, window and context. No reinstall, no
+  activity restart, the same process. The libraries and their heaps stay
+  loaded (the system's UI thread may still call into a build once: a
+  looper's or a frame's callback); a session's memory grows by a build's
+  heap per swap. Checked on CI's emulator (`dev-android.mjs`: two edits,
+  the same pid, the count kept).
+- **iOS, the simulator.** The app is the dev host; each later build is a
+  dylib (`-D hxmc.shared` for `ios-sim-arm64`, whose main runs the
+  program's body rather than UIKit's start), loaded by the app on the main
+  thread inside UIKit's loop once the running build's body returns having
+  handed over. The `UIWindow`, its root view controller and the
+  `CAMetalLayer`'s view stay; each build replaces the methods of
+  `HxmcView` and the app delegate's lifecycle with its own. The simulator
+  reads the Mac's files, so the dev server can name the dylib's path
+  directly. Checked in CI (ios-simulator: `ios-dev.sh`,
+  `DevHostTest.app` and two later builds as dylibs: the count kept, the
+  same process and view). `hxmc dev` does not drive the simulator yet (an
+  `.app` output is built as before); `HXMC_DEV_NEXT` (libraries handed
+  over to in turn, a second after the first frame) is how the test drives
+  it without a dev server.
+- **iOS, a device: not possible with a dylib.** What was found (no device
+  was tried here): Apple's DTS answer to exactly this question (a dylib
+  signed with the developer's identity, sent to a development-signed app
+  on an iPhone in Developer Mode, written to its container and `dlopen`ed)
+  is no: "you can only open a library that's either built in to the OS or
+  embedded within your app" ([Apple Developer Forums
+  773210](https://developer.apple.com/forums/thread/773210), Quinn "The
+  Eskimo!"); the poster reports it worked on iOS 17 with Xcode attached
+  and fails on iOS 18 with "code signature invalid", and works once the
+  dylib is inside the app bundle. InjectionNext, which signs each dylib
+  with the identity of the app's build ("expanded codesigning identity",
+  `codesign --force -s <identity>`, no entitlements) and loads it from the
+  app's data container's `tmp/`, has the same failure open on device since
+  iOS 18.6 and on iOS 26 ([InjectionNext
+  #81](https://github.com/johnno1962/InjectionNext/issues/81): a valid
+  signature with the app's TeamIdentifier, "code signature invalid
+  (errno=1)"; the maintainer has not reproduced it, contributors conclude
+  device injection cannot work on iOS 18+). Library validation also means
+  only code signed by the team (or Apple) loads at all
+  ([forum thread 670761](https://developer.apple.com/forums/thread/670761)).
+  So `CodeSign.hx` signing each dylib with the developer identity (it signs
+  ad hoc only today) would not be enough: the only loadable place is the
+  app bundle, and installing a new bundle restarts the app. The device
+  fallback therefore stays the plan's: the program as wasm run by an
+  interpreter inside the host app (UI work, slower; nothing of it is built
+  yet), and a restart (reinstall, the snapshot carried) as the last resort.
+
 ## Fast refresh: state carried by key
 
 A reload is never a patch of running code: the new build runs its own
@@ -388,9 +466,11 @@ a fresh build of the same sources, byte for byte
 (`packages/os/test/dev/dev-verify.mjs <compiler> [example] [native|web|web-gc]`).
 ## Not yet
 
-- Seamless swaps natively on macOS and Windows (step 3): the process
-  restarts (the window closes and opens again); they need Mach-O dylibs
-  and DLLs from hxmc. Android and iOS are not driven yet.
+- Seamless swaps on Windows (step 3): the process restarts (the window
+  closes and opens again); it needs DLLs from hxmc. `hxmc dev` does not
+  drive the iOS simulator yet (its host is built and tested), and an iOS
+  device cannot load a new build's code (above): the wasm fallback is not
+  built.
 - Styles and assets without a rebuild (step 4).
 - The UI engine's own state (focus, scroll and selection by node key) is
   the UI session's part of step 2; ui's widgets' own signals are keyed

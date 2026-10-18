@@ -293,8 +293,10 @@ const hxbCache = process.env.HXMC_DEV_HXB_CACHE === '1' ? [] : ['-D', 'disable-h
 // (-D hxmc.shared -D hxmc.dev-host; the output renamed to a fresh name per
 // build, <out>.dev/<n>.so) and keeps the window and the GPU context across
 // builds; HXMC_DEV_HOST=0: a new process per build instead
-const hosted = !browser && process.platform === 'linux' && osPackage && process.env.HXMC_DEV_HOST !== '0'
-	&& all.some((a, i) => (a === '-D' || a === '--define') && all[i + 1] === 'hxmc.libc=glibc');
+// (macOS: each build a dylib)
+const hosted = !browser && !android && !out.endsWith('.app') && osPackage && process.env.HXMC_DEV_HOST !== '0'
+	&& (process.platform === 'darwin' || process.platform === 'linux' && all.some((a, i) => (a === '-D' || a === '--define') && all[i + 1] === 'hxmc.libc=glibc'));
+const libExt = process.platform === 'darwin' ? '.dylib' : '.so';
 // Android: the APK is the dev host, installed once: its library's activity
 // glue keeps the window, the EGL context and the input queue, and each
 // later build's library (taken from its APK) is fetched by the running
@@ -330,7 +332,8 @@ if (hosted) {
 	if (!fs.existsSync(hostExe)) hostBuilt = new Promise((resolve, reject) => {
 		fs.mkdirSync(cacheDir, { recursive: true });
 		const tmp = hostExe + '.' + process.pid;
-		const p = spawn(compiler, ['-cp', src, '-main', 'hxmc.dev.DevHost', '-D', 'hxmc.libc=glibc', '--custom-target', 'hxmc=' + tmp, ...(hxmcStd ? ['-cp', hxmcStd] : [])],
+		const p = spawn(compiler, ['-cp', src, '-main', 'hxmc.dev.DevHost', ...(process.platform === 'linux' ? ['-D', 'hxmc.libc=glibc'] : []), '--custom-target', 'hxmc=' + tmp,
+			...(hxmcStd ? ['-cp', hxmcStd] : [])],
 			{ stdio: ['ignore', 'pipe', 'pipe'] });
 		let o = '';
 		p.stdout.on('data', (d) => (o += d));
@@ -344,10 +347,10 @@ if (hosted) {
 }
 // (the build's output, a shared library, under a name of its own: a library loaded is not written over, nor loaded twice under one name)
 function nextLibrary() {
-	const lib = path.join(hostDir, `${++libCount}.so`);
+	const lib = path.join(hostDir, `${++libCount}${libExt}`);
 	fs.renameSync(out, lib);
 	// (two builds back: closed by the host)
-	try { fs.unlinkSync(path.join(hostDir, `${libCount - 2}.so`)); } catch {}
+	try { fs.unlinkSync(path.join(hostDir, `${libCount - 2}${libExt}`)); } catch {}
 	return lib;
 }
 
