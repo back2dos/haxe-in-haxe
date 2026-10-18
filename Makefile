@@ -689,6 +689,7 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm
 	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
 	sh packages/3d/test/check.sh bin/3d/$(GFX_TARGET)
 # what each feature of packages/3d adds to a program (packages/3d/test/size: Linux x86-64, wasm32-wasi)
 3d-sizes: $(TOOL) $(STD) $(HOST_RT)
