@@ -1,9 +1,11 @@
 # The dev loop: live reload and fast refresh
 
 Save a file, see the change, keep where you were. Four steps, each useful on
-its own; the first two give most of it. Steps 1 and 2 are built:
-[docs/dev.md](../dev.md) (how to use them, the primitives as built, the
-protocol, the times measured).
+its own; the first two give most of it. Steps 1 and 2 are built, and step
+3 in the browser, natively (Linux, macOS, Windows), on Android and on the
+iOS simulator: [docs/dev.md](../dev.md) (how to use them, the primitives
+as built, the protocol, the times measured; on an iOS device a new
+build's dylib cannot be loaded, and the wasm fallback is not built).
 
 ## Principles
 
