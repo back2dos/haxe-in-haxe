@@ -754,6 +754,14 @@ class Lower {
 		fi.cSymbol = metaString(":hxmc.export", cf.cfMeta);
 	}
 
+	// metadata m as the source writes it: not the @:keep DCE gives every class
+	// it filtered (Dce.mkKeepMeta, at no width)
+	static function written(m:StrictMeta, ml:core.Ast.Metadata):Bool {
+		for (e in ml)
+			if (core.Meta.metaEq(m, e.meta) && e.pos.pmax > e.pos.pmin) return true;
+		return false;
+	}
+
 	// The declaration a method overrides or implements: its signature is the one
 	// every implementation of the selector shares.
 	public function rootDecl(c:TClass, name:String):TClassField {
@@ -781,6 +789,8 @@ class Lower {
 		fi.selfClass = ci;
 		funcs.set(cf, fi);
 		ci.methods.set(cf.cfName, fi);
+		// (@:keep, on the method or its class, or @:keepSub on a superclass: live whatever reaches it, Reach)
+		if (written(Keep, cf.cfMeta) || written(Keep, c.clMeta) || optimization.Dce.superForcesKeep(c)) prog.roots.push(fi);
 		prog.funcs.push(fi);
 		// shared signature: the root declaration's (generic parameters are Dynamic there)
 		var decl = rootDecl(c, cf.cfName);
@@ -1086,6 +1096,8 @@ class Lower {
 		prog.funcs.push(fi);
 		prog.inits.push(fi);
 		initOf.set(fi, c);
+		// (a class's __init__ runs whether or not live code reads its statics: Reach)
+		if (c.clInit != null) prog.roots.push(fi);
 		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> new FnLower(this, fi, null, null).runInit(c))));
 	}
 

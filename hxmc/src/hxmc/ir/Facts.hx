@@ -24,6 +24,7 @@ class Facts {
 	public var bySymbol = new Map<String, FuncInfo>();
 	public var types:Array<TypeEntry> = [];
 	public var boundTypes = new Map<Int, Int>(); // sig -> type index of its bound-method closures
+	public var closureSigs = new Map<Int, Bool>(); // the signatures of closures (lambdas, bound methods)
 
 	// Function bodies refer to program-wide numbers (type indices, field ids,
 	// signature ids, globals, dispatch selectors) by name: TY_*, FID_*, SIG_*,
@@ -254,13 +255,26 @@ class Facts {
 			t.fields = [for (i in 0...s.fields.length) {name: s.fields[i].name, slot: s.locs[i], ty: s.fields[i].ty}];
 			s.tindex = addType(t);
 		}
+		// (closures share a type when their signatures and their captures'
+		// representations are the same: their code is in the object)
+		var closures = new Map<String, Int>();
 		for (l in p.lambdas) {
 			var slots:Array<Null<Ty>> = [TI32];
 			for (c in l.captures)
 				slots.push(c.ty);
-			var t = entry("<closure>", "TK_CLOSURE", slots, "clos." + symbol(l.fn));
+			var key = "clos." + l.sig.key + "." + [for (c in l.captures) switch c.ty {
+				case TStruct(_, size): "s" + size;
+				case t: Ir.repr(t);
+			}].join("");
+			var known = closures.get(key);
+			if (known != null) {
+				l.tindex = known;
+				continue;
+			}
+			var t = entry("<closure>", "TK_CLOSURE", slots, key);
 			t.sup = l.sig.id;
 			l.tindex = addType(t);
+			closures.set(key, l.tindex);
 		}
 		// class methods for structural and dynamic access: the effective implementation of every name
 		for (c in p.classes) {
@@ -271,6 +285,7 @@ class Facts {
 				for (name => m in k.methods)
 					if (!seen.exists(name)) {
 						seen.set(name, true);
+						if (!p.isLive(m)) continue;
 						var sig = p.sig([for (i in 1...m.args.length) m.args[i].ty], m.ret);
 						var d = m.dfltEntry;
 						if (d == null) ms.push({name: name, fn: symbol(m), sig: sig.id}) else
@@ -289,12 +304,25 @@ class Facts {
 		// consumers): a method, so structural calls hit the inline cache
 		// instead of the boxed slow path
 		types[5].methods = [{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id}];
-		// one bound-method closure type per signature: code, this, method
-		for (s in p.sigs) {
-			var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32], "bound." + s.key);
-			t.sup = s.id;
-			boundTypes.set(s.id, addType(t));
-		}
+		// one bound-method closure type per signature of a method in the
+		// tables (code, this, method; after Reach: else every signature's)
+		var bound = new Map<Int, Bool>();
+		for (t in types)
+			for (m in t.methods) {
+				bound.set(m.sig, true);
+				if (m.dsig != null) bound.set(m.dsig, true);
+			}
+		for (s in p.sigs)
+			if (p.live == null || bound.exists(s.id)) {
+				var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32], "bound." + s.key);
+				t.sup = s.id;
+				boundTypes.set(s.id, addType(t));
+			}
+		// the signatures closures have: those dynamic calls reach (DataGen's DYN<s>)
+		for (s in boundTypes.keys())
+			closureSigs.set(s, true);
+		for (l in p.lambdas)
+			closureSigs.set(l.sig.id, true);
 	}
 
 	// ---- field names: collected from the whole program, sorted, so the runtime can search them
