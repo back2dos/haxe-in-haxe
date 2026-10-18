@@ -231,21 +231,23 @@ llvmpipe; ui's Counter (about 400 modules, 1700 functions) and Gallery (about
 
 | | build | save to frame | target |
 | --- | --- | --- | --- |
-| Counter, browser (wasm) | 0.92 s | 1.07 s | 0.5 s |
-| Counter, browser (WasmGC) | 0.84 s | 1.01 s | 0.5 s |
-| Counter, native | 0.94 s | 1.12 s | 0.5 s |
-| Gallery, browser (wasm) | 1.49 s | 1.75 s | 1.5 s |
-| Gallery, browser (WasmGC) | 1.31 s | 1.68 s | 1.5 s |
-| Gallery, native | 1.48 s | 1.68 s | 1.5 s |
+| Counter, browser (wasm) | 0.93 s | 1.07 s | 0.5 s |
+| Counter, browser (WasmGC) | 0.79 s | 0.99 s | 0.5 s |
+| Counter, native | 0.88 s | 1.08 s | 0.5 s |
+| Gallery, browser (wasm) | 1.35 s | 1.61 s | 1.5 s |
+| Gallery, browser (WasmGC) | 1.38 s | 1.76 s | 1.5 s |
+| Gallery, native | 1.39 s | 1.67 s | 1.5 s |
 
-The build is most of it (the reload itself, the page loading again or the
-process starting, is 0.15-0.25 s). Of the Counter's build, in the
-compilation server: about 0.35 s reads every cached module back from its
-HXB and caches the build's again (the server's HXB cache, as upstream's),
-0.18 s lowers every function again, then DCE, the objects and the link;
-the Gallery's edit also types its large module of markup again. Neither
-target is met yet: what would close the gap is in
-[plans/dev-loop.md](plans/dev-loop.md).
+(Runs vary by about 10%.) The build is most of it; the reload itself, the
+page loading again or the process starting, is 0.15-0.3 s. Of the build,
+in the compilation server: 0.4-0.5 s reads every cached module back from
+its HXB and caches each again (the server's HXB cache, as upstream's),
+the Gallery's edit types its large module of markup again (0.25 s of
+macros), DCE takes 0.1 s, and hxmc replays the lowered bodies of the
+modules not typed again (`LowerCache`, by module step: 0.1 s where
+lowering everything takes 0.2-0.35 s) and fingerprints every module to
+reuse its object (0.2-0.3 s with the link). Neither target is met yet: what
+is left is in [plans/dev-loop.md](plans/dev-loop.md).
 
 ## Tests
 

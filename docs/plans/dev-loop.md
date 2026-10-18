@@ -77,12 +77,11 @@ tools can drive the loop.
 
 Targets: a counter-sized app under 500 ms from save to pixels, the gallery
 under 1.5 s. Measured as built ([dev.md](../dev.md#times)): 1.0-1.1 s for
-the counter, 1.7 s for the gallery, most of it the build. What is left: the
-compilation server reads every cached module back from its HXB and caches
-each again every build (0.35 s of the counter's), the lowered bodies kept by
-field object (LowerCache) are never found again in such a server (0.18 s),
-and a large module of markup types slowly (the gallery's edit). Mobile: Android pushes the new `.so`/APK and relaunches; iOS
-relaunches on the simulator (iOS forbids loading new code on devices).
+the counter, 1.6-1.8 s for the gallery, most of it the build. What is left:
+the compilation server reads every cached module back from its HXB and
+caches each again every build (0.4-0.5 s), the lowered bodies are replayed
+rather than kept (0.1 s), every module is fingerprinted again to find its
+object, and a large module of markup types slowly (the gallery's edit).
 
 ## 2. Fast refresh: state carried by key
 
