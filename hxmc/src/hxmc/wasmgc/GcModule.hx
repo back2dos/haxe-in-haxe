@@ -409,6 +409,7 @@ class GcModule {
 		importFunc("hxmc", "readFile", "p_p");
 		importFunc("hxmc", "writeFile", "ppi_i");
 		importFunc("hxmc", "dateNum", "ifiiiiii_f");
+		importFunc("hxmc", "fileIo", "iipii_i");
 		// the program's imports (@:hxmc.lib externs) that take and return numbers only
 		var foreign = [for (n in uses.hosts.keys()) n];
 		foreign.sort(Reflect.compare);

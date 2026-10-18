@@ -116,6 +116,8 @@ extern class W {
 	// a file's bytes (null when it cannot be read), written (appended)
 	static function readFile(path:String):Dynamic;
 	static function writeFile(path:String, b:Dynamic, append:Bool):Bool;
+	// file descriptors (GcSys's op codes): opened, read, written, closed, sought, told
+	static function fileIo(op:Int, fd:Int, x:Dynamic, a:Int, b:Int):Int;
 	// the calendar (GcRepr's date fields: op codes there)
 	static function dateNum(op:Int, t:Float, y:Int, m:Int, d:Int, h:Int, mi:Int, s:Int):Float;
 	static function f32Bits(v:Float):Int;

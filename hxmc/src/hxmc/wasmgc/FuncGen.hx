@@ -1387,7 +1387,7 @@ class FuncGen {
 				case "dynCall":
 					all();
 					call(m.dynCall());
-				case "sysStr" | "sysNum" | "readFile" | "writeFile" | "dateNum":
+				case "sysStr" | "sysNum" | "readFile" | "writeFile" | "dateNum" | "fileIo":
 					all();
 					call(m.importOf("hxmc." + name.substr(w.length)));
 				case "arrLen":
@@ -1737,6 +1737,11 @@ class FuncGen {
 			case "Math_pow": hostMath(9);
 			case "Math_random":
 				call(m.importOf("hxmc.random"));
+			case "rt_throw":
+				// (the value thrown, as hxmc.rt.Start's)
+				all();
+				op(0x08);
+				op(0);
 			case "rt_blocking_enter" | "rt_blocking_leave":
 			// (the linker's builtins of linear memory: hxmc.rt.wasm.Wasm)
 			case "memcpy" | "memmove" | "memset" if (m.memory):
