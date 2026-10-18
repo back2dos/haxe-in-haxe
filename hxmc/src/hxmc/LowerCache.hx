@@ -25,15 +25,28 @@ import core.TType;
 // by a replay: it keeps the objects of the build that recorded it (bound
 // anew each build), so a body is copied once per build.
 //
+// A compilation server that keeps its modules as HXB (the default) reads
+// them back each build, which makes new field objects for every module:
+// a body is then also found by its module, class and field (byKey), and
+// reused when its module was not typed again since it was recorded (the
+// module's compilation step, m_processed, is the same: the module was read
+// back from what that build cached). Its calls then hold the objects of
+// the build that recorded it: replaying them, each class, enum, abstract
+// and field is the current build's of the same path and name (tc, tcf,
+// tt...: the same objects when they are current), and one gone abandons
+// the lowering as any mismatch does.
+//
 // Closures written in a body are cached with it (their bodies are lowered
 // later, by their own entries, found through the closure's old function).
 // Static initializers and the closures the lowering makes itself
 // (forwarders, adapters) are lowered again each build: they are small.
 class LowerCache {
 	var entries = new haxe.ds.ObjectMap<TClassField, Entry>();
+	var byKey = new Map<String, Entry>(); // by module, class and field (CachedLower.stableKey)
 	var lambdas = new haxe.ds.ObjectMap<FuncInfo, Entry>(); // closure bodies, by their (recorded) function
 
 	public var hits = 0;
+	public var keyed = 0; // of the hits, found by key
 	public var misses = 0;
 	public var restarts = 0;
 	public var build = 0; // builds lowered (Entry.gen)
@@ -46,32 +59,38 @@ class LowerCache {
 	var lines = false; // and whether they have their positions (Lower.lines)
 
 	public function lower(main:TClass, types:Array<ModuleType>, basic:BasicTypes):Program {
-		hits = misses = 0;
+		hits = misses = keyed = 0;
 		why = null;
 		build++;
 		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
+			byKey = new Map();
 			target = Lower.targetCode;
 			platform = Lower.targetPlatform;
 			lines = Lower.lines;
 		}
-		var l = new CachedLower(this, true);
+		var l = new CachedLower(this, true, types);
 		var prog = try Lower.program(main, types, basic, l) catch (m:Mismatch) {
 			restarts++;
 			why = m.why;
-			l = new CachedLower(this, false);
+			l = new CachedLower(this, false, types);
 			Lower.program(main, types, basic, l);
 		}
 		hits = l.hits;
+		keyed = l.keyed;
 		misses = l.misses;
 		entries = l.newEntries;
 		lambdas = l.newLambdas;
+		byKey = l.newByKey;
 		return prog;
 	}
 
 	@:allow(hxmc.CachedLower) function entry(cf:TClassField):Null<Entry>
 		return entries.get(cf);
+
+	@:allow(hxmc.CachedLower) function keyEntry(k:String):Null<Entry>
+		return byKey.get(k);
 
 	@:allow(hxmc.CachedLower) function lambdaEntry(fi:FuncInfo):Null<Entry>
 		return lambdas.get(fi);
@@ -95,6 +114,7 @@ class Entry {
 	public var nlambdas:Int;
 	public var tests:Null<haxe.ds.ObjectMap<{}, Ex>> = null; // per catch with a test: the test applied to MARK
 	public var gen = 0; // the build that recorded it: its global and selector numbers are that build's
+	public var processed = 0; // its module's compilation step then (0: unknown)
 
 	public function new(tf, fi) {
 		this.tf = tf;
@@ -165,7 +185,9 @@ class CachedLower extends Lower {
 
 	public var newEntries = new haxe.ds.ObjectMap<TClassField, Entry>();
 	public var newLambdas = new haxe.ds.ObjectMap<FuncInfo, Entry>();
+	public var newByKey = new Map<String, Entry>();
 	public var hits = 0;
+	public var keyed = 0;
 	public var misses = 0;
 
 	// the calls of the body being lowered are logged here (the ones a call
@@ -192,10 +214,35 @@ class CachedLower extends Lower {
 
 	static var MARK = new Local(-0x7fff, "mark", TRef(RAny));
 
-	public function new(cache, reuse) {
+	// the class of each field lowered (stableKey), and the program's types by
+	// path, for the calls of a body recorded by another build (tc, te, ta)
+	var owners = new haxe.ds.ObjectMap<TClassField, TClass>();
+	// replaying a body recorded by another build (and the closures it wrote, staleLambdas)
+	var translating = false;
+	var replaying:Null<FuncInfo> = null; // the function whose body is replayed
+	var staleLambdas = new haxe.ds.ObjectMap<FuncInfo, Bool>();
+	var current = new haxe.ds.ObjectMap<{}, Bool>();
+	var classesByPath = new Map<String, TClass>();
+	var enumsByPath = new Map<String, TEnum>();
+	var abstractsByPath = new Map<String, TAbstract>();
+
+	public function new(cache, reuse, types:Array<ModuleType>) {
 		super();
 		this.cache = cache;
 		this.reuse = reuse;
+		for (t in types)
+			switch t {
+				case TClassDecl(c):
+					current.set(c, true);
+					classesByPath.set(typeKey(c.clModule, c.clPath), c);
+				case TEnumDecl(e):
+					current.set(e, true);
+					enumsByPath.set(typeKey(e.eModule, e.ePath), e);
+				case TAbstractDecl(a):
+					current.set(a, true);
+					abstractsByPath.set(typeKey(a.aModule, a.aPath), a);
+				case TTypeDecl(_):
+			}
 		var p = new CachedProgram(this);
 		p.classes = prog.classes;
 		prog = p;
@@ -216,19 +263,39 @@ class CachedLower extends Lower {
 		if (key != null) {
 			var tf = funcExpr(key);
 			var old = reuse ? cache.entry(key) : null;
-			if (old != null && tf != null && old.tf == tf) {
+			var skey = stableKey(key);
+			var processed = processedOf(key);
+			var byKey = false;
+			// (the field object is new: the same body when its module was not typed again)
+			if (reuse && tf != null && (old == null || old.tf != tf) && skey != null && processed != 0) {
+				var k = cache.keyEntry(skey);
+				if (k != null && k.processed == processed && k.tf != null) {
+					old = k;
+					byKey = true;
+				}
+			}
+			if (old != null && tf != null && (byKey || old.tf == tf)) {
+				translating = byKey;
 				replay(fi, old);
+				translating = false;
 				newEntries.set(key, old);
+				if (skey != null) newByKey.set(skey, old);
 				hits++;
+				if (byKey) keyed++;
 			} else {
-				newEntries.set(key, recordBody(fi, tf, run));
+				var e = recordBody(fi, tf, run);
+				e.processed = processed;
+				newEntries.set(key, e);
+				if (skey != null) newByKey.set(skey, e);
 				misses++;
 			}
 			return;
 		}
 		var old = replayLambdas.get(fi);
 		if (old != null) {
+			translating = staleLambdas.exists(fi);
 			replay(fi, old);
+			translating = false;
 			newLambdas.set(old.fi, old);
 			hits++;
 		} else if (bodyLambdas.exists(fi)) {
@@ -269,8 +336,14 @@ class CachedLower extends Lower {
 		if (smap == null) smaps.set(old.gen, smap = new Map());
 		stamp++;
 		bindFunc(old.fi, fi);
+		var saved = replaying;
+		replaying = fi;
 		for (c in old.log)
-			call(c);
+			try call(c) catch (m:Mismatch) {
+				if (Sys.getEnv("HXMC_LOWER_WHY") == "1") m.why += " (replaying " + old.fi.name + " into " + fi.name + ": " + Type.enumConstructor(c) + (translating ? ", translated" : "") + ")";
+				throw m;
+			}
+		replaying = saved;
 		fi.locals = [for (x in old.locals) local(x)];
 		fi.hasTry = old.hasTry;
 		fi.nlambdas = old.nlambdas;
@@ -313,6 +386,7 @@ class CachedLower extends Lower {
 	}
 
 	override public function staticFunc(c:TClass, cf:TClassField):FuncInfo {
+		owners.set(cf, c);
 		depth++;
 		var r = super.staticFunc(c, cf);
 		depth--;
@@ -321,6 +395,7 @@ class CachedLower extends Lower {
 	}
 
 	override public function method(c:TClass, cf:TClassField):FuncInfo {
+		owners.set(cf, c);
 		depth++;
 		var r = super.method(c, cf);
 		depth--;
@@ -329,6 +404,7 @@ class CachedLower extends Lower {
 	}
 
 	override public function ctor(c:TClass):FuncInfo {
+		if (c.clConstructor != null) owners.set(c.clConstructor, c);
 		depth++;
 		var r = super.ctor(c);
 		depth--;
@@ -345,6 +421,7 @@ class CachedLower extends Lower {
 	}
 
 	override public function structCtor(c:TClass):FuncInfo {
+		if (c.clConstructor != null) owners.set(c.clConstructor, c);
 		depth++;
 		var r = super.structCtor(c);
 		depth--;
@@ -481,27 +558,31 @@ class CachedLower extends Lower {
 		switch c {
 			case CTy(t, r):
 				// (made of what is bound already: no effect, the same type)
-				if (!skipTy || !boundTy(r)) bindTy(r, ty(t));
+				if (!skipTy || !boundTy(r)) bindTy(r, ty(tt(t)));
 			case CClass(k, r):
-				bindClass(r, classInfo(k));
+				bindClass(r, classInfo(tc(k)));
 			case CEnum(e, r):
-				bindEnum(r, enumInfo(e));
+				bindEnum(r, enumInfo(te(e)));
 			case CCtorInfo(ef, en, r):
-				bindCtor(r, ctorInfo(ef, en));
+				var n = te(en);
+				bindCtor(r, ctorInfo(tef(en, n, ef), n));
 			case CStatic(k, cf, r):
-				bindFunc(r, staticFunc(k, cf));
+				var n = tc(k);
+				bindFunc(r, staticFunc(n, tcf(k, n, cf)));
 			case CMethod(k, cf, r):
-				bindFunc(r, method(k, cf));
+				var n = tc(k);
+				bindFunc(r, method(n, tcf(k, n, cf)));
 			case CCtor(k, r):
-				bindFunc(r, ctor(k));
+				bindFunc(r, ctor(tc(k)));
 			case CStructCtor(k, r):
-				bindFunc(r, structCtor(k));
+				bindFunc(r, structCtor(tc(k)));
 			case CStructBox(name, r):
 				bindClass(r, structBox(name));
 			case CStaticVar(k, cf, r):
-				bindGlobal(r, staticVar(k, cf));
+				var n = tc(k);
+				bindGlobal(r, staticVar(n, tcf(k, n, cf)));
 			case CReflect(k):
-				reflectStatics(k);
+				reflectStatics(tc(k));
 			case CStaticClos(f, r):
 				bindLambda(r, staticClosure(obj(f)));
 			case CHostClos(name, s, self, r):
@@ -509,7 +590,7 @@ class CachedLower extends Lower {
 			case CCtorClos(ci, s, r):
 				bindLambda(r, ctorClosure(obj(ci), obj(s)));
 			case CBoundClos(f, d, owner, r):
-				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), cls: d.cls}, obj(owner)));
+				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), cls: d.cls == null ? null : tc(d.cls)}, obj(owner)));
 			case CAdapter(from, to, r):
 				bindLambda(r, adapter(obj(from), obj(to)));
 			case CLambda(s, caps, name, module, r):
@@ -519,28 +600,108 @@ class CachedLower extends Lower {
 				bindLambda(r, n);
 				bodyLambdas.remove(n.fn);
 				replayLambdas.set(n.fn, body);
+				// (as lowering the body named it: Lower.lambdaName, which a bound closure made later numbers after it)
+				if (replaying != null) replaying.nlambdas++;
+				if (translating) staleLambdas.set(n.fn, true);
 			case CSelector(name, s, r):
 				bindSel(r, selector(name, obj(s)));
 			case CNeedsDispatch(k, name, r):
-				if (needsDispatch(k, name) != r) mismatch("dispatch of " + name + " changed");
+				if (needsDispatch(tc(k), name) != r) mismatch("dispatch of " + name + " changed");
 			case CLookup(k, name, r):
-				var n = lookupMethod(k, name);
-				if ((n == null) != (r == null) || n != null && (n.cls != r.cls || n.field != r.field)) mismatch("method " + name + " changed");
+				var n = lookupMethod(tc(k), name);
+				if ((n == null) != (r == null) || n != null && (n.cls != tc(r.cls) || n.field != tcf(r.cls, n.cls, r.field))) mismatch("method " + name + " changed");
 			case CImplementors(k, name, r):
-				var n = implementors(k, name);
+				var n = implementors(tc(k), name);
 				if (n.length != r.length) mismatch("implementations of " + name + " changed");
 				for (i in 0...n.length)
-					if (n[i].cls != r[i].cls || n[i].field != r[i].field) mismatch("implementations of " + name + " changed");
+					if (n[i].cls != tc(r[i].cls) || n[i].field != tcf(r[i].cls, n[i].cls, r[i].field)) mismatch("implementations of " + name + " changed");
 			case CRootDecl(k, name, r):
-				if (rootDecl(k, name) != r) mismatch("declaration of " + name + " changed");
+				// (recorded by another build: by name, as the call does not say the field's class)
+				var n = rootDecl(tc(k), name);
+				if (translating ? (n == null) != (r == null) || n != null && n.cfName != r.cfName : n != r) mismatch("declaration of " + name + " changed");
 			case CSuperOf(ci, r):
-				if (superOf(obj(ci)) != r) mismatch("superclass changed");
+				if (superOf(obj(ci)) != (r == null ? null : tc(r))) mismatch("superclass changed");
 			case CRoot(r):
 				bindClass(r, rootClass());
 			case CSig(args, ret, r):
 				bindSig(r, prog.sig([for (a in args) mapTy(a)], mapTy(ret)));
 			case CShape(fields, r):
 				bindShape(r, prog.shape([for (f in fields) {name: f.name, ty: mapTy(f.ty)}]));
+		}
+	}
+
+	// ---- the current build's objects for those a body recorded by another build calls with
+
+	static function typeKey(m:ModuleDef, p:core.Globals.GlobalTypePath):String
+		return core.Globals.sTypePath(m.mPath) + ":" + core.Globals.sTypePath(p);
+
+	// a field's key across builds: its module, class and name (null: an overload, not found by name)
+	function stableKey(cf:TClassField):Null<String> {
+		var c = owners.get(cf);
+		if (c == null) return null;
+		var kind = if (c.clConstructor == cf) "new" else if (c.clStatics.get(cf.cfName) == cf) "static " + cf.cfName else if (c.clFields.get(cf.cfName) == cf) cf.cfName else null;
+		return kind == null ? null : typeKey(c.clModule, c.clPath) + ":" + kind;
+	}
+
+	// the compilation step its module was last typed at (0: unknown)
+	function processedOf(cf:TClassField):Int {
+		var c = owners.get(cf);
+		return c == null ? 0 : c.clModule.mExtra.mProcessed;
+	}
+
+	function tc(c:TClass):TClass {
+		if (c == null || current.exists(c)) return c;
+		switch c.clKind {
+			case KTypeParameter(_): return c;
+			case _:
+		}
+		var n = classesByPath.get(typeKey(c.clModule, c.clPath));
+		if (n == null) mismatch("class " + core.Globals.sTypePath(c.clPath) + " is gone");
+		return n;
+	}
+
+	function te(e:TEnum):TEnum {
+		if (e == null || current.exists(e)) return e;
+		var n = enumsByPath.get(typeKey(e.eModule, e.ePath));
+		if (n == null) mismatch("enum " + core.Globals.sTypePath(e.ePath) + " is gone");
+		return n;
+	}
+
+	function ta(a:TAbstract):TAbstract {
+		if (current.exists(a)) return a;
+		var n = abstractsByPath.get(typeKey(a.aModule, a.aPath));
+		// (one the program does not list: what ty reads of it is its name and type)
+		return n == null ? a : n;
+	}
+
+	// the field of new class n for field cf of old class o
+	function tcf(o:TClass, n:TClass, cf:TClassField):TClassField {
+		if (o == n || cf == null) return cf;
+		var r = if (o.clConstructor == cf) n.clConstructor else if (o.clStatics.get(cf.cfName) == cf) n.clStatics.get(cf.cfName) else if (o.clFields.get(cf.cfName) == cf)
+			n.clFields.get(cf.cfName) else if (o.clInit == cf) n.clInit else null;
+		if (r == null) mismatch("field " + cf.cfName + " is gone");
+		return r;
+	}
+
+	function tef(o:TEnum, n:TEnum, ef:TEnumField):TEnumField {
+		if (o == n) return ef;
+		var r = n.eConstrs.get(ef.efName);
+		if (r == null) mismatch("constructor " + ef.efName + " is gone");
+		return r;
+	}
+
+	// a type with the current classes, enums and abstracts (what ty reads of it)
+	function tt(t:T):T {
+		return switch core.TFunctions.follow(t) {
+			case TInst(c, ps):
+				switch c.clKind {
+					case KTypeParameter(_): t;
+					case _: TInst(tc(c), [for (p in ps) tt(p)]);
+				}
+			case TEnum(e, ps): TEnum(te(e), [for (p in ps) tt(p)]);
+			case TAbstract(a, ps): TAbstract(ta(a), [for (p in ps) tt(p)]);
+			case TFun(s): TFun(new TSignature([for (a in s.args) {name: a.name, optional: a.optional, type: tt(a.type)}], tt(s.ret)));
+			case f: f;
 		}
 	}
 
@@ -594,7 +755,7 @@ class CachedLower extends Lower {
 
 	function bindFunc(o:FuncInfo, n:FuncInfo) {
 		if (!bind(o, n)) return;
-		if (o.name != n.name || o.args.length != n.args.length) mismatch("function " + o.name + " changed");
+		if (o.name != n.name || o.args.length != n.args.length) mismatch("function " + o.name + " changed" + (Sys.getEnv("HXMC_LOWER_WHY") == "1" ? " (now " + n.name + ", " + o.args.length + " to " + n.args.length + " arguments)" : ""));
 		for (i in 0...o.args.length)
 			bindLocal(o.args[i], n.args[i]);
 		bindTy(o.ret, n.ret);

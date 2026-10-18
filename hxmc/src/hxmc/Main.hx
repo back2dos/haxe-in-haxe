@@ -135,7 +135,7 @@ class Main {
 		if (opts.stats) {
 			Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
 			if (useCache)
-				Sys.println('hxmc: bodies ${lowerCache.hits} reused, ${lowerCache.misses} lowered' + (lowerCache.why != null ? ' (lowered again: ${lowerCache.why})' : ''));
+				Sys.println('hxmc: bodies ${lowerCache.hits} reused (${lowerCache.keyed} by key), ${lowerCache.misses} lowered' + (lowerCache.why != null ? ' (lowered again: ${lowerCache.why})' : ''));
 		}
 		if (Sys.getEnv("HXMC_LOWER_ONLY") == "1") return; // (profiling the lowering)
 		if (opts.wasmGc) {

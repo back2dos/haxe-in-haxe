@@ -468,7 +468,9 @@ class PosixSys {
 	public static function realPath(path:String):String
 		return fullPath(path);
 
-	// gid uid atime mtime ctime dev ino nlink rdev size mode
+	// gid uid atime mtime ctime dev ino nlink rdev size mode (the times in
+	// seconds with their fraction, as OCaml's Unix.stat: a file written twice
+	// in one second changed, for the compilation server)
 	public static function stat(path:String):Array<Float> {
 		var p = cstr(path);
 		var st = Mem.stack(256);
@@ -479,18 +481,21 @@ class PosixSys {
 			return cast v;
 		inline function u(v:Int):Float
 			return f((v : I64) & (((1 : I64) << 32) - 1));
+		// (a timespec: seconds, then nanoseconds)
+		inline function t(at:Int):Float
+			return f(Mem.getI64(st, at)) + f(Mem.getI64(st, at + 8)) / 1e9;
 		if (mac())
 			return [
-				u(Mem.getI32(st, 20)), u(Mem.getI32(st, 16)), f(Mem.getI64(st, 32)), f(Mem.getI64(st, 48)), f(Mem.getI64(st, 64)), u(Mem.getI32(st, 0)),
+				u(Mem.getI32(st, 20)), u(Mem.getI32(st, 16)), t(32), t(48), t(64), u(Mem.getI32(st, 0)),
 				f(Mem.getI64(st, 8)), Mem.getU16(st, 6), u(Mem.getI32(st, 24)), f(Mem.getI64(st, 96)), Mem.getU16(st, 4)
 			];
 		if (Mem.arm())
 			return [
-				u(Mem.getI32(st, 28)), u(Mem.getI32(st, 24)), f(Mem.getI64(st, 72)), f(Mem.getI64(st, 88)), f(Mem.getI64(st, 104)), f(Mem.getI64(st, 0)),
+				u(Mem.getI32(st, 28)), u(Mem.getI32(st, 24)), t(72), t(88), t(104), f(Mem.getI64(st, 0)),
 				f(Mem.getI64(st, 8)), u(Mem.getI32(st, 20)), f(Mem.getI64(st, 32)), f(Mem.getI64(st, 48)), u(Mem.getI32(st, 16))
 			];
 		return [
-			u(Mem.getI32(st, 32)), u(Mem.getI32(st, 28)), f(Mem.getI64(st, 72)), f(Mem.getI64(st, 88)), f(Mem.getI64(st, 104)), f(Mem.getI64(st, 0)),
+			u(Mem.getI32(st, 32)), u(Mem.getI32(st, 28)), t(72), t(88), t(104), f(Mem.getI64(st, 0)),
 			f(Mem.getI64(st, 8)), f(Mem.getI64(st, 16)), f(Mem.getI64(st, 40)), f(Mem.getI64(st, 48)), u(Mem.getI32(st, 24))
 		];
 	}
