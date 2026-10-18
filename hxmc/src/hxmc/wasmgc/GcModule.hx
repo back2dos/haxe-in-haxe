@@ -862,7 +862,11 @@ class GcModule {
 			b.u8(0x0F);
 			b.u8(0x0B);
 		}
-		b.u8(0x00);
+		// (null, or not a function: as hxmc.rt.Dyn.callBoxed)
+		b.u8(0x23);
+		Enc.uleb(b, strLit("Cannot call a non-function"));
+		b.u8(0x08);
+		b.u8(0);
 	}
 
 	public function sigOfKey(key:String):SigInfo {
@@ -991,6 +995,13 @@ class GcModule {
 	public function globalKey(g:Int):String
 		return keyOf(prog.globals[g].ty);
 
+	public function globalTy(g:Int):Ty
+		return prog.globals[g].ty;
+
+	// an interface's index (prog.interfaces: -1 - its type value's id)
+	public function interfaceIndex(c:ClassInfo):Int
+		return prog.interfaces.indexOf(c);
+
 	public function ctorParamKey(c:CtorInfo, idx:Int):String
 		return keyOf(c.params[idx]);
 
@@ -1019,7 +1030,8 @@ class GcModule {
 		var kind = 0, id = 0, name = "";
 		switch tr {
 			case TRClass(c):
-				id = c.id;
+				// (an interface: -1 - its index, interfaces having no class id)
+				id = c.isInterface ? -1 - interfaceIndex(c) : c.id;
 				name = c.name;
 			case TREnum(e):
 				kind = 1;

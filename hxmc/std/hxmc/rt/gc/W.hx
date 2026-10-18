@@ -91,6 +91,8 @@ extern class W {
 	static function fieldNames(o:Dynamic):Dynamic;
 	static function objGet(o:Dynamic, i:Int):Dynamic;
 	static function objSet(o:Dynamic, i:Int, v:Dynamic):Void;
+	// a shallow copy of a class instance or anonymous structure (its added fields not copied), else null
+	static function objCopy(o:Dynamic):Dynamic;
 	static function createEmpty(cl:Dynamic):Dynamic;
 	static function enumOf(v:Dynamic):Dynamic;
 	static function enumIndex(v:Dynamic):Int;
@@ -106,6 +108,13 @@ extern class W {
 	static function typeId(t:Dynamic):Int;
 	static function typeName(t:Dynamic):String;
 	static function isType(v:Dynamic):Bool;
+	// whether v is an instance of the class or interface of the id (a type value's)
+	static function instOf(v:Dynamic, id:Int):Bool;
+	// the statics reached through a class value, by the class's index (typeAt's):
+	// their names (null: none), static i boxed (a method as a closure), set (false: a method)
+	static function staticNames(ci:Int):Array<String>;
+	static function staticGet(ci:Int, i:Int):Dynamic;
+	static function staticSet(ci:Int, i:Int, v:Dynamic):Bool;
 	// the fields added to an anonymous structure (a GcFields)
 	static function anonOverflow(o:Dynamic):Dynamic;
 	static function setAnonOverflow(o:Dynamic, v:Dynamic):Void;

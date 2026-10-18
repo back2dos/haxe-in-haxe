@@ -1226,15 +1226,14 @@ class FuncGen {
 						i32(0);
 						op(0x4E);
 					case "Bool": test(m.dynType(TBool));
-					case "Int" | "Float" | "Dynamic":
+					case "Int":
+						// (an Int, or a Float of an Int's value, as hxmc.rt.Dyn.is: GcNative.isInt)
+						call(m.exportOf("gc_is_int"));
+					case "Float" | "Dynamic":
 						call(Helpers.kind(m));
 						var t = temp("i");
 						localSet(t);
 						switch n {
-							case "Int":
-								localGet(t);
-								i32(1);
-								op(0x46);
 							case "Float":
 								localGet(t);
 								i32(1);
@@ -1342,6 +1341,9 @@ class FuncGen {
 				case "objGet":
 					all();
 					call(m.meta.objGet());
+				case "objCopy":
+					all();
+					call(m.meta.objCopy());
 				case "objSet":
 					all();
 					call(m.meta.objSet());
@@ -1372,6 +1374,18 @@ class FuncGen {
 				case "typeKind" | "typeId" | "typeName":
 					all();
 					m.meta.typeField(b, name.substr(w.length) == "typeKind" ? 0 : name.substr(w.length) == "typeId" ? 1 : 2);
+				case "staticNames":
+					all();
+					call(m.meta.staticNames());
+				case "staticGet":
+					all();
+					call(m.meta.staticGet());
+				case "staticSet":
+					all();
+					call(m.meta.staticSet());
+				case "instOf":
+					all();
+					call(m.meta.instOf());
 				case "isType":
 					all();
 					op(0xFB);
@@ -1541,6 +1555,10 @@ class FuncGen {
 					case EType(tr): typeTest(tr);
 					case _:
 				}
+			case "Std_isOfType" | "Std_is" | "hx_is":
+				// (a type known at run time only: GcNative.isOfType)
+				all();
+				call(m.exportOf("gc_is"));
 			case "hx_clos_of_sig" if (args[1].match(EStr(_))):
 				// (the closure when it has this signature, else null)
 				var key = switch args[1] {
@@ -1627,6 +1645,30 @@ class FuncGen {
 				localGet(t);
 				op(0x05);
 				m.constZero(b, "p");
+				op(0x0B);
+				release("p", t);
+			case "Std_downcast" | "hx_cast" if (!args[1].match(EType(_))):
+				// (the value when of the type, else null; a cast: else an error unless null)
+				var t = temp("p");
+				expr(args[0]);
+				localTee(t);
+				expr(args[1]);
+				call(m.exportOf("gc_is"));
+				if (name == "hx_cast") {
+					localGet(t);
+					op(0xD1);
+					op(0x72);
+				}
+				op(0x04);
+				op(0x6D);
+				localGet(t);
+				op(0x05);
+				if (name == "hx_cast") {
+					expr(EStr("Class cast error"));
+					op(0x08);
+					op(0);
+				} else
+					m.constZero(b, "p");
 				op(0x0B);
 				release("p", t);
 			case "hx_cast" if (args[1].match(EType(_))):
