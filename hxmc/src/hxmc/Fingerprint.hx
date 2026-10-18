@@ -164,6 +164,7 @@ class Fingerprint {
 	static inline var E_NEWCLOS = 70;
 	static inline var E_NEWBOX = 71;
 	static inline var E_NEWANON = 72;
+	static inline var E_ARRGETU = 73;
 
 	public function func(f:FuncInfo) {
 		word(FUNC);
@@ -408,7 +409,7 @@ class Fingerprint {
 				ex(a);
 				ex(i);
 			case EArrGetU(elem, a, i):
-				b.add("au");
+				word(E_ARRGETU);
 				ty(elem);
 				ex(a);
 				ex(i);
