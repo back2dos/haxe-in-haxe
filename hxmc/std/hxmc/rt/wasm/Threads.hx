@@ -15,13 +15,8 @@ class Threads {
 	static function never(what:String):Void
 		Rt.rt_throw(what + ": no other thread can end this wait (WebAssembly has one thread)");
 
-	// (-D hxmc.wasm-gc: through its runtime, hxmc.rt.gc)
 	static function sleep(timeout:Float) {
-		#if hxmc.wasm_gc
-		if (timeout > 0) hxmc.rt.gc.GcSys.sleep(timeout);
-		#else
 		if (timeout > 0) hxmc.rt.WasiSys.sleep(timeout);
-		#end
 	}
 
 	public static function spawn(job:Dynamic):Int {
