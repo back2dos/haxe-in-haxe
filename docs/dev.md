@@ -402,7 +402,12 @@ edits, the machine less busy, load 0.8-1.3):
 | Gallery, browser (WasmGC) | 0.77 s | 1.09 s | 1.10-1.11 s |
 | Counter, native (Linux, the dev host) | 0.37 s | 0.44-0.45 s | 0.52-0.56 s |
 | Gallery, native (Linux, the dev host) | 0.81 s | 0.89 s | 0.90-0.93 s |
+| a drawn cube, Android (CI's x86-64 emulator) | 0.15 s | 0.30 s | (a reinstall, many seconds) |
 
+(Android: the dev-android.mjs edits on CI's emulator, one run: the swap
+after the build, 0.15 s, is the library taken from its APK, fetched over
+adb's reversed socket, written and loaded on the device. The iOS simulator,
+macOS and Windows are checked in CI without a timed `hxmc dev`.)
 Natively the swap after the build is 0.07-0.09 s (the snapshot, the
 dispose, loading the library and its first frame), where the restart was
 0.12-0.14 s (most of it loading Mesa and making the window, which the host
