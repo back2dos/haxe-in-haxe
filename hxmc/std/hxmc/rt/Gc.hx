@@ -306,9 +306,10 @@ class Gc {
 	// misses overlap) and pushed, the first one on top. No call in the loop
 	// but the stack's growth, before the scan, and few values live across
 	// the scan (the nursery's bounds and the stack are read where used): the
-	// scan's values stay in registers. Objects of more than SMALL_SLOTS
-	// slots are scanned out of the loop, LARGE_SLICE slots at a time
-	// (scanLarge), so that the stack stays small.
+	// scan's values stay in registers (with one word of the pointer map:
+	// objects of more than SMALL_SLOTS slots are scanned out of the loop,
+	// LARGE_SLICE slots at a time, scanLarge, which also keeps the stack
+	// small).
 	@:hxmc.noGc static function drainMinor() {
 		while (gcTop > 0) {
 			if (gcTop + SMALL_SLOTS + 1 > gcCap) reserve(gcTop + SMALL_SLOTS + 1);
@@ -325,7 +326,7 @@ class Gc {
 		}
 	}
 
-	static inline var SMALL_SLOTS = 64;
+	static inline var SMALL_SLOTS = 32;
 
 	// a large object on top of the stack: its next LARGE_SLICE slots (from
 	// the entry's slot index), the entry left below the children they push
@@ -380,19 +381,14 @@ class Gc {
 		var n = lo & 0x0FFFFFFF;
 		var k = lo >>> 28;
 		if (k == K_OBJ) {
+			// (at most SMALL_SLOTS slots: one word of the map)
 			var pm = ptrmapOf(o);
-			if (!pm.isNull()) {
-				var w = 0;
-				while (w << 5 < n) {
-					var m = Mem.getI32(pm, w << 2);
-					var i = w << 5;
-					while (m != 0) {
-						if (m & 1 != 0) t = minorSlot(o, i, t);
-						m = m >>> 1;
-						i++;
-					}
-					w++;
-				}
+			var m = pm.isNull() ? 0 : Mem.getI32(pm, 0);
+			var i = 0;
+			while (m != 0) {
+				if (m & 1 != 0) t = minorSlot(o, i, t);
+				m = m >>> 1;
+				i++;
 			}
 		} else if (k == K_PARR) {
 			var i = Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY ? 1 : 0;
@@ -427,35 +423,34 @@ class Gc {
 		var v = Ptr.ofI64(Mem.getI64At(o, 0, i));
 		if (!v.ult(youngStart) && v.ult(youngEnd)) {
 			var vlo = hdrLo(v);
-			var vk = vlo >>> 28;
-			if (vk == K_FWD)
+			if (vlo >>> 28 == K_FWD)
 				Mem.setI64At(o, 0, i, Mem.getI64(v, 0));
 			else {
 				// (copyTo, without the call of memcpy)
 				var words = (vlo & 0x0FFFFFFF) + 1;
-				var dst = oldPtr, s = v.add(-8);
+				var dst = oldPtr;
 				if (words <= 8) {
 					do {
-						Mem.setI64(dst, 0, Mem.getI64(s, 0));
+						Mem.setI64(dst, 0, Mem.getI64(v, -8));
 						if (words == 1) break;
-						Mem.setI64(dst, 8, Mem.getI64(s, 8));
+						Mem.setI64(dst, 8, Mem.getI64(v, 0));
 						if (words == 2) break;
-						Mem.setI64(dst, 16, Mem.getI64(s, 16));
+						Mem.setI64(dst, 16, Mem.getI64(v, 8));
 						if (words == 3) break;
-						Mem.setI64(dst, 24, Mem.getI64(s, 24));
+						Mem.setI64(dst, 24, Mem.getI64(v, 16));
 						if (words == 4) break;
-						Mem.setI64(dst, 32, Mem.getI64(s, 32));
+						Mem.setI64(dst, 32, Mem.getI64(v, 24));
 						if (words == 5) break;
-						Mem.setI64(dst, 40, Mem.getI64(s, 40));
+						Mem.setI64(dst, 40, Mem.getI64(v, 32));
 						if (words == 6) break;
-						Mem.setI64(dst, 48, Mem.getI64(s, 48));
+						Mem.setI64(dst, 48, Mem.getI64(v, 40));
 						if (words == 7) break;
-						Mem.setI64(dst, 56, Mem.getI64(s, 56));
+						Mem.setI64(dst, 56, Mem.getI64(v, 48));
 					} while (false);
 				} else {
 					var j = 0;
 					while (j < words) {
-						Mem.setI64At(dst, 0, j, Mem.getI64At(s, 0, j));
+						Mem.setI64At(dst, 0, j, Mem.getI64At(v, -8, j));
 						j++;
 					}
 				}
@@ -464,7 +459,7 @@ class Gc {
 				Mem.setI32(v, -8, (vlo & 0x0FFFFFFF) | (K_FWD << 28));
 				Mem.setPtr(v, 0, nv);
 				Mem.setI64At(o, 0, i, nv.toI64());
-				if (vk == K_OBJ || vk == K_PARR) {
+				if (vlo >>> 28 == K_OBJ || vlo >>> 28 == K_PARR) {
 					Mem.setPtr(gcStack, t << 4, nv);
 					Mem.setI32(gcStack, (t << 4) + 8, 0);
 					t++;
