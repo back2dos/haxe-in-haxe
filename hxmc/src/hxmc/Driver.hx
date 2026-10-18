@@ -29,7 +29,10 @@ class Driver {
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
 		abi.framePointers = !abi.wasm && (abi.arm || o.framePointers);
-		if (o.shared && !abi.android) {
+		if (o.shared && abi.os == "macos") {
+			// (macOS and iOS: a Mach-O dylib, LinkMachO; the code is position-independent already)
+			abi.output = SharedLibrary;
+		} else if (o.shared && !abi.android) {
 			// (Linux in the dynamic glibc mode: the C library's imports; Android always is one)
 			if (abi.interp == null) throw "hxmc: -D hxmc.shared: a shared library is written for Linux in the dynamic glibc mode (-D hxmc.libc=glibc) and Android";
 			abi.reloc = Pic;
@@ -471,6 +474,7 @@ class Driver {
 		} : abi.os == "macos" ? {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
+			if (abi.output == SharedLibrary) l.installName = "@rpath/" + haxe.io.Path.withoutDirectory(out);
 			l.dylibs = dylibs;
 			if (bundle != null) {
 				l.sign = bundle.sign;

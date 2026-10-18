@@ -830,6 +830,9 @@ jobs:
           mkdir -p bin && tar xzf dl/ios.tar.gz -C bin
           xcodebuild -version
           sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
+      - name: hxmc dev's host on an iPhone simulator (two builds swapped into the running app)
+        if: ${{ !cancelled() }}
+        run: sh packages/gfx/test/ios-dev.sh bin/ios/ios-sim-arm64 bin/ios/ios-sim-arm64
       - uses: actions/upload-artifact@v7
         if: always()
         with:

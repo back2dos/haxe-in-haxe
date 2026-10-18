@@ -602,11 +602,16 @@ android-device-check: android-programs
 # (packages/gfx/test/IosTest.hx) and the cube example (also as an .ipa);
 # SimTap (packages/gfx/test/SimTap.hx), a macOS program that taps the
 # simulator for ios.sh
+# (hxmc dev's host: DevHostTest as the app and as dylibs of later versions, ios-dev.sh)
+IOS_DEV := -D hxmc.dev -D hxmc.dev-host -D hxmc.exports=hxmc_dev_run,hxmc_dev_state
 ios-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ios/$(IOS_TARGET)/IosTest.app,$(GFX_CP) -main IosTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.gfxtest)
 	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.app,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
 	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.ipa,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
 	$(call hxmc,bin/ios/SimTap,-cp packages/os/src -cp packages/gfx/test -main SimTap $(HXMC_ARGS) -D hxmc.target=macos-arm64)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/DevHostTest.app,$(GFX_CP) -main DevHostTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.devhosttest $(IOS_DEV) -D devhost_version=1)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/DevHost2.dylib,$(GFX_CP) -main DevHostTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) $(IOS_DEV) -D hxmc.shared -D devhost_version=2)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/DevHost3.dylib,$(GFX_CP) -main DevHostTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) $(IOS_DEV) -D hxmc.shared -D devhost_version=3)
 # their structure without a Mac (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature; llvm-objdump when there)
 ios-check: ios-programs
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run IosCheck $(foreach a,IosTest.app Cube.app Cube.ipa,bin/ios/$(IOS_TARGET)/$(a))
@@ -614,6 +619,7 @@ ios-check: ios-programs
 ios-sim-check:
 	$(MAKE) --no-print-directory ios-programs IOS_TARGET=ios-sim-arm64
 	sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
+	sh packages/gfx/test/ios-dev.sh bin/ios/ios-sim-arm64 bin/ios/ios-sim-arm64
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
