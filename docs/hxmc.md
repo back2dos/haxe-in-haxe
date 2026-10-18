@@ -458,8 +458,8 @@ identified by the bundle id, its CodeDirectory's special slots binding the
 `Info.plist`, an empty requirement set and `CodeResources` (and the
 entitlements), as `codesign -s -` signs, which `codesign --verify` accepts
 and the simulator runs. An `.ipa` is the bundle under `Payload/`, stored,
-the executable with mode 0755. The cube's app: 269 KB (its executable 269
-KB; a hello world's 134 KB); IosTest's 651 KB.
+the executable with mode 0755. The cube's executable: 269 KB, its `.ipa`
+273 KB; a hello world's 134 KB; IosTest's 651 KB.
 
 The app (`packages/os`, `hxmc.os.uikit`): UIKit wants `UIApplicationMain`
 on the main thread before any window, and it never returns. A program
@@ -497,7 +497,8 @@ IosTest installed and launched with its stdout in a file, the cube headless
 on the simulator's Metal against `cube.png`, frames in the window and its
 pixels lit, a tap posted on the Simulator's window (`SimTap.hx`, an hxmc
 program for macOS) as MouseDown and MouseUp, a screenshot, Settings and back
-as Suspend and Resume; CI's `ios` and `ios-simulator` jobs). Devices need
+as Suspend and Resume; CI's `ios` and `ios-simulator` jobs, the latter on
+an iPhone 17 simulator of iOS 26.2, Xcode 16.4's runner). Devices need
 what is left ([plans/targets.md](plans/targets.md#ios)): a signature by the
 developer's certificate (a CMS blob over the CodeDirectory), the
 provisioning profile (`embedded.mobileprovision`) and its entitlements
