@@ -195,7 +195,7 @@ atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against
 `sample-cff.png`, when fonts-inter is installed, as in CI; Arabic, Hebrew and marks against Chromium's widths and ink, grapheme clusters against `Intl.Segmenter`), `make ui-check` (the flexbox layout against
 Chromium's on 89 cases (29 of them CSS grids), `packages/ui/test/layout-expected.json`, which
-`layout-ref.mjs` writes from `layout-cases.mjs` (`make ui-layout-fuzz SEED=n COUNT=n`, a tool and not a lane: random flex trees against Chromium's boxes, a difference reduced into a case there, `make ui-layout-reduce CASE='fuzz 41-87'` dropping nodes and properties while it still differs); text wrapping, events and
+`layout-ref.mjs` writes from `layout-cases.mjs` (`make ui-layout-fuzz SEED=n COUNT=n`, a tool and not a lane: random flex trees against Chromium's boxes, `FEATURES=more` grids, absolute positions, auto margins, order, aspect ratios, hidden overflow and display none too, a difference reduced into a case there, `make ui-layout-reduce CASE='fuzz 41-87'` dropping nodes and properties while it still differs; the plain trees of seeds 3, 5, 8, 11, 13, 17, 19, 23, 29, 31, 41 and 99 all match, the more trees differ mostly where aspect ratios meet stretching); text wrapping, events and
 focus; PNG files of every colour type, depth, filter and interlacing,
 `packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
 expected, checked against Chromium's decoder when written; JPEG files of
@@ -237,7 +237,7 @@ a context menu chosen from (NSMenu), the menu bar's item performed; on
 Windows `WinAccessTest` calls the UI Automation providers through their
 COM interfaces and asks UI Automation for the window's element, and drives
 the native views: an EDIT typed into and centred, a popup menu chosen
-from by keys). In the browser: `make ui-web-check` (the native form on the DOM's own
+from by keys, the window's menu bar and a command of it). In the browser: `make ui-web-check` (the native form on the DOM's own
 controls, `native-web.mjs`; native text editors over a drawn window,
 the page's input and textarea, typed in, submitted, tabbed between drawn
 widgets and hidden under a popup, `web-field.mjs`; the todo example (its

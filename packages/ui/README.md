@@ -230,7 +230,7 @@ undo). They run natively on Linux, macOS and Windows, and in a browser
   invalid), `Textarea`, `Label`, `Badge`, `Card` (`CardHeader`, `CardTitle`, `CardDescription`, `CardAction`, `CardContent`,
   `CardFooter`), `RadioGroup`, `Slider`, `RangeSlider` (two knobs, a
   slider each for the keyboard), `Progress` (or indeterminate), `Tabs`, `Separator`, `Skeleton`, `Alert`
-  (`AlertTitle`, `AlertDescription`), `Avatar` (an image or initials), `Kbd`, `Spinner`, `Field` (a label, control, description and error as one group; `FieldSet`, `FieldLegend`, `FieldGroup`, `FieldSeparator` around fields), `ButtonGroup` (joined buttons, a text, separators), `InputGroup` (an input with addons before and after it; a click on one focuses the input), `Empty` (an empty state: media, a title, a description, actions), `Item` (a row of media, a title, a description and actions; `ItemGroup`), `AspectRatio`, `ScrollArea`, `NativeSelect` (the platform's menu as its options where it has one), `BarChart`, `LineChart` and `AreaChart` (series on a round scale, an axis, grid, legend and a tooltip of the category under the pointer; each series the theme's --chart-N), `PieChart` (slices clockwise from the top, a donut with a hole; the slice under the pointer by its angle), `SidebarProvider` with `Sidebar` (collapsing offcanvas or to its icons, its trigger and Mod+B toggling it; its header, content, footer, groups and menu buttons) and `SidebarInset`, `NavigationMenu` (a navigation landmark of triggers whose panels open under it, by a click, the pointer or the keys, and links), `Carousel` (slides through a viewport: Previous, Next and the arrow keys ease it to a slide, a wheel or trackpad settles on one), `Table` (sortable, resizable columns, numeric ones at the end with tabular figures, virtualised
+  (`AlertTitle`, `AlertDescription`), `Avatar` (an image or initials), `Kbd`, `Spinner`, `Field` (a label, control, description and error as one group; `FieldSet`, `FieldLegend`, `FieldGroup`, `FieldSeparator` around fields), `ButtonGroup` (joined buttons, a text, separators), `InputGroup` (an input with addons before and after it; a click on one focuses the input), `Empty` (an empty state: media, a title, a description, actions), `Item` (a row of media, a title, a description and actions; `ItemGroup`), `AspectRatio`, `ScrollArea`, `NativeSelect` (the platform's menu as its options where it has one), `BarChart`, `LineChart` and `AreaChart` (series on a round scale, stacked or side by side, an axis, grid, legend and a tooltip of the category under the pointer or the arrow keys; each series the theme's --chart-N), `PieChart` (slices clockwise from the top, a donut with a hole; the slice under the pointer by its angle, or the arrow keys'), `SidebarProvider` with `Sidebar` (collapsing offcanvas or to its icons, its trigger and Mod+B toggling it; its header, content, footer, groups and menu buttons) and `SidebarInset`, `NavigationMenu` (a navigation landmark of triggers whose panels open under it, by a click, the pointer or the keys, and links), `Carousel` (slides through a viewport: Previous, Next and the arrow keys ease it to a slide, a wheel or trackpad settles on one), `Table` (sortable, resizable columns, numeric ones at the end with tabular figures, virtualised
   rows, selection and keyboard), `Tree` (items opened and closed, by the
   pointer or the arrows, virtualised rows; ARIA's tree, with levels),
   `Split` (two panes, a divider dragged or moved by the arrows), `Calendar`
@@ -405,8 +405,9 @@ NSMenu; the browser and Linux keep the drawn one. A select is drawn on
 desktop by default (the plan: native on touch); with `host="native"` its
 options are the same native menu, under it, the chosen one checked. A
 menu bar is the system's on macOS (`PlatformViews.menuBar`: its menus after
-the application's, the drawn bar hidden, its shortcuts still working),
-drawn in the window elsewhere.
+the application's, the drawn bar hidden, its shortcuts still working) and
+the window's own on Windows (SetMenu: its items' commands the window's
+WM_COMMAND), drawn in the window elsewhere.
 
 ## Accessibility
 

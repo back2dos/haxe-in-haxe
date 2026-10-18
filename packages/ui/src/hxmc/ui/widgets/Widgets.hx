@@ -3705,6 +3705,21 @@ class Widgets implements Markup {
 		return 10 * p;
 	}
 
+	// (a chart's scale's top: max, else the greatest value (stacked: the greatest sum) rounded up)
+	static function chartTop(series:Array<{name:String, values:Array<Float>, ?color:Color}>, n:Int, max:Null<Float>, stacked:Bool):Float {
+		if (max != null) return max;
+		var most = 0.0;
+		for (i in 0...n) {
+			var sum = 0.0;
+			for (s in series) {
+				var v = Math.max(0, s.values[i]);
+				if (stacked) sum += v else most = Math.max(most, v);
+			}
+			most = Math.max(most, sum);
+		}
+		return niceMax(most);
+	}
+
 	// (unstyled, each series a colour of its own: a theme's are its tokens, --chart-1 to --chart-5)
 	static function chartBase()
 		Rules.addBase("chart", Lambda.flatten([
@@ -3721,6 +3736,23 @@ class Widgets implements Markup {
 				rules;
 			}
 		]));
+
+	// (a chart's keys, as recharts' accessibility layer: the arrows from one category or slice
+	// to the next (none shown: the first, or the last going back), Home and End, Escape none)
+	static function chartKeys(e:Event, hover:Signal<Int>, n:Int) {
+		var i = hover.peek();
+		var next = switch Behaviour.mirror(e.key, e.current.rtl()) {
+			case Key.RIGHT | Key.DOWN: i < 0 ? 0 : Std.int(Math.min(n - 1, i + 1));
+			case Key.LEFT | Key.UP: i < 0 ? n - 1 : Std.int(Math.max(0, i - 1));
+			case Key.HOME: 0;
+			case Key.END: n - 1;
+			case Key.ESCAPE: -1;
+			case _: -2;
+		}
+		if (next == -2 || n == 0) return;
+		e.preventDefault();
+		hover.value = next;
+	}
 
 	// (a chart's frame: the y axis's ticks and the plot's grid lines, the
 	// plot, the x axis's labels, the legend; the category under the pointer
@@ -3739,7 +3771,8 @@ class Widgets implements Markup {
 					for (t in 0...5)
 						<text slot="chart-tick" position="absolute" right={6} top={h - t / 4 * h - 7}>{format(top * t / 4)}</text>
 				]}</view>
-				<view tag={tag + "-plot"} slot="chart-plot" width={w} height={h} position="relative" onPointerMove={at} onPointerLeave={_ -> hover.value = -1}>
+				<view tag={tag + "-plot"} slot="chart-plot" width={w} height={h} position="relative" onPointerMove={at} onPointerLeave={_ -> hover.value = -1}
+					focusable={true} onKeyDown={e -> chartKeys(e, hover, n)} onBlur={_ -> hover.value = -1}>
 					{[for (t in 0...5) <view slot="chart-grid" position="absolute" left={0} width={w} top={h - t / 4 * h} height={1}/>]}
 					{plot}
 					<Show when={() -> hover.value >= 0}>{() -> {
@@ -3788,24 +3821,30 @@ class Widgets implements Markup {
 			width: "the plot's width (300 when not given)",
 			height: "the plot's height (160 when not given)",
 			max: "the scale's top (else the greatest value rounded up)",
+			stacked: "the series stacked, each on the ones before it (the scale to their sums)",
 			format: "a value as the axis and the tooltip show it (else as it is)",
 			label: "its name for assistive technology"
+		},
+		keys: {
+			"Left, Right, Up, Down": "shows the next or previous category's values (the plot focused)",
+			"Home, End": "the first or last category's",
+			"Escape": "hides them"
 		}
 	})
 	public static function BarChart(props:{labels:Array<String>, series:Array<{name:String, values:Array<Float>, ?color:Color}>, ?width:Float, ?height:Float,
-			?max:Float, ?format:Float->String, ?label:String, ?tag:String}):View {
+			?max:Float, ?stacked:Bool, ?format:Float->String, ?label:String, ?tag:String}):View {
 		var tag = props.tag ?? "bar-chart", w = props.width ?? 300.0, h = props.height ?? 160.0, n = props.labels.length, hover = signal(-1);
-		var top = props.max ?? niceMax(Lambda.fold(props.series, (s, m) -> Math.max(m, Lambda.fold(s.values, Math.max, 0.0)), 0.0));
+		var stacked = props.stacked == true, top = chartTop(props.series, n, props.max, stacked);
 		var format = props.format ?? Behaviour.plain, series = props.series, slot = n == 0 ? 0.0 : w / n;
-		var barW = series.length == 0 ? 0.0 : slot * 0.7 / series.length;
+		var barW = series.length == 0 ? 0.0 : stacked ? slot * 0.6 : slot * 0.7 / series.length;
+		var bar = (i:Int, k:Int) -> <view slot="chart-bar" data-series={Std.string(k % 5 + 1)} width={barW}
+			height={Math.max(0, Math.min(1, series[k].values[i] / top)) * h} background={series[k].color} data-active={() -> hover.value == i ? "true" : null}/>;
 		var plot = <view position="absolute" left={0} top={0} width={w} height={h} direction="row">{[
 			for (i in 0...n)
 				<view tag={tag + "-" + i} width={slot} height={h} direction="row" justify="center" align-items="end" role="group"
-					label={props.labels[i] + ": " + [for (s in series) s.name + " " + format(s.values[i])].join(", ")}>{[
-					for (k in 0...series.length)
-						<view slot="chart-bar" data-series={Std.string(k % 5 + 1)} width={barW} height={Math.max(0, Math.min(1, series[k].values[i] / top)) * h}
-							background={series[k].color} data-active={() -> hover.value == i ? "true" : null}/>
-				]}</view>
+					label={props.labels[i] + ": " + [for (s in series) s.name + " " + format(s.values[i])].join(", ")}>
+					{stacked ? <view direction="column-reverse">{[for (k in 0...series.length) bar(i, k)]}</view> : [for (k in 0...series.length) bar(i, k)]}
+				</view>
 		]}</view>;
 		return chartFrame(tag, props.labels, series, w, h, top, plot, hover, props.label, format);
 	}
@@ -3822,12 +3861,18 @@ class Widgets implements Markup {
 			width: "the plot's width (300 when not given)",
 			height: "the plot's height (160 when not given)",
 			max: "the scale's top (else the greatest value rounded up)",
+			stacked: "the series stacked, each on the ones before it (the scale to their sums)",
 			format: "a value as the axis and the tooltip show it (else as it is)",
 			label: "its name for assistive technology"
+		},
+		keys: {
+			"Left, Right, Up, Down": "shows the next or previous category's values (the plot focused)",
+			"Home, End": "the first or last category's",
+			"Escape": "hides them"
 		}
 	})
 	public static function LineChart(props:{labels:Array<String>, series:Array<{name:String, values:Array<Float>, ?color:Color}>, ?width:Float, ?height:Float,
-			?max:Float, ?format:Float->String, ?label:String, ?tag:String}):View
+			?max:Float, ?stacked:Bool, ?format:Float->String, ?label:String, ?tag:String}):View
 		return seriesChart(props, "line-chart", false);
 
 	// an area chart (recharts' AreaChart in shadcn's look): LineChart's
@@ -3840,32 +3885,48 @@ class Widgets implements Markup {
 			width: "the plot's width (300 when not given)",
 			height: "the plot's height (160 when not given)",
 			max: "the scale's top (else the greatest value rounded up)",
+			stacked: "the series stacked, each on the ones before it (the scale to their sums)",
 			format: "a value as the axis and the tooltip show it (else as it is)",
 			label: "its name for assistive technology"
+		},
+		keys: {
+			"Left, Right, Up, Down": "shows the next or previous category's values (the plot focused)",
+			"Home, End": "the first or last category's",
+			"Escape": "hides them"
 		}
 	})
 	public static function AreaChart(props:{labels:Array<String>, series:Array<{name:String, values:Array<Float>, ?color:Color}>, ?width:Float, ?height:Float,
-			?max:Float, ?format:Float->String, ?label:String, ?tag:String}):View
+			?max:Float, ?stacked:Bool, ?format:Float->String, ?label:String, ?tag:String}):View
 		return seriesChart(props, "area-chart", true);
 
 	// (LineChart's and AreaChart's: a line per series, filled under it for an area)
 	static function seriesChart(props:{labels:Array<String>, series:Array<{name:String, values:Array<Float>, ?color:Color}>, ?width:Float, ?height:Float,
-			?max:Float, ?format:Float->String, ?label:String, ?tag:String}, kind:String, area:Bool):View {
+			?max:Float, ?stacked:Bool, ?format:Float->String, ?label:String, ?tag:String}, kind:String, area:Bool):View {
 		var tag = props.tag ?? kind, w = props.width ?? 300.0, h = props.height ?? 160.0, n = props.labels.length, hover = signal(-1);
-		var top = props.max ?? niceMax(Lambda.fold(props.series, (s, m) -> Math.max(m, Lambda.fold(s.values, Math.max, 0.0)), 0.0));
+		var stacked = props.stacked == true, top = chartTop(props.series, n, props.max, stacked);
 		var format = props.format ?? Behaviour.plain, series = props.series, slot = n == 0 ? 0.0 : w / n;
 		var px = (i:Int) -> (i + 0.5) * slot, py = (v:Float) -> h - Math.max(0, Math.min(1, v / top)) * h;
+		// (each series' line at its values, stacked: on the sums before it)
+		var base = [for (i in 0...n) 0.0], at = [];
+		for (k in 0...series.length) {
+			at.push([for (i in 0...n) (stacked ? base[i] : 0) + series[k].values[i]]);
+			if (stacked) base = at[k];
+		}
+		inline function num(v:Float):String
+			return Std.string(Math.fround(v * 100) / 100);
 		var plot = <view position="absolute" left={0} top={0} width={w} height={h}>{[
 			for (k in 0...series.length) {
-				var d = [for (i in 0...n) (i == 0 ? "M" : "L") + Math.fround(px(i) * 100) / 100 + " " + Math.fround(py(series[k].values[i]) * 100) / 100].join(" ");
-				// (an area's: the line's points closed along the axis, filled faintly under the line)
-				var fill = !area || n == 0 ? "" : '<path d="M${Math.fround(px(0) * 100) / 100} $h ${d.substr(1)} L${Math.fround(px(n - 1) * 100) / 100} $h Z" fill="currentColor" fill-opacity="0.4"/>';
+				var d = [for (i in 0...n) (i == 0 ? "M" : "L") + num(px(i)) + " " + num(py(at[k][i]))].join(" ");
+				// (an area's: the line's points closed along the axis, or back along the line under it
+				// stacked, filled faintly)
+				var under = stacked && k > 0 ? [for (j in 0...n) {var i = n - 1 - j; "L" + num(px(i)) + " " + num(py(at[k - 1][i]));}].join(" ") : 'L${num(px(n - 1))} $h L${num(px(0))} $h';
+				var fill = !area || n == 0 ? "" : '<path d="$d $under Z" fill="currentColor" fill-opacity="0.4"/>';
 				var svg = Svg.parse('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 $w $h" width="$w" height="$h">$fill<path d="$d" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>');
 				[
 					<image tag={tag + "-line-" + k} slot={area ? "chart-area" : "chart-line"} data-series={Std.string(k % 5 + 1)} src={svg} position="absolute" left={0} top={0} width={w}
 						height={h} color={series[k].color}/>,
 					<Show when={() -> hover.value >= 0}>{() -> <view slot="chart-dot" data-series={Std.string(k % 5 + 1)} position="absolute" width={8} height={8}
-						radius={4} left={px(hover.value) - 4} top={py(series[k].values[hover.value]) - 4} background={series[k].color}/>}</Show>
+						radius={4} left={px(hover.value) - 4} top={py(at[k][hover.value]) - 4} background={series[k].color}/>}</Show>
 				];
 			}
 		]}</view>;
@@ -3888,6 +3949,11 @@ class Widgets implements Markup {
 			inner: "a donut's hole, its radius a fraction of the circle's (0 when not given: a pie)",
 			format: "a value as the tooltip shows it (else as it is)",
 			label: "its name for assistive technology"
+		},
+		keys: {
+			"Left, Right, Up, Down": "shows the next or previous slice's values (the plot focused)",
+			"Home, End": "the first or last slice's",
+			"Escape": "hides them"
 		}
 	})
 	public static function PieChart(props:{slices:Array<{name:String, value:Float, ?color:Color}>, ?size:Float, ?inner:Float, ?format:Float->String,
@@ -3926,7 +3992,7 @@ class Widgets implements Markup {
 		}
 		return <view tag={tag} slot="chart" role="img" label={props.label ?? "Chart"} align-items="center">
 			<view tag={tag + "-plot"} slot="chart-plot" width={size} height={size} position="relative" onPointerMove={under}
-				onPointerLeave={_ -> hover.value = -1}>
+				onPointerLeave={_ -> hover.value = -1} focusable={true} onKeyDown={e -> chartKeys(e, hover, slices.length)} onBlur={_ -> hover.value = -1}>
 				{[
 					for (k in 0...slices.length)
 						if (ends[k].to > ends[k].from) {

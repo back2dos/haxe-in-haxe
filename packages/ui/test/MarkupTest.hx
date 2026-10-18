@@ -913,6 +913,27 @@ class MarkupTest implements Markup {
 		ui.pointerMove(plot.absX - 50, plot.absY + 10);
 		ui.update();
 		check("chart: gone when the pointer leaves", ui.root.find("c-tooltip") == null);
+		// the keys, the plot focused: the first category, the next, Escape none
+		ui.setFocus(plot);
+		ui.keyDown(Key.RIGHT, 0);
+		ui.update();
+		var label = () -> (cast ui.root.find("c-tooltip").children[0] : TextNode).text;
+		check("chart: Right shows the first category", ui.root.find("c-tooltip") != null && label() == "A");
+		ui.keyDown(Key.RIGHT, 0);
+		ui.update();
+		check("chart: Right again the next", label() == "B");
+		ui.keyDown(Key.ESCAPE, 0);
+		ui.update();
+		check("chart: Escape hides it", ui.root.find("c-tooltip") == null);
+		// stacked: one bar of each category's values, on a scale to their greatest sum
+		var ui = new Ui(new MonoText(), 500, 400);
+		Render.render(<view padding={10}>
+			<BarChart tag="s" stacked={true} labels={["A", "B"]} series={[{name: "x", values: [50, 90]}, {name: "y", values: [10, 20]}]} width={200} height={100}/>
+		</view>, ui.root);
+		ui.update();
+		var col = ui.root.find("s-1").children[0];
+		check("stacked chart: a category's bars one on another, to a scale of 200", col.children.length == 2 && col.children[0].height == 45
+			&& col.children[1].height == 10 && col.children[1].absY + 10 == col.children[0].absY, [for (b in col.children) b.height + "@" + b.absY].join(","));
 		// a pie chart: a slice per value, clockwise from the top; the one under the pointer by its angle, none in a donut's hole
 		var ui = new Ui(new MonoText(), 500, 400);
 		Render.render(<view padding={10}>
