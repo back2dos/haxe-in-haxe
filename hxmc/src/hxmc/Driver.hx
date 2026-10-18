@@ -292,13 +292,24 @@ class Driver {
 		var lits:Array<Array<String>> = [for (_ in 0...nm) null];
 		var objs:Array<Obj> = [for (_ in 0...nm) null];
 		var s0 = haxe.Timer.stamp();
+		// (the functions that may be inlined: their digests first, Fingerprint.Inlined)
+		var inlined:Null<Fingerprint.Inlined> = null;
+		if (MirBuild.inlineCands != null) {
+			var cands = MirBuild.inlineCands;
+			inlined = new Fingerprint.Inlined(prep, [for (f in p.funcs) if (cands.exists(f)) f]);
+			var d = Inline.DEPTH;
+			while (d >= 1) {
+				var depth = d;
+				parallel(inlined.funcs.length, jobs, k -> inlined.compute(depth, k));
+				d--;
+			}
+		}
 		parallel(nm, jobs, mi -> {
-			var fp = new Fingerprint(prep);
-			var text = new StringBuf();
-			text.add(tk);
+			var fp = new Fingerprint(prep, inlined);
+			fp.text(tk);
 			for (f in byModule.get(order[mi]))
-				fp.func(f, text);
-			var key = Fingerprint.hash(text.toString());
+				fp.func(f);
+			var key = fp.key();
 			keys[mi] = key;
 			lits[mi] = fp.newStrings;
 			var mem = resident ? memObjs.get(memPaths[mi]) : null;
