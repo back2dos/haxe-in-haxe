@@ -547,6 +547,16 @@ class FnLower {
 		return r;
 	}
 
+	// A static function called or taken through one of its @:overload
+	// signatures: a copy of its field with that type and no body
+	// (typeload.ml's build_overloads), which a non-extern class implements
+	// with the function itself; an extern class's is a function of its own.
+	static function overloadImpl(c:TClass, cf:TClassField):TClassField {
+		if (cf.cfExpr != null || c.hasClassFlag(CExtern)) return cf;
+		var impl = c.clStatics.get(cf.cfName);
+		return impl != null && impl.cfExpr != null && impl.cfOverloads.indexOf(cf) >= 0 ? impl : cf;
+	}
+
 	// ---- default values
 
 	// A default value lowered outside of its function: calls pass those of
@@ -1331,6 +1341,7 @@ class FnLower {
 						coerce(EField(ci, idx, value(obj)), ci.fields[idx].ty, tyOf(e));
 				}
 			case FStatic(c, cf):
+				var cf = overloadImpl(c, cf);
 				switch cf.cfKind {
 					case Var(_) if (c.hasClassFlag(CExtern)):
 						var t = ty(cf.cfType);
@@ -1860,6 +1871,12 @@ class FnLower {
 
 	function call(f:TExpr, cargs:Array<TExpr>, e:TExpr):Ex {
 		var rt = tyOf(e);
+		switch strip(f).eexpr {
+			case TField(o, FStatic(c, cf)) if (overloadImpl(c, cf) != cf):
+				// (its arguments and result converted from the overload's types)
+				f = {eexpr: TField(o, FStatic(c, overloadImpl(c, cf))), etype: f.etype, epos: f.epos};
+			case _:
+		}
 		switch strip(f).eexpr {
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);
