@@ -691,6 +691,8 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	$(call hxmc,bin/3d/GltfTest.wasm,$(SCENE_CP) -main GltfTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(call hxmc,bin/3d/PhysicsTest.wasm,$(SCENE_CP) -main PhysicsTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm && $(WASI) bin/3d/PhysicsTest.wasm
+	@# (the asset step: the sample packed for the packed scene)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/sample.glb bin/3d/sample.hxm3d
 	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
@@ -704,8 +706,12 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	grep -q "has no field bal" bin/3d/ModelTypo.log
 # what each feature of packages/3d adds to a program (packages/3d/test/size: Linux x86-64, wasm32-wasi)
 3d-sizes: $(TOOL) $(STD) $(HOST_RT)
+	@mkdir -p bin/3d
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/sample.glb bin/3d/sample.hxm3d
 	ulimit -s unlimited 2>/dev/null || true; sh packages/3d/test/size/sizes.sh $(TOOL) bin/3d/size -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test/size $(HXMC_ARGS)
 3d-web-check: $(TOOL) $(STD)
+	@mkdir -p bin/3d
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/sample.glb bin/3d/sample.hxm3d
 	$(call hxmc,bin/3d/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/3d/test/web.mjs bin/3d/SceneWebTest.wasm bin/3d
 
