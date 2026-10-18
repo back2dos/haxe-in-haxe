@@ -87,7 +87,7 @@ class FuncGen {
 			local.set(s.id, i);
 			localKey.set(s.id, s.key);
 		}
-		var code = m.reach.bodies.get(f);
+		var code = m.uses.bodies.get(f);
 		for (l in code.locals)
 			if (!local.exists(l.id) && repr(l.ty) != "v") {
 				local.set(l.id, nparams + extra.length);
@@ -564,7 +564,7 @@ class FuncGen {
 			return k > 0 && repr(s.fields[k - 1].ty) == r;
 		}
 		var out = hint != null && has(hint) ? [hint] : [];
-		for (s in m.reach.shapes.keys())
+		for (s in m.uses.shapes.keys())
 			if (s != hint && has(s)) out.push(s);
 		if (out.length > ANON_CANDS) out = hint != null && has(hint) ? [hint] : [];
 		return out;

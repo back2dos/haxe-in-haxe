@@ -190,7 +190,8 @@ counter example (with the ui changes of the same work): 1.21 MB instead of
 1.77. `HXMC_STATS=1` prints the live
 functions (and where a name is computed) and the data's parts;
 `HXMC_REACH_WHY=<pack.Class.method>` the chain that keeps a function;
-`HXMC_REACH=0` keeps everything.
+`HXMC_REACH=0` keeps everything. WasmGC uses the same analysis (WasmGC
+below).
 
 ## Module cache
 
@@ -571,9 +572,12 @@ its index in the exported `__indirect_function_table` (corpus case
 
 With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the IR after Lower
 becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): objects live in the
-engine's collector, with no linear memory, shadow stack or barriers. What main and the
-initializers reach is emitted (`GcGen.Reach`), each function's body first
-through `IrOpt`: inlining where it lets scalar replacement turn objects
+engine's collector, with no linear memory, shadow stack or barriers. What is
+emitted is what the reachability above keeps (method-level, by name), run
+twice: before and after each function's body goes through `IrOpt`, so a
+function inlined everywhere is dropped (the runtime's exports are live
+where this target's code calls them: `GcGen.runtimeCalls`). `IrOpt`:
+inlining where it lets scalar replacement turn objects
 that never escape into locals (the IR's counterpart of Mir's `Inline` and
 `Sroa`, which this path never reaches; V8 inlines small functions of a
 WasmGC module itself). A reference has the wasm type its IR type proves

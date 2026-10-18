@@ -6,7 +6,7 @@ import hxmc.ir.Ir;
 // Inlining and scalar replacement on the IR, for the WasmGC path: the native
 // and linear-memory paths do both on Mir (hxmc.Inline, then hxmc.Sroa), which
 // WasmGC, emitted from the IR, never reaches. A function's optimized body is
-// made when GcGen.Reach reaches it (the function itself is left as Lower made
+// made for each function the module has (GcGen.Uses; the function itself is left as Lower made
 // it: the compilation server reuses its body).
 //
 // Inlining, for scalar replacement only (V8 inlines small functions of a

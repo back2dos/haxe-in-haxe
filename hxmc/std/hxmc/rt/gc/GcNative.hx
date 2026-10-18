@@ -194,7 +194,7 @@ class GcNative {
 }
 
 // the fields added to an anonymous structure (Reflect.setField of a name its layout lacks)
-@:keep @:hxmc.wasmgc
+@:hxmc.wasmgc
 class GcFields {
 	public final names:Array<String> = [];
 	public final values:Array<Dynamic> = [];

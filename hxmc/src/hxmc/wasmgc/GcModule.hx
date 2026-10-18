@@ -3,7 +3,7 @@ package hxmc.wasmgc;
 import hxmc.Buf;
 import hxmc.ir.Ir;
 import hxmc.wasm.Enc;
-import hxmc.wasmgc.GcGen.Reach;
+import hxmc.wasmgc.GcGen.Uses;
 
 // A WasmGC module from the reached part of the IR (GcGen). Every Haxe
 // reference is an eqref (locals, parameters, fields, globals), cast to its
@@ -24,7 +24,7 @@ import hxmc.wasmgc.GcGen.Reach;
 // value (node 22 runs them without flags).
 class GcModule {
 	final prog:Program;
-	public final reach:Reach;
+	public final uses:Uses;
 
 	// ---- types
 	final types:Array<Buf> = []; // each subtype's encoding, in index order
@@ -71,9 +71,9 @@ class GcModule {
 
 	public final meta:Meta;
 
-	public function new(prog:Program, reach:Reach) {
+	public function new(prog:Program, uses:Uses) {
 		this.prog = prog;
-		this.reach = reach;
+		this.uses = uses;
 		meta = new Meta(this);
 	}
 
@@ -288,7 +288,7 @@ class GcModule {
 		for (e in prog.enums)
 			enumBase(e);
 		// classes in preorder: a superclass before its subclasses
-		var cs = [for (c in reach.classes.keys()) c];
+		var cs = [for (c in uses.classes.keys()) c];
 		cs.sort((a, b) -> a.id - b.id);
 		for (c in cs) {
 			classType(c);
@@ -296,7 +296,7 @@ class GcModule {
 			clsList.push(c);
 			if (c.sup == null) tObj = tClass.get(c);
 		}
-		for (l in reach.lambdas.keys())
+		for (l in uses.lambdas.keys())
 			lambdaType(l);
 		for (s in prog.shapes)
 			// (by representation: a layout is shared by the literals of its names and representations)
@@ -363,14 +363,14 @@ class GcModule {
 		importFunc("hxmc", "writeFile", "ppi_i");
 		importFunc("hxmc", "dateNum", "ifiiiiii_f");
 		// the program's imports (@:hxmc.lib externs) that take and return numbers only
-		var foreign = [for (n in reach.hosts.keys()) n];
+		var foreign = [for (n in uses.hosts.keys()) n];
 		foreign.sort(Reflect.compare);
 		for (n in foreign) {
 			var key = foreignKey(n);
 			if (key != null) importFunc(hxmc.ir.CInterop.LIBS.get(n), n, key);
 		}
 		var tagType = funcType("p_v");
-		for (f in reach.funcs) {
+		for (f in uses.funcs) {
 			funcIndex.set(f, imports.length + funcs.length);
 			funcs.push(f);
 			typeOfFunc(f);
@@ -395,7 +395,7 @@ class GcModule {
 			globals.push({type: tb, init: ib, mut: true});
 		}
 		// selectors
-		for (s in reach.sels.keys()) {
+		for (s in uses.sels.keys()) {
 			selIndex.set(s, nsel++);
 		}
 		var trace = Sys.getEnv("HXMC_GC_TRACE") == "1";
@@ -416,7 +416,7 @@ class GcModule {
 		if (dynCallBody != null) writeDynCall();
 		// (the table's wrappers, before the module is written)
 		for (c in clsList)
-			for (s in reach.sels.keys()) {
+			for (s in uses.sels.keys()) {
 				var f = c.findMethod(prog.selectors[s].name);
 				if (f != null && funcIndex.exists(f)) tableFunc(f);
 			}
@@ -598,7 +598,7 @@ class GcModule {
 
 	// ======== what FuncGen asks
 
-	// the runtime's function exported under the symbol (@:hxmc.export), which Reach added
+	// the runtime's function exported under the symbol (@:hxmc.export), which the reachability kept
 	public function exportOf(sym:String):Int {
 		for (f in funcs)
 			if (f.cSymbol == sym) return funcIndex.get(f);
@@ -1052,7 +1052,7 @@ class GcModule {
 
 	// the reached selectors in the order of their table columns
 	function sortedSels():Array<Int> {
-		var a = [for (s in reach.sels.keys()) s];
+		var a = [for (s in uses.sels.keys()) s];
 		a.sort((x, y) -> selIndex.get(x) - selIndex.get(y));
 		return a;
 	}
