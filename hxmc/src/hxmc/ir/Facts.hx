@@ -95,7 +95,7 @@ class Facts {
 	public function str(s:String):String {
 		var n = strNames.get(s);
 		if (n == null) {
-			n = "S_" + haxe.crypto.Md5.encode([for (i in 0...s.length) StringTools.hex(s.charCodeAt(i))].join(",")).substr(0, 16);
+			n = hxmc.Prep.strName(s);
 			if (strByName.exists(n)) throw "string literal hash collision: " + n;
 			strByName.set(n, s);
 			strNames.set(s, n);
@@ -497,30 +497,54 @@ class Facts {
 		var cand = new Map<FuncInfo, Bool>();
 		for (f in p.funcs)
 			if (!f.hasTry && !f.collects) cand.set(f, true);
-		function exOk(e:Ex):Bool {
-			var ok = switch e {
-				case ECall(g, _): cand.exists(g);
-				case _: GcPoints.gcPoint(e) == 0;
-			}
-			if (ok) Facts.iterEx(x -> if (ok && !exOk(x)) ok = false, e);
-			return ok;
-		}
-		function stOk(s:Stmt):Bool {
-			var ok = switch s {
-				case SArrSet(_) | SArrPush(_) | SAnonSet(_) | SThrow(_) | STry(_): false;
-				case _: true;
-			}
-			if (ok) Facts.iterStmt(x -> if (ok && !stOk(x)) ok = false, x -> if (ok && !exOk(x)) ok = false, s);
-			return ok;
-		}
-		var changed = true;
-		while (changed) {
-			changed = false;
-			for (f in p.funcs)
-				if (cand.exists(f) && !Lambda.foreach(f.body, stOk)) {
-					cand.remove(f);
-					changed = true;
+		// (one walk of each candidate: a GC point of its own drops it, else the
+		// functions it calls; then a dropped function drops its callers, and
+		// theirs: the same largest set as dropping until nothing changes)
+		var callers = new haxe.ds.ObjectMap<FuncInfo, Array<FuncInfo>>();
+		var dropped:Array<FuncInfo> = [];
+		for (f in p.funcs) {
+			if (!cand.exists(f)) continue;
+			var ok = true;
+			var callees:Array<FuncInfo> = [];
+			function exOk(e:Ex) {
+				if (!ok) return;
+				switch e {
+					case ECall(g, _): callees.push(g);
+					case _: if (GcPoints.gcPoint(e) != 0) ok = false;
 				}
+				Facts.iterEx(exOk, e);
+			}
+			function stOk(s:Stmt) {
+				if (!ok) return;
+				switch s {
+					case SArrSet(_) | SArrPush(_) | SAnonSet(_) | SThrow(_) | STry(_): ok = false;
+					case _: Facts.iterStmt(stOk, exOk, s);
+				}
+			}
+			for (s in f.body)
+				stOk(s);
+			if (!ok) {
+				cand.remove(f);
+				dropped.push(f);
+				continue;
+			}
+			for (g in callees) {
+				var cs = callers.get(g);
+				if (cs == null) {
+					callers.set(g, cs = []);
+					if (!cand.exists(g)) dropped.push(g);
+				}
+				if (cs.length == 0 || cs[cs.length - 1] != f) cs.push(f);
+			}
+		}
+		while (dropped.length > 0) {
+			var cs = callers.get(dropped.pop());
+			if (cs != null)
+				for (c in cs)
+					if (cand.exists(c)) {
+						cand.remove(c);
+						dropped.push(c);
+					}
 		}
 		for (f in p.funcs)
 			f.noGc = cand.exists(f);

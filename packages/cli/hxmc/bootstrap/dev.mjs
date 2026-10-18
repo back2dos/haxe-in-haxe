@@ -4,7 +4,7 @@
 //   node dev.mjs <compiler> [--port <n>] [--host <address>] [--quiet] <haxe arguments: build.hxml, ...>
 //
 // The compiler (hxmc's native one: the npm package's haxe, or the tool) stays
-// resident as a compilation server (`--wait`: typed modules, lowered bodies
+// resident as a compilation server (`--server-connect`: typed modules, lowered bodies
 // and compiled objects kept in memory); each build is a request to it, with
 // -D hxmc.dev added (fast refresh's primitives, hxmc.dev.Hot, and the dev
 // client in hxmc.os.App). The class paths and libraries the build names are
@@ -167,15 +167,6 @@ const fonts = [...packages.values()].some((p) => p.json.haxe.name === 'hxmc.text
 
 // --- the compilation server ---
 
-function freePort() {
-	return new Promise((resolve) => {
-		const s = net.createServer().listen(0, '127.0.0.1', () => {
-			const p = s.address().port;
-			s.close(() => resolve(p));
-		});
-	});
-}
-
 const log = (s) => {
 	if (!quiet || s.startsWith('hxmc dev: reloaded') || s.startsWith('hxmc dev: error')) console.log(s);
 };
@@ -192,8 +183,32 @@ const serverEnv = {
 	RT_OLD_MB: process.env.RT_OLD_MB ?? '4096',
 	RT_MINOR_KB: process.env.RT_MINOR_KB ?? '32768',
 };
-const serverPort = await freePort();
-const server = spawn(compiler, ['--wait', String(serverPort)], { env: serverEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+// (--server-connect: the server connects here and takes its requests on that
+// connection, each one length-prefixed: where a connection per request
+// (--wait) may find the server reading before the request is sent, and
+// waiting 50 ms for it)
+let link = null, linked = null;
+const linkServer = net.createServer((sock) => {
+	if (link) return sock.destroy();
+	link = sock;
+	let buf = Buffer.alloc(0);
+	sock.on('data', (d) => {
+		buf = Buffer.concat([buf, d]);
+		while (buf.length >= 4 && buf.length >= 4 + buf.readInt32LE(0)) {
+			const n = buf.readInt32LE(0);
+			const answer = buf.subarray(4, 4 + n).toString('utf8');
+			buf = buf.subarray(4 + n);
+			const r = requests.shift();
+			r.resolve(answer);
+			if (requests.length > 0) sendRequest(requests[0]);
+		}
+	});
+	sock.on('error', () => {});
+	linked();
+});
+const linkedPromise = new Promise((r) => (linked = r));
+await new Promise((r) => linkServer.listen(0, '127.0.0.1', r));
+const server = spawn(compiler, ['--server-connect', '127.0.0.1:' + linkServer.address().port], { env: serverEnv, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverOutput = '';
 server.stdout.on('data', (d) => (serverOutput += d));
 server.stderr.on('data', (d) => (serverOutput += d));
@@ -210,47 +225,49 @@ const stop = () => {
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 
-// a request to the compilation server (its protocol: the arguments, one
-// per line, then a NUL; the answer's lines: \x01 output, \x02 failure, any
-// other a message)
-function request(words) {
-	return new Promise((resolve) => {
-		const tryConnect = (n) => {
-			const sock = net.connect(serverPort, '127.0.0.1');
-			const chunks = [];
-			sock.on('error', (e) => {
-				if (n > 0) setTimeout(() => tryConnect(n - 1), 50);
-				else resolve({ ok: false, messages: 'hxmc dev: no compilation server (' + e.message + ')' });
-			});
-			sock.on('connect', () => {
-				sock.write(['--cwd', cwd, ...words].map((a) => a + '\n').join('') + '\0');
-			});
-			sock.on('data', (d) => chunks.push(d));
-			sock.on('end', () => {
-				let ok = true;
-				const messages = [];
-				for (const line of Buffer.concat(chunks).toString('utf8').split('\n')) {
-					if (line.startsWith('\x01')) process.stdout.write(line.slice(1).replaceAll('\x01', '\n'));
-					else if (line.startsWith('\x02')) ok = false;
-					else if (line !== '') messages.push(line);
-				}
-				resolve({ ok, messages: messages.join('\n') });
-			});
-		};
-		tryConnect(100);
+// a request to the compilation server (its protocol: the arguments, one per
+// line, after their length, a 32-bit little-endian integer; the answer, after
+// its length too, in lines: \x01 output, \x02 failure, any other a message),
+// one at a time
+const requests = [];
+function sendRequest(r) {
+	const body = Buffer.from(['--cwd', cwd, ...r.words].join('\n'), 'utf8');
+	const head = Buffer.alloc(4);
+	head.writeInt32LE(body.length);
+	link.write(Buffer.concat([head, body]));
+}
+async function request(words) {
+	await linkedPromise;
+	const answer = await new Promise((resolve) => {
+		requests.push({ words, resolve });
+		if (requests.length === 1) sendRequest(requests[0]);
 	});
+	let ok = true;
+	const messages = [];
+	for (const line of answer.split('\n')) {
+		if (line.startsWith('\x01')) process.stdout.write(line.slice(1).replaceAll('\x01', '\n'));
+		else if (line.startsWith('\x02')) ok = false;
+		else if (line !== '') messages.push(line);
+	}
+	return { ok, messages: messages.join('\n') };
 }
 
 // a build, with -D hxmc.dev; the files changed since the last one invalidated
 // first (server/invalidate): the server compares a file's time, which two
-// saves in one second share (and file systems with coarse times)
+// saves in one second share (and file systems with coarse times).
+// -D disable-hxb-cache: the server keeps its typed modules in memory (Haxe's
+// own mode, "use in-memory cache instead of hxb powered cache"), where the
+// default writes every module as HXB after each build and reads each back
+// in the next (0.3-0.4 s of an edit's build). The outputs are the same
+// (packages/os/test/dev/dev-verify.mjs); HXMC_DEV_HXB_CACHE=1 keeps the HXB cache.
+const hxbCache = process.env.HXMC_DEV_HXB_CACHE === '1' ? [] : ['-D', 'disable-hxb-cache'];
 const changedFiles = new Set();
 async function build() {
 	const files = [...changedFiles];
 	changedFiles.clear();
 	for (const file of files)
 		if (file.endsWith('.hx')) await request(['--display', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/invalidate', params: { file } })]);
-	return request([...args, '-D', 'hxmc.dev', ...(hxmcStd ? ['-cp', hxmcStd] : [])]);
+	return request([...args, '-D', 'hxmc.dev', ...hxbCache, ...(hxmcStd ? ['-cp', hxmcStd] : [])]);
 }
 
 // --- the program ---
@@ -318,8 +335,9 @@ async function reloadNative() {
 			sock.write(JSON.stringify({ type: 'reload', snapshot: snapshotFile }) + '\n');
 			// (a program that does not answer, its loop busy or not hxmc.os's: stopped, a cold start)
 			const t = setTimeout(() => old.kill(), 3000);
-			await Promise.race([saved.then(() => exited), exited]);
-			clearTimeout(t);
+			// (the new build starts once the snapshot is written, while the old one exits)
+			exited.then(() => clearTimeout(t));
+			await Promise.race([saved, exited]);
 			withSnapshot = fs.existsSync(snapshotFile);
 		} else {
 			old.kill();
@@ -345,7 +363,15 @@ body { margin: 0; background: #fff; }
 #hxmc-dev-overlay { position: fixed; inset: 0; z-index: 2147483647; display: none; overflow: auto; margin: 0; padding: 16px;
 	background: rgba(20, 0, 0, .9); color: #ffd7d7; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
 #hxmc-dev-overlay b { color: #fff; }
-</style></head><body>
+</style>
+${[...imports.map((p) => `/__hxmc/pkg/${p.json.haxe.name}/imports.mjs`), '/__hxmc/os/browser.mjs'].map((u) => `<link rel="modulepreload" href="${u}">`).join('\n')}
+<script>
+// (the module and the fonts, fetched and compiled from the start, while the scripts load)
+window.hxmcDevLoad = { wasm: WebAssembly.compileStreaming(fetch('/__hxmc/app.wasm?' + Date.now())),
+	fonts: Promise.all([${fonts.map((f) => `'/__hxmc/fonts/${path.basename(f)}'`).join(', ')}].map((u) => fetch(u).then((r) => r.arrayBuffer()))) };
+window.hxmcDevLoad.wasm.catch(() => {});
+window.hxmcDevLoad.fonts.catch(() => {});
+</script></head><body>
 <pre id="hxmc-dev-overlay" role="alert"></pre>
 <script type="module">
 import { run } from '/__hxmc/os/browser.mjs';
@@ -387,8 +413,8 @@ ws.onmessage = (e) => {
 	}
 };
 ws.onclose = () => setTimeout(() => location.reload(), 1000);
-run('/__hxmc/app.wasm?' + Date.now(), { imports: [${imports.map((p) => `'/__hxmc/pkg/${p.json.haxe.name}/imports.mjs'`).join(', ')}${imports.length ? ', ' : ''}dev],
-	fonts: [${fonts.map((f) => `'/__hxmc/fonts/${path.basename(f)}'`).join(', ')}], stdout: out, stderr: (s) => out(s) })
+window.hxmcDevLoad.fonts.then((fonts) => run(window.hxmcDevLoad.wasm, { imports: [${imports.map((p) => `'/__hxmc/pkg/${p.json.haxe.name}/imports.mjs'`).join(', ')}${imports.length ? ', ' : ''}dev],
+	fonts, stdout: out, stderr: (s) => out(s) }))
 	.catch((e) => { show(String(e && e.stack || e)); send({ type: 'log', text: 'error: ' + (e && e.stack || e) }); });
 </script></body></html>`;
 

@@ -217,7 +217,7 @@ browser the page gives the module the imports of `hxmc_dev`:
 `restore_length()` and `restore_take(p)` (the snapshot it was given, -1:
 none), `register(f)` (the `@:hxmc.callback` the page calls for a reload),
 `send(p, n)` (the snapshot) and `frame()`. hxmc.os's app loop reads the
-dev server's messages at each turn (an idle loop wakes every 50 ms in a dev
+dev server's messages at each turn (an idle loop wakes every 10 ms in a dev
 build) and reports the first frame.
 
 ## Times
