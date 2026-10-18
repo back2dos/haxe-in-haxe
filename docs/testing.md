@@ -344,3 +344,9 @@ which the website build copies (`make site BENCH_DATA=<checkout>`) for its
 table and charts. The first points on `bench-data` are earlier measurements
 imported from this repository's history (`"source": "imported"`: a
 development VM, best of the runs).
+
+Micro-benchmarks (`hxmc/test/micro`, built and run by hand, not a lane):
+`VectorBlitBench`, `haxe.ds.Vector.blit` against the plain loop for Float
+and String vectors and overlapping moves, times per operation, and one row
+at a time for instruction counts under callgrind (the numbers before and
+after hxmc's `Vector.hx` in its header).

@@ -133,6 +133,11 @@ class GcRepr {
 	public static inline function arrCopyFrom(r:Dynamic, a:Dynamic, pos:Int, l:Int)
 		W.arrBlit(r, 0, a, pos, l);
 
+	// d[di, di + n) = a[si, si + n) (inside both, one element kind; array.copy
+	// moves overlapping ranges)
+	public static inline function arrMove(d:Dynamic, di:Int, a:Dynamic, si:Int, n:Int)
+		W.arrBlit(d, di, a, si, n);
+
 	public static inline function arrRemoveAt(a:Dynamic, i:Int) {
 		var n = W.arrLen(a);
 		W.arrBlit(a, i, a, i + 1, n - i - 1);
