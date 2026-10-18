@@ -21,6 +21,7 @@ class HaxeMain {
 	}
 
 	public static function run(args:Array<String>):Int {
+		if (args[0] == "--dev") return dev(args.slice(1));
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
@@ -63,7 +64,8 @@ class HaxeMain {
 				}
 				@:privateAccess Main.generate(com, com.file);
 			} catch (e:Dynamic) {
-				failed = Std.string(e);
+				// (a compilation server's client gets it as an error: hxmc dev)
+				if (Driver.resident) com.error("hxmc: " + Std.string(e), core.Globals.nullPos) else failed = Std.string(e);
 			}
 		}
 		// -lib from node_modules before lix and haxelib (NodeLibs.hx)
@@ -87,6 +89,24 @@ class HaxeMain {
 			return 1;
 		}
 		return code;
+	}
+
+	// `haxe --dev <arguments>`, `hxmc dev <arguments>`: the dev loop (docs/dev.md),
+	// node running dev.mjs (beside this binary in the npm package, HXMC_DEV_SCRIPT
+	// from the launcher, packages/cli in the repository), which keeps this
+	// compiler resident as a compilation server
+	public static function dev(args:Array<String>):Int {
+		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
+		var dir = Path.directory(exe);
+		var script = Sys.getEnv("HXMC_DEV_SCRIPT");
+		for (c in [dir + "/dev.mjs", dir + "/../hxmc/bootstrap/dev.mjs", dir + "/../../packages/cli/hxmc/bootstrap/dev.mjs"])
+			if (script == null && sys.FileSystem.exists(c)) script = c;
+		if (script == null) {
+			Sys.stderr().writeString("hxmc dev: dev.mjs is not beside the compiler (" + dir + ")\n");
+			return 1;
+		}
+		var node = Sys.getEnv("HXMC_NODE");
+		return Sys.command(node == null || node == "" ? "node" : node, [script, exe].concat(args));
 	}
 
 	// whether the arguments, or the hxml files they name, contain --custom-target hxmc

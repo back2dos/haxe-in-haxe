@@ -14,6 +14,7 @@
     "haxe/upstream/std/",
     "hxmc/bootstrap/haxe",
     "hxmc/bootstrap/launcher.mjs",
+    "hxmc/bootstrap/dev.mjs",
     "hxmc/bootstrap/platforms.mjs",
     "hxmc/bootstrap/postinstall.mjs",
     "hxmc/bootstrap/wasm.mjs",

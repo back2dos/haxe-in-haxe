@@ -1,7 +1,9 @@
 # The dev loop: live reload and fast refresh
 
 Save a file, see the change, keep where you were. Four steps, each useful on
-its own; the first two give most of it.
+its own; the first two give most of it. Steps 1 and 2 are built:
+[docs/dev.md](../dev.md) (how to use them, the primitives as built, the
+protocol, the times measured).
 
 ## Principles
 
@@ -74,8 +76,12 @@ tools can drive the loop.
   correctness, only where measured to help.
 
 Targets: a counter-sized app under 500 ms from save to pixels, the gallery
-under 1.5 s. Mobile: Android pushes the new `.so`/APK and relaunches; iOS
-relaunches on the simulator (iOS forbids loading new code on devices).
+under 1.5 s. Measured as built ([dev.md](../dev.md#times)): 1.0-1.1 s for
+the counter, 1.6-1.8 s for the gallery, most of it the build. What is left:
+the compilation server reads every cached module back from its HXB and
+caches each again every build (0.4-0.5 s), the lowered bodies are replayed
+rather than kept (0.1 s), every module is fingerprinted again to find its
+object, and a large module of markup types slowly (the gallery's edit).
 
 ## 2. Fast refresh: state carried by key
 
