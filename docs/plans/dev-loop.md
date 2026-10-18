@@ -76,12 +76,15 @@ tools can drive the loop.
   correctness, only where measured to help.
 
 Targets: a counter-sized app under 500 ms from save to pixels, the gallery
-under 1.5 s. Measured as built ([dev.md](../dev.md#times)): 1.0-1.1 s for
-the counter, 1.6-1.8 s for the gallery, most of it the build. What is left:
-the compilation server reads every cached module back from its HXB and
-caches each again every build (0.4-0.5 s), the lowered bodies are replayed
-rather than kept (0.1 s), every module is fingerprinted again to find its
-object, and a large module of markup types slowly (the gallery's edit).
+under 1.5 s. Measured as built ([dev.md](../dev.md#times)): 0.45-0.56 s for
+the counter (the browser under 0.5 s, natively 0.52-0.56 s), 0.9-1.14 s for
+the gallery. What is left for the counter, natively: the process starting
+again (0.12-0.14 s, most of it the GL driver and the window: step 3 keeps
+them), Haxe's DCE and module checks each build (0.1 s), and hxmc's lowering
+replay, analyses and link over the whole program (0.18 s): reusing the last
+build's program for the modules not typed again (rather than replaying
+their bodies into a new one), and linking only what changed, are the next
+steps there.
 
 ## 2. Fast refresh: state carried by key
 

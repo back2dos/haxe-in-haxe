@@ -246,43 +246,48 @@ class Reach {
 				case DYN_GET | DYN_CALL_FIELD: addMethod(f, 1, "");
 				case _:
 			}
+		// (the direct calls, in the order of the bodies, found once: the rounds go over them)
+		var sites:Array<{f:FuncInfo, g:FuncInfo, args:Array<Ex>}> = [];
+		for (f in p.funcs) {
+			function ex(e:Ex) {
+				switch e {
+					case ECall(g, args): sites.push({f: f, g: g, args: args});
+					case _:
+				}
+				Facts.iterEx(ex, e);
+			}
+			function st(s:Stmt)
+				Facts.iterStmt(st, ex, s);
+			for (s in body(f))
+				st(s);
+		}
 		var changed = true;
 		while (changed) {
 			changed = false;
-			for (f in p.funcs) {
-				function ex(e:Ex) {
-					switch e {
-						case ECall(g, args):
-							for (k in at(sinks, g)) {
-								var j = paramOf(f, args[k]);
-								if (j >= 0 && add(sinks, f, j)) changed = true;
-							}
-							for (s in atMethod(g)) {
-								var x = args[s.j];
-								var j = paramOf(f, x);
-								if (j >= 0 && addMethod(f, j, s.pre)) changed = true;
-								// ("get_" + field: Reflect.getProperty)
-								var c = concatOf(f, x);
-								if (c != null) {
-									var j = paramOf(f, c.rest);
-									if (j >= 0 && addMethod(f, j, s.pre + c.pre)) changed = true;
-								}
-								var a = s.pre == "" ? elementOf(f, x) : null;
-								var j = a == null ? -1 : paramOf(f, a);
-								if (j >= 0 && add(arraySinks, f, j)) changed = true;
-							}
-							for (k in at(arraySinks, g)) {
-								var j = paramOf(f, args[k]);
-								if (j >= 0 && add(arraySinks, f, j)) changed = true;
-							}
-						case _:
-					}
-					Facts.iterEx(ex, e);
+			for (site in sites) {
+				var f = site.f, g = site.g, args = site.args;
+				for (k in at(sinks, g)) {
+					var j = paramOf(f, args[k]);
+					if (j >= 0 && add(sinks, f, j)) changed = true;
 				}
-				function st(s:Stmt)
-					Facts.iterStmt(st, ex, s);
-				for (s in body(f))
-					st(s);
+				for (s in atMethod(g)) {
+					var x = args[s.j];
+					var j = paramOf(f, x);
+					if (j >= 0 && addMethod(f, j, s.pre)) changed = true;
+					// ("get_" + field: Reflect.getProperty)
+					var c = concatOf(f, x);
+					if (c != null) {
+						var j = paramOf(f, c.rest);
+						if (j >= 0 && addMethod(f, j, s.pre + c.pre)) changed = true;
+					}
+					var a = s.pre == "" ? elementOf(f, x) : null;
+					var j = a == null ? -1 : paramOf(f, a);
+					if (j >= 0 && add(arraySinks, f, j)) changed = true;
+				}
+				for (k in at(arraySinks, g)) {
+					var j = paramOf(f, args[k]);
+					if (j >= 0 && add(arraySinks, f, j)) changed = true;
+				}
 			}
 		}
 	}

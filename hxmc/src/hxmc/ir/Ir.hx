@@ -375,13 +375,16 @@ class Program {
 	public inline function isLive(f:FuncInfo):Bool
 		return live == null || live.exists(f);
 
+	var sigKeys = new Map<String, SigInfo>();
+
 	public function sig(args:Array<Ty>, ret:Ty):SigInfo {
 		var key = [for (a in args) Ir.repr(a)].join("") + "_" + Ir.repr(ret);
-		for (s in sigs)
-			if (s.key == key) return s;
+		var known = sigKeys.get(key);
+		if (known != null) return known;
 		var norm = (t:Ty) -> Ir.isRef(t) ? TRef(RAny) : t;
 		var s = new SigInfo(sigs.length, [for (a in args) norm(a)], norm(ret), key);
 		sigs.push(s);
+		sigKeys.set(key, s);
 		return s;
 	}
 
