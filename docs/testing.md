@@ -237,7 +237,7 @@ a context menu chosen from (NSMenu), the menu bar's item performed; on
 Windows `WinAccessTest` calls the UI Automation providers through their
 COM interfaces and asks UI Automation for the window's element, and drives
 the native views: an EDIT typed into and centred, a popup menu chosen
-from by keys). In the browser: `make ui-web-check` (the native form on the DOM's own
+from by keys, the window's menu bar and a command of it). In the browser: `make ui-web-check` (the native form on the DOM's own
 controls, `native-web.mjs`; native text editors over a drawn window,
 the page's input and textarea, typed in, submitted, tabbed between drawn
 widgets and hidden under a popup, `web-field.mjs`; the todo example (its
