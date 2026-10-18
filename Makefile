@@ -681,6 +681,8 @@ gfx-shader-check: $(TOOL)
 # the renderer's frames against golden images, natively (GFX_TARGET) and in Chromium
 SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test -cp packages/physics/src -cp packages/physics/examples -cp packages/physics/test \
 	-cp packages/text/src -cp packages/ui/src
+SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp packages/view/src -cp packages/3d-ui/src -cp packages/3d-ui/test \
+	-D hxmc.view.renderer=hxmc.scene.view.SceneRenderer
 3d-check: $(TOOL) $(STD) $(HOST_RT)
 	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest PhysicsTest; do $(TOOL) $(SCENE_CP) --run $$t; done
 	$(call hxmc,bin/3d/SceneTest,$(SCENE_CP) -main SceneTest $(HXMC_ARGS))
@@ -700,6 +702,9 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	$(call hxmc,bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main InputTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/InputTest.wasm,$(SCENE_CP) -main InputTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)) && $(WASI) bin/3d/InputTest.wasm
+	@# (@hxmc/3d-ui: view's markup on the scene graph; natively: its meshes import gfx, which node lacks)
+	$(call hxmc,bin/3d/$(GFX_TARGET)/SceneUiTest$(call EXE,$(GFX_TARGET)),$(SCENE_UI_CP) -main SceneUiTest $(HXMC_ARGS) $(GFX_ARGS))
+	bin/3d/$(GFX_TARGET)/SceneUiTest$(call EXE,$(GFX_TARGET))
 	sh packages/3d/test/check.sh bin/3d/$(GFX_TARGET)
 	@# (Model.of's files beside the executable, -D hxmc.scene.embed=0)
 	$(call hxmc,bin/3d/files/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS) -D hxmc.scene.embed=0 -D hxmc.scene.out=bin/3d/files/RenderTest$(call EXE,$(GFX_TARGET)))

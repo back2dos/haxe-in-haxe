@@ -191,7 +191,8 @@ wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`;
 `@hxmc/physics`: `packages/physics/test/PhysicsTest.hx`, its checksum the
 same on all three), input
 actions from synthetic events natively and as wasm32-wasi (`InputTest.hx`),
-a `Model.of` reference to a name the file lacks rejected, then the
+a `Model.of` reference to a name the file lacks rejected, `@hxmc/3d-ui`'s
+markup on the scene graph natively (`packages/3d-ui/test/SceneUiTest.hx`), then the
 renderer's frames (`packages/3d/test/Scenes.hx`: the sample glTF scene)
 headless against `packages/3d/test/<scene>.png` by the rule above
 (`RenderTest`, `check.sh`); `make 3d-web-check`: the same on WebGPU and
