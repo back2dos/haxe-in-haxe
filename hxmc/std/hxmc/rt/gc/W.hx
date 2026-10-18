@@ -56,6 +56,9 @@ extern class W {
 	static function bytesGet(b:Dynamic, i:Int):Int;
 	static function bytesSet(b:Dynamic, i:Int, v:Int):Void;
 	static function bytesCopy(dst:Dynamic, di:Int, src:Dynamic, si:Int, n:Int):Void;
+	// linear memory to bytes, bytes to linear memory: n bytes
+	static function memToBytes(b:Dynamic, pos:Int, p:hxmc.unsafe.Ptr, n:Int):Void;
+	static function bytesToMem(p:hxmc.unsafe.Ptr, b:Dynamic, pos:Int, n:Int):Void;
 	static function bytesFill(b:Dynamic, pos:Int, v:Int, n:Int):Void;
 	static function bytesGetI32(b:Dynamic, pos:Int):Int;
 	static function bytesSetI32(b:Dynamic, pos:Int, v:Int):Void;

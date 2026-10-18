@@ -267,6 +267,16 @@ class MemRepr {
 		}
 	}
 
+	// ---- linear memory (C's)
+
+	// the n bytes at p
+	public static inline function octetsAt(p:Ptr, n:Int):MemOctets
+		return p;
+
+	// s as UTF-8 at p (3 * length + 1 bytes), NUL-terminated; the byte count
+	public static inline function utf8To(s:String, p:Ptr):Int
+		return Str.utf8Into(s, p);
+
 	// ---- Bytes: K_RAW, int32 length, the bytes from offset 8
 
 	public static inline function bytesLen(b:Dynamic):Int

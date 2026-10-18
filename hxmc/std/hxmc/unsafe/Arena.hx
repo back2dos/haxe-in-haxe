@@ -103,7 +103,7 @@ abstract Arena(Ptr) {
 	public function cstring(s:String):CString {
 		if (s == null) return Ptr.nil();
 		var p:Ptr<UInt8> = alloc(3 * s.length + 1, 1);
-		hxmc.rt.Str.utf8Into(s, (p : Ptr));
+		hxmc.rt.Repr.utf8To(s, p);
 		return p;
 	}
 

@@ -83,7 +83,7 @@ class Str {
 	}
 
 	@:hxmc.host("hx_str_of_utf8") public static function ofUtf8(c:Ptr, n:Int):String
-		return decode(c, 0, n);
+		return decode(Repr.octetsAt(c, n), 0, n);
 
 	// the UTF-8 bytes [from, end) of o as a string (not allocating
 	// before it: in linear memory o may be the address of a heap object's)
@@ -173,7 +173,7 @@ class Str {
 			return p;
 		}
 		var buf = LibC.malloc((3 * len(s) + 1 : I64));
-		utf8Into(s, buf);
+		Repr.utf8To(s, buf);
 		return buf;
 	}
 

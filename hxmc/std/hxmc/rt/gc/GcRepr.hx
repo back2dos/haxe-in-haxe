@@ -168,6 +168,22 @@ class GcRepr {
 		W.arrSetLen(a, n - l);
 	}
 
+	// ---- linear memory (the module's, for what crosses to the host)
+
+	// the n bytes at p, copied
+	public static inline function octetsAt(p:hxmc.unsafe.Ptr, n:Int):GcOctets {
+		var b = scratch(n);
+		W.memToBytes(b, 0, p, n);
+		return b;
+	}
+
+	public static inline function utf8To(s:String, p:hxmc.unsafe.Ptr):Int {
+		var b = scratch(3 * W.strLen(s) + 1);
+		var n = hxmc.rt.Str.utf8Into(s, b);
+		W.bytesToMem(p, b, 0, n + 1);
+		return n;
+	}
+
 	// ---- Bytes: an array of bytes
 
 	public static inline function bytesLen(b:Dynamic):Int
@@ -211,7 +227,7 @@ class GcRepr {
 		return 0;
 	}
 
-	static var scratchBytes:Dynamic = null;
+	static var scratchBytes:haxe.io.Bytes = null;
 
 	// a buffer of at least n bytes, kept for the next call
 	public static function scratch(n:Int):GcOctets {
@@ -322,7 +338,7 @@ abstract GcElems(Dynamic) from Dynamic to Dynamic {
 }
 
 // bytes: a haxe.io.Bytes (an array of bytes)
-abstract GcOctets(Dynamic) from Dynamic to Dynamic {
+abstract GcOctets(haxe.io.Bytes) from haxe.io.Bytes to haxe.io.Bytes {
 	public inline function get(i:Int):Int
 		return W.bytesGet(this, i);
 
