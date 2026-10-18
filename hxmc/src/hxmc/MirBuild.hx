@@ -818,7 +818,9 @@ class MirBuild {
 		return sp;
 	}
 
-	// rt_sp_hw = max(rt_sp_hw, top): rarely raised (after a collection), on a slow path
+	// rt_sp_hw = max(rt_sp_hw, top): rarely raised (after a collection), on a slow path;
+	// on WebAssembly also where the shadow stack overflows (past rt_sp_limit: a
+	// region of linear memory, no guard page; every new depth passes here first)
 	function raiseHw(top:Int) {
 		var hw = tlsLoad("rt_sp_hw");
 		var up = newBlock(), done = newBlock();
@@ -826,6 +828,18 @@ class MirBuild {
 		br(cmp(CUGt, top, hw), up, done);
 		seal(up);
 		cur = up;
+		if (abi.wasm) {
+			var over = newBlock(), fits = newBlock();
+			over.cold = true;
+			fits.cold = true;
+			br(cmp(CUGt, top, loadM(Opt.MCallOnly, I64, 8, symAddr("rt_sp_limit"), 0)), over, fits);
+			seal(over);
+			cur = over;
+			call("rt_stack_overflow", [], Void, true);
+			add(mk(Unreachable, Void));
+			seal(fits);
+			cur = fits;
+		}
 		tlsStore("rt_sp_hw", top);
 		jmp(done);
 		seal(done);
