@@ -480,6 +480,14 @@ through edits of the Counter, of a module it uses whose API changes and of
 a module of markup (an attribute changed, an element added), each against
 a fresh build of the same sources, byte for byte
 (`packages/os/test/dev/dev-verify.mjs <compiler> [example] [native|web|web-gc]`).
+
+Beyond `make dev-check`, in CI: `dev-android.mjs` on the android job's
+emulator (`hxmc dev` on a drawn program built as an APK: installed once,
+two edits swapped into the same process, the count kept), `ios-dev.sh` on
+the ios-simulator job, and `host-dev.sh` on gfx-macos and gfx-windows
+(`DevHostTest`'s app or host and two or three later builds as libraries,
+handing over by themselves: the count kept, the same process and window
+or view).
 ## Not yet
 
 - An iOS device cannot load a new build's code (above): the wasm fallback

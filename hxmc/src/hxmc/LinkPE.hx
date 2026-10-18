@@ -16,8 +16,9 @@ import hxmc.Obj;
 // (no PDB: docs/plans/codegen.md). With `dll` (-D hxmc.shared: hxmc dev's
 // builds on Windows) a DLL instead: no entry point, its exports (Abi.exports)
 // in an export directory, relocatable (base relocations, x86-64 too) from
-// its preferred base (dllBase), which it keeps unless taken: no
-// DYNAMIC_BASE, so 32-bit absolute addresses stay below 4 GB.
+// its preferred base (dllBase, x86-64), which it keeps unless taken: no
+// DYNAMIC_BASE there; arm64's like its executables (DYNAMIC_BASE, which
+// Windows requires on arm64: ERROR_BAD_EXE_FORMAT without it).
 class LinkPE {
 	// the image base: x86-64 a fixed 0x400000 (addresses are kept absolute);
 	// arm64 0x140000000, relocatable (addresses are kept as RVAs, BASE 0, and
@@ -95,11 +96,8 @@ class LinkPE {
 	}
 
 	public function link(entry:String):Bytes {
-		if (dll) {
-			BASE = dllBase;
-			imgLo = 0;
-			imgHi = 0;
-		}
+		// (x86-64: a DLL at its preferred base; arm64: as an executable, relocatable with DYNAMIC_BASE, which Windows requires there)
+		if (dll && !arm) BASE = dllBase;
 		readImports();
 		resolve();
 		// the imports the objects use: IAT slots (and thunks for code)
@@ -493,7 +491,7 @@ class LinkPE {
 		h.u16(3); // console
 		// NX_COMPAT | TERMINAL_SERVER_AWARE (x86-64: no DYNAMIC_BASE, a fixed
 		// image; arm64: DYNAMIC_BASE, with base relocations)
-		h.u16(dll ? 0x8100 : relocatable ? (imgHi != 0 ? 0x8160 : 0x8140) : 0x8100); // (| HIGH_ENTROPY_VA above 4 GB; a DLL: at its preferred base when free)
+		h.u16(dll && !arm ? 0x8100 : relocatable ? (imgHi != 0 ? 0x8160 : 0x8140) : 0x8100); // (| HIGH_ENTROPY_VA above 4 GB; an x86-64 DLL: at its preferred base when free)
 		h.u64(0x1000000, 0); // stack reserve
 		h.u64(0x1000, 0);
 		h.u64(0x100000, 0); // heap
