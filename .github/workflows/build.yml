@@ -623,8 +623,8 @@ jobs:
           make rt && touch bin/hxmc/rt/*/*.o
           make gfx-shader-check
           make gfx-check GFX_TARGET=linux-x86_64
-      - name: 3d (Eval, natively, wasm32-wasi)
-        run: make 3d-check
+      - name: 3d (Eval, natively, wasm32-wasi; Mesa llvmpipe)
+        run: make 3d-check GFX_TARGET=linux-x86_64
       - name: audio (ALSA's null and file devices)
         run: make audio-check AUDIO_TARGET=linux-x86_64
       - name: touch (TouchDrag, the gesture of Android and iOS)
@@ -635,6 +635,7 @@ jobs:
           npm install --no-save --silent playwright@1.56.1
           npx playwright install --with-deps chromium > /dev/null
           make gfx-web-check
+          make 3d-web-check
           # (the module cache across WasmGC and native builds on one store)
           make gfx-cache-check
       - name: audio (WebAudio in Chromium)

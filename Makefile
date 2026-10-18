@@ -111,7 +111,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check 3d-check \
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check 3d-check 3d-web-check \
 	android-programs android-check android-device-check touch-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
@@ -193,7 +193,9 @@ help:
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
 ## 3d-check    packages/3d (docs/plans/3d.md): the math, the scene graph, the camera and the fixed-step
 ##             clock, the glTF reader on the sample scene, on Eval, natively and as wasm32-wasi
-##             (packages/3d/test/SceneTest.hx, GltfTest.hx)
+##             (packages/3d/test/SceneTest.hx, GltfTest.hx); then the renderer's frames headless against
+##             golden images (packages/3d/test/check.sh: RenderTest, Scenes.hx; Linux: Mesa)
+## 3d-web-check  packages/3d's frames on WebGPU and WebGL2 in headless Chromium (packages/3d/test/web.mjs)
 ## view-check  packages/view on Eval, natively and in JavaScript (the port, node): signals, markup
 ##             (elements, attributes, whitespace, components, text runs, reactive values), the control
 ##             flow components, on two test renderers with boundaries between them, and the programs
@@ -672,7 +674,8 @@ audio-web-check: $(TOOL) $(STD)
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
 
-# packages/3d (docs/plans/3d.md) on gfx: the unit tests on Eval, natively and as wasm32-wasi
+# packages/3d (docs/plans/3d.md) on gfx: the unit tests on Eval, natively and as wasm32-wasi, then
+# the renderer's frames against golden images, natively (GFX_TARGET) and in Chromium
 SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test
 3d-check: $(TOOL) $(STD) $(HOST_RT)
 	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest; do $(TOOL) $(SCENE_CP) --run $$t; done
@@ -682,6 +685,12 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	$(call hxmc,bin/3d/SceneTest.wasm,$(SCENE_CP) -main SceneTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(call hxmc,bin/3d/GltfTest.wasm,$(SCENE_CP) -main GltfTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm
+	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
+	sh packages/3d/test/check.sh bin/3d/$(GFX_TARGET)
+3d-web-check: $(TOOL) $(STD)
+	$(call hxmc,bin/3d/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/3d/test/web.mjs bin/3d/SceneWebTest.wasm bin/3d
 
 # (two renderers: TestRenderer, OtherRenderer; JavaScript compiled by the port)
 VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer -D hxmc.view.renderer.other=OtherRenderer
