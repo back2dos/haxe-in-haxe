@@ -233,7 +233,7 @@ class Driver {
 	function toolKey():String {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
-		return "hxmc|" + abi.rtName + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "")
+		return "hxmc|" + abi.rtName + (abi.ios() ? "+" + abi.platform : "") + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "")
 			+ (abi.output == SharedLibrary ? "+shared" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
@@ -454,6 +454,7 @@ class Driver {
 			var imp = LinkInputs.peImports(still, abi);
 			if (imp != null) all.push(imp);
 		}
+		var bundle = abi.ios() && hxmc.ios.Bundle.isBundle(out) ? new hxmc.ios.Bundle(out, abi, o.ios) : null;
 		var exe = abi.os == "windows" ? {
 			var l = new LinkPE(all, abi.arm);
 			l.symbols = !o.strip;
@@ -462,6 +463,10 @@ class Driver {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
 			l.dylibs = dylibs;
+			if (bundle != null) {
+				l.sign = bundle.sign;
+				l.minos = bundle.minos;
+			}
 			l.link("main");
 		} : {
 			// (an APK: its lib<name>.so, Apk)
@@ -484,6 +489,11 @@ class Driver {
 			exe;
 		};
 		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
+		// iOS: the app bundle (or its .ipa) around the executable
+		if (bundle != null) {
+			bundle.write(out, exe);
+			return;
+		}
 		// Android: the shared library alone (lib<name>.so), or in an APK
 		if (abi.android && StringTools.endsWith(out, ".apk")) {
 			// (classes.dex: Glue's classes, for a program with listeners; views: org.hxmc.Activity)
@@ -496,17 +506,7 @@ class Driver {
 			return;
 		}
 		sys.io.File.saveBytes(out, exe);
-		// under WASI (the tool as a WebAssembly module) there are no processes:
-		// whoever runs the module marks the output executable (HXMC_EXE_LIST
-		// names a file the output's path is added to, one per line)
-		// (Windows hosts need no mode)
-		if (Sys.systemName() == "Windows") {} else if (Sys.systemName() != "Wasi")
-			Sys.command("chmod", ["755", out]);
-		else if (Sys.getEnv("HXMC_EXE_LIST") != null) {
-			var f = sys.io.File.append(Sys.getEnv("HXMC_EXE_LIST"));
-			f.writeString(sys.FileSystem.absolutePath(out) + "\n");
-			f.close();
-		}
+		markExecutable(out);
 		if (hxmc.x64.Emit.sizeStats) {
 			var ks = [for (k in hxmc.x64.Emit.statBytes.keys()) k];
 			ks.sort((x, y) -> hxmc.x64.Emit.statBytes.get(y) - hxmc.x64.Emit.statBytes.get(x));
@@ -521,6 +521,20 @@ class Driver {
 
 	static function ms(s:Float):String
 		return Std.int(s * 1000) + " ms";
+
+	// under WASI (the tool as a WebAssembly module) there are no processes:
+	// whoever runs the module marks the output executable (HXMC_EXE_LIST
+	// names a file the output's path is added to, one per line)
+	// (Windows hosts need no mode)
+	public static function markExecutable(path:String) {
+		if (Sys.systemName() == "Windows") {} else if (Sys.systemName() != "Wasi")
+			Sys.command("chmod", ["755", path]);
+		else if (Sys.getEnv("HXMC_EXE_LIST") != null) {
+			var f = sys.io.File.append(Sys.getEnv("HXMC_EXE_LIST"));
+			f.writeString(sys.FileSystem.absolutePath(path) + "\n");
+			f.close();
+		}
+	}
 }
 
 // The order blocks are laid out in: reverse postorder, the cold blocks (slow

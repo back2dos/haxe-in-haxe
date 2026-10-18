@@ -34,6 +34,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - Android, step 1: GPU only, `NativeActivity`, the APK writer: landed (`android-arm64`, `android-x86_64`; [hxmc.md](docs/hxmc.md#android), what is left: [targets.md](docs/plans/targets.md#android))
 - Android, step 2: native controls through JNI (a DEX writer for the glue, `hxmc.ui.native` on `android.widget`): landed ([hxmc.md](docs/hxmc.md#android))
 - Android, step 3: a GPU view among views (`GpuView`), the input method for a drawn window: landed (what is left: [targets.md](docs/plans/targets.md#android))
+- iOS, step 1: GPU only, UIKit through the Objective-C runtime, the app bundle and its ad hoc signature: landed (`ios-arm64`, `ios-sim-arm64`; [hxmc.md](docs/hxmc.md#ios), what is left: [targets.md](docs/plans/targets.md#ios))
 
 ## Next
 
@@ -53,7 +54,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - Native macros beyond the prototype ([compiler.md](docs/plans/compiler.md#native-macros-prototype))
 - C interop: methods on structs, specialized generics, value enums, allocators ([lowlevel.md](docs/plans/lowlevel.md))
 - WebAssembly threads; WasmGC as a browser-focused second path ([targets.md](docs/plans/targets.md#webassembly))
-- iOS ([targets.md](docs/plans/targets.md#ios))
+- iOS, steps 2 and 3 (native controls via UIKit, mixing), device signing, icons ([targets.md](docs/plans/targets.md#ios))
 - gfx: multisampling, bind groups, compute, Vulkan, D3D12; audio input and devices ([graphics.md](docs/plans/graphics.md))
 - Compact strings ([runtime.md](docs/plans/runtime.md#compact-strings-latin-1--utf-16))
 - Direct system calls on Linux ([runtime.md](docs/plans/runtime.md#direct-system-calls-on-linux))

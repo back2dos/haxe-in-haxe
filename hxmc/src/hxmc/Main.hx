@@ -122,6 +122,7 @@ class Main {
 			throw "hxmc: a program for " + abi.name + " must be typed for it: -D hxmc.target=" + abi.name + " (also when writing its HXB)";
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
+		hxmc.ir.Lower.targetPlatform = abi.platformCode();
 		hxmc.ir.Lower.lines = opts.debugLines && !abi.wasm;
 		var t0 = haxe.Timer.stamp();
 		// resident: bodies of the fields the server kept are reused (LowerCache)

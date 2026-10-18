@@ -330,6 +330,49 @@ app icon's compiled asset catalog (`Assets.car`, undocumented), the App
 Store's declared SDK/Xcode version checks, simulator testing (macOS
 only). No JIT on iOS.
 
+Order:
+
+1. GPU only (done, [hxmc.md](../hxmc.md#ios)): `ios-arm64` and
+   `ios-sim-arm64`, macOS arm64's Mach-O and runtime objects with the
+   platform in `LC_BUILD_VERSION` (minimum 15.0: `UILaunchScreen` is 14's,
+   and 15 is the floor of current Xcodes; SDK 18.0) and `Mem.platform()`
+   for packages; the bundle writer (an XML `Info.plist` with an empty
+   `UILaunchScreen`, `CodeResources`, an ad hoc signature written by the
+   linker with the bundle's special slots, `CodeSign.hx`, which macOS's
+   linker signature now is too), the `.ipa`; `hxmc.os.uikit`:
+   `UIApplicationMain` run by the generated main (`hxmc_ui_main`), the
+   program's body inside UIKit's loop, a `CAMetalLayer`-backed view for the
+   Metal back end, touches, the safe area, Suspend and Resume. CI:
+   `IosCheck` on Linux, IosTest on an iPhone simulator of a macOS runner
+   (`xcrun simctl`, a tap posted on the Simulator's window), not required
+   checks yet. `ios-sim-x86_64` is left out: x86-64 needs
+   `objc_msgSend_stret` for gfx ([graphics.md](graphics.md)) and Intel
+   runners are going away. Left from this step:
+   - device signing: the CMS signature blob by the developer's
+     certificate (RSA or P-256: `P256.hx` has the curve, DER exists for
+     Android), the provisioning profile copied in as
+     `embedded.mobileprovision`, its entitlements (also as DER, slot 7,
+     needed since iOS 15), the designated requirement naming the
+     certificate's chain, the team id: `CodeSign.Identity` is the API,
+     filled from a PKCS#12 export of the developer's identity and a profile
+     downloaded from their account; installs then through
+     libimobiledevice or `xcrun devicectl`;
+   - the app icon and an asset catalog (`Assets.car`: undocumented; a
+     `CFBundleIcons` of plain PNGs works for the home screen until then),
+     `PkgInfo`, a binary `Info.plist`;
+   - keys and text input (a `UIKeyInput` view and an input method, as
+     macOS's text view), multiple touches, UIScene (required by the SDK
+     after iOS 26), `os_log` for what the app prints on a device;
+   - the App Store's checks (the declared SDK and Xcode in `Info.plist`'s
+     DT* keys, `LC_ENCRYPTION_INFO_64`), the main stack (`RT_STACK_MB`'s
+     1 GB reservation; iOS limits an app's address space).
+2. Native controls via UIKit: `hxmc.ui.native` on `UIButton`, `UILabel`,
+   `UITextField`, ... (the AppKit backend's pattern: classes made at run
+   time for targets and delegates).
+3. Mixing: a GPU view among UIKit views (`GpuView` over a
+   `CAMetalLayer`-backed `UIView`), a native field in a drawn tree for text
+   input, as on Android.
+
 ## Shared libraries and position-independent output
 
 Needed by Android and plugins: the relocation model, TLS model, output
