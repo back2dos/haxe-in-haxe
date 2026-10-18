@@ -231,9 +231,13 @@ another process through libatspi, in a D-Bus session with AT-SPI's bus
 (at-spi2-core); on macOS in CI
 `TextInputTest` types through the window's text view and composes in it,
 `MacAccessTest` reads the accessibility tree through NSAccessibility and
-performs its actions; on Windows `WinAccessTest` calls the UI Automation
-providers through their COM interfaces and asks UI Automation for the
-window's element). In the browser: `make ui-web-check` (the native form on the DOM's own
+performs its actions, and drives the native views: a field (an
+NSTextField, a password's NSSecureTextField), a text area (an NSTextView),
+a context menu chosen from (NSMenu), the menu bar's item performed; on
+Windows `WinAccessTest` calls the UI Automation providers through their
+COM interfaces and asks UI Automation for the window's element, and drives
+the native views: an EDIT typed into and centred, a popup menu chosen
+from by keys). In the browser: `make ui-web-check` (the native form on the DOM's own
 controls, `native-web.mjs`; native text editors over a drawn window,
 the page's input and textarea, typed in, submitted, tabbed between drawn
 widgets and hidden under a popup, `web-field.mjs`; the todo example (its
