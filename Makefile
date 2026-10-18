@@ -704,6 +704,7 @@ web-widgets: $(TOOL) $(PORT_BIN)
 	@mkdir -p bin/web/widgets
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/tools -cp packages/web/test --run WidgetParity packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/web/src/hxmc/web/widgets/Widgets.hx
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/web/widgets/shadcn.css
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/web/widgets/shadcn-scoped.css .hxmc
 	for m in counter:WidgetCounter form:WidgetForm gallery:WidgetGallery; do \
 		ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(DOM_CP) -cp packages/web/examples -main $${m#*:} -dce full -D js-es=6 -D analyzer-optimize -js bin/web/widgets/$${m%%:*}.js || exit 1; \
 		printf '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>%s</title><link rel="stylesheet" href="shadcn.css"></head><body><script src="%s.js"></script></body></html>\n' $${m#*:} $${m%%:*} > bin/web/widgets/$${m%%:*}.html; \
