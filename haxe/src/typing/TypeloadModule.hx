@@ -339,14 +339,17 @@ class TypeloadModule {
 			var inheritance = TypeloadCheck.Inheritance.setHeritance(local, c, d.flags, p);
 			function perform():BuildState {
 				c.clBuild = function() return Building([c]);
+				if (buildClassHook != null) buildClassHook(c, true);
 				try {
 					for (f in inheritance) f();
 					TypeloadFields.initClass(local, cctx, c, p, d.flags, d.data);
+					if (buildClassHook != null) buildClassHook(c, false);
 					c.clBuild = function() return Built;
 					local.g.buildCount++;
 					for (tp in c.clParams) follow(tp.ttpType);
 					return Built;
 				} catch (e:BuildCanceled) {
+					if (buildClassHook != null) buildClassHook(c, false);
 					c.clBuild = makePass(local, perform);
 					function rebuild():Void delayLate(local.g, PBuildClass, function() {
 						c.clBuild();
@@ -368,6 +371,7 @@ class TypeloadModule {
 							state;
 					};
 				} catch (e:haxe.Exception) {
+					if (buildClassHook != null) buildClassHook(c, false);
 					c.clBuild = function() return Built;
 					throw e;
 				}
@@ -825,6 +829,10 @@ class TypeloadModule {
 	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) learns here when a module is typed
 	// ... from its source (start, then end); always null in the compiler itself.
 	public static var typeFromSourceHook:Null<(com:CommonContext, path:GlobalTypePath, start:Bool) -> Void> = null;
+
+	// port: and when a class of such a module is built (its fields made: start, then end, also when the build
+	// ... fails or is canceled); always null in the compiler itself.
+	public static var buildClassHook:Null<(c:TClass, start:Bool) -> Void> = null;
 
 	public static function loadModulePrime(com:CommonContext, g:TyperGlobals, path:GlobalTypePath, p:Pos):ModuleDef {
 		Common.checkCancellation(com);

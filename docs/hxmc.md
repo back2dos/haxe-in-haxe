@@ -234,7 +234,14 @@ expressions kept, which inlining copies), or of its whole content across
 contexts (a macro's code runs). A module typed again whose interface did
 not change leaves its dependents restored (early cutoff: a body edited in
 a central module of the port types that module again, not its
-dependents); an edit undone restores the earlier variant. Modules built by
+dependents); an edit undone restores the earlier variant (a module a macro
+defined, with no file of its own, the variant whose dependencies are as
+they were: the one typed with the variant restored for the module whose
+macro defines it). A restored module that refers to one typed again reads
+that module's fields once they exist: one read while a class of a module it
+depends on, or of its cycle, is being built is typed from its source too,
+and the fields Haxe makes in a later pass (an interface's property
+accessors) are made before it reads them. Modules built by
 macros are restored too; the state macros keep between calls is tracked:
 the static variables of macro classes (not the std's) the macros run in a
 module's typing use are kept with it (a registry an `@:autoBuild` fills
@@ -242,7 +249,9 @@ for another macro, a counter naming generated types). Such a module is
 restored while no macro of the build uses that state; a macro that uses
 it after such a module was restored makes the build run again, those
 modules typed (`HXMC_MODULE_CACHE_RETYPE`), and an edited one has the
-others that keep state there typed from the start. A callback a macro
+others that keep state there typed from the start. A class's build (its
+fields made, its build macros run, lazily, when first asked for) is part of
+the typing of its module, whichever module's typing asks for it. A callback a macro
 registers while a module is typed (`onGenerate`, `onAfterTyping`,
 `onAfterGenerate`) makes that module typed every build. Not used for
 display requests, the server itself, several compilations, init macros,
