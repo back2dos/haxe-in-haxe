@@ -143,6 +143,7 @@ enum LCall {
 	CCtorClos(ci:CtorInfo, sig:SigInfo, r:LambdaInfo);
 	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
 	CAdapter(from:SigInfo, to:SigInfo, r:LambdaInfo);
+	CDynAdapter(to:SigInfo, r:LambdaInfo);
 	CLambda(sig:SigInfo, captures:Array<Local>, name:String, module:String, r:LambdaInfo);
 	CSelector(name:String, sig:SigInfo, r:Int);
 	CNeedsDispatch(c:TClass, name:String, r:Bool);
@@ -529,6 +530,17 @@ class CachedLower extends Lower {
 		return r;
 	}
 
+	// (one per signature in the program, as adapter: a replayed body asks
+	// the lowering for it again, rather than making a closure of its own
+	// that the next body asking for the same signature would make twice)
+	override public function dynAdapter(to:SigInfo):LambdaInfo {
+		depth++;
+		var r = super.dynAdapter(to);
+		depth--;
+		log(CDynAdapter(to, r));
+		return r;
+	}
+
 	override public function newLambda(sig:SigInfo, captures:Array<Local>, body:hxmc.ir.FnLower->Void, name:String, module:String):LambdaInfo {
 		depth++;
 		var r = super.newLambda(sig, captures, body, name, module);
@@ -638,6 +650,8 @@ class CachedLower extends Lower {
 				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), cls: d.cls == null ? null : tc(d.cls)}, obj(owner)));
 			case CAdapter(from, to, r):
 				bindLambda(r, adapter(obj(from), obj(to)));
+			case CDynAdapter(to, r):
+				bindLambda(r, dynAdapter(obj(to)));
 			case CLambda(s, caps, name, module, r):
 				var body = cache.lambdaEntry(r.fn);
 				if (body == null) mismatch("closure " + name + " without its body");
