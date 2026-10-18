@@ -689,7 +689,7 @@ SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp 
 3d-programs: $(TOOL) $(STD) $(HOST_RT)
 	@mkdir -p bin/3d
 	@# (the asset step: the samples packed for the packed scenes)
-	ulimit -s unlimited 2>/dev/null || true; for m in sample skinned normals; do $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/$$m.glb bin/3d/$$m.hxm3d || exit 1; done
+	ulimit -s unlimited 2>/dev/null || true; for m in sample skinned normals morph; do $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/$$m.glb bin/3d/$$m.hxm3d || exit 1; done
 	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
 3d-check: $(TOOL) $(STD) $(HOST_RT)
 	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest PhysicsTest; do $(TOOL) $(SCENE_CP) --run $$t; done
@@ -725,11 +725,11 @@ SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp 
 # what each feature of packages/3d adds to a program (packages/3d/test/size: Linux x86-64, wasm32-wasi)
 3d-sizes: $(TOOL) $(STD) $(HOST_RT)
 	@mkdir -p bin/3d
-	ulimit -s unlimited 2>/dev/null || true; for m in sample skinned normals; do $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/$$m.glb bin/3d/$$m.hxm3d || exit 1; done
+	ulimit -s unlimited 2>/dev/null || true; for m in sample skinned normals morph; do $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/$$m.glb bin/3d/$$m.hxm3d || exit 1; done
 	ulimit -s unlimited 2>/dev/null || true; sh packages/3d/test/size/sizes.sh $(TOOL) bin/3d/size -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test/size $(HXMC_ARGS)
 3d-web-check: $(TOOL) $(STD)
 	@mkdir -p bin/3d
-	ulimit -s unlimited 2>/dev/null || true; for m in sample skinned normals; do $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/$$m.glb bin/3d/$$m.hxm3d || exit 1; done
+	ulimit -s unlimited 2>/dev/null || true; for m in sample skinned normals morph; do $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/$$m.glb bin/3d/$$m.hxm3d || exit 1; done
 	@# (Model.of's files beside the module, -D hxmc.scene.embed=0: fetched by browser.mjs before main)
 	rm -rf bin/3d/assets
 	$(call hxmc,bin/3d/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.scene.embed=0 -D hxmc.scene.out=bin/3d/SceneWebTest.wasm)
