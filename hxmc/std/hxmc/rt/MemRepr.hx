@@ -206,10 +206,32 @@ class MemRepr {
 		arrSetLen(a, n - 1);
 	}
 
-	// the last of n elements removed
-	public static inline function arrRemoveLast(a:Dynamic, n:Int) {
-		LibC.memset(arrData(a).add(elemSize(a) * (n - 1)), 0, elemSize(a));
-		arrSetLen(a, n - 1);
+	// the last of n elements removed and returned (taken, its slot cleared,
+	// before the value is boxed: the array is not live across that
+	// allocation, so needs no root)
+	@:access(hxmc.rt.Boxes) public static inline function arrPop(a:Dynamic, n:Int):Dynamic {
+		n--;
+		var k = arrKind(a);
+		var d = arrData(a);
+		arrSetLen(a, n);
+		if (k == AK_PTR) {
+			var v = Mem.getRefAt(d, 0, n);
+			Mem.setI64At(d, 0, n, 0);
+			return v;
+		}
+		if (Types.ak4(k)) {
+			var x = Mem.getI32At(d, 0, n);
+			Mem.setI32At(d, 0, n, 0);
+			return k == AK_BOOL ? Boxes.boxBool(x) : Boxes.boxInt(x);
+		}
+		if (k == AK_F64) {
+			var x = Mem.getF64At(d, 0, n);
+			Mem.setI64At(d, 0, n, 0);
+			return Boxes.boxFloat(x);
+		}
+		var x = Mem.getI64At(d, 0, n);
+		Mem.setI64At(d, 0, n, 0);
+		return Boxes.boxI64(x);
 	}
 
 	// cut from m elements to n (what is cut cleared)

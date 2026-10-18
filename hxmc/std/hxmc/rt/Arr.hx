@@ -136,9 +136,7 @@ class Arr {
 	@:hxmc.host("Array_pop") static function pop(a:Dynamic):Dynamic {
 		var n = len(a);
 		if (n == 0) return null;
-		var v = (a : Array<Dynamic>)[n - 1];
-		Repr.arrRemoveLast(a, n);
-		return v;
+		return Repr.arrPop(a, n);
 	}
 
 	@:hxmc.host("Array_shift") static function shift(a:Dynamic):Dynamic {
@@ -167,6 +165,7 @@ class Arr {
 	@:hxmc.host("Array_unshift") static function unshift(a:Dynamic, x:Dynamic):Void
 		insert(a, 0, x);
 
+	// (no allocation but in grow: the array needs no root here)
 	@:hxmc.host("Array_resize") @:access(hxmc.rt.Boxes) static function resize(a:Dynamic, n:Int):Void {
 		var m = len(a);
 		if (n < m) {
@@ -174,6 +173,18 @@ class Arr {
 			return;
 		}
 		if (n == m) return;
+		#if !(hxmc.wasm_gc)
+		// within the capacity: the slots past the length are zero (shrinking
+		// clears them)
+		if (n <= Boxes.arrCap(a)) {
+			MemRepr.arrSetLen(a, n);
+			return;
+		}
+		#end
+		grow(a, n);
+	}
+
+	@:access(hxmc.rt.Boxes) static function grow(a:Dynamic, n:Int):Void {
 		#if !(hxmc.wasm_gc)
 		// past the capacity (including from empty), the data
 		// allocated at the new length, the elements copied once (the new ones

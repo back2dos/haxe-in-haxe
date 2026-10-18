@@ -139,8 +139,12 @@ class GcRepr {
 		W.arrSetLen(a, n - 1);
 	}
 
-	public static inline function arrRemoveLast(a:Dynamic, n:Int)
+	// the last of n elements removed and returned
+	public static inline function arrPop(a:Dynamic, n:Int):Dynamic {
+		var v = (a : Array<Dynamic>)[n - 1];
 		W.arrSetLen(a, n - 1);
+		return v;
+	}
 
 	public static inline function arrCut(a:Dynamic, n:Int, m:Int)
 		W.arrSetLen(a, n);
