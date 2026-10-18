@@ -1,10 +1,15 @@
 # The dev loop: `hxmc dev`
 
 Save a file, see the change, keep where you were. `hxmc dev` builds the
-program, runs it, and on every save builds it again and reloads it; the
-reload starts the new build fresh, with the old build's state carried over
-by key (fast refresh). The design and what comes next:
-[plans/dev-loop.md](plans/dev-loop.md) (steps 1 and 2 are built).
+program, runs it, and on every save builds it again and swaps it in; the
+new build starts fresh, with the old build's state carried over by key
+(fast refresh). Nothing reloads or restarts (step 3, "No reloads"): in the
+browser the new module runs in the same page, on the same canvas and GPU
+device; natively each build is a shared library loaded into the same
+process, the dev host, on the same window and GPU context (Linux, macOS,
+Windows); on Android and the iOS simulator the app is the host. The design and what comes next:
+[plans/dev-loop.md](plans/dev-loop.md) (steps 1 and 2 are built, step 3 in
+the browser, natively, on Android and on the iOS simulator).
 
 ```sh
 npx haxe --dev build.hxml          # the npm package
@@ -28,26 +33,183 @@ the output, `--custom-target hxmc=<out>`, says how the program runs:
 What happens:
 
 - The compiler stays resident: the dev server starts it as a compilation
-  server (`--wait`) and each build is a request to it, with `-D hxmc.dev`
-  added. Typed modules, lowered bodies and compiled objects stay in memory;
-  a build types again only the modules that changed and those that depend
-  on them.
+  server (`--server-connect`: it connects to the dev server and takes each
+  build on that one connection) and each build is a request to it, with
+  `-D hxmc.dev` added. Typed modules, lowered bodies and compiled objects
+  stay in memory; a build types again only the modules that changed and
+  those that depend on them. The typed modules are kept as they are
+  (`-D disable-hxb-cache`, Haxe's in-memory server cache), not written as
+  HXB after each build and read back in the next (`HXMC_DEV_HXB_CACHE=1`:
+  the HXB cache, Haxe's default); either way a build makes the bytes a
+  fresh build makes (`make dev-check`).
 - The class paths and libraries the build names (and its hxml files) are
   watched; a change builds again (several changes close together: one
   build).
-- A build that compiles reloads the program. In the browser the page asks
-  the running module for its snapshot, keeps it in `sessionStorage` and
-  loads again with the new module. Natively the program writes its
-  snapshot to a file and exits, and the new build starts with it.
+- A build that compiles swaps the new build in. In the browser the page
+  fetches the new module as soon as the program is typed (the server says
+  so; the module is held back until the build ends and compiled as it
+  arrives), while the old build keeps running and showing its frames. Then
+  the old instance snapshots and is disposed (below), and the new module is
+  instantiated in the same page, from the snapshot, against the same canvas
+  (its last frame shown until the new build's first), the same `GPUDevice`
+  (or the canvas's WebGL2 context: the page's `?gfx=webgl2`) and the same
+  fonts. Natively on Linux (the dev host, below) the running build writes
+  its snapshot, disposes and returns, and the host loads the new build
+  into the same process. Elsewhere natively the program writes its
+  snapshot to a file and exits, and the new build starts once the snapshot
+  is written.
+- The dev host (Linux, the glibc mode; `HXMC_DEV_HOST=0`: a process per
+  build instead): `hxmc.dev.DevHost`, a small executable built once (and
+  cached in `~/.cache/hxmc/dev-host`), is the process of the whole session.
+  Each build is a shared library (`-D hxmc.shared -D hxmc.dev-host`,
+  added by the dev server; the output renamed `<out>.dev/<n>.so`, a fresh
+  name per build), with its own runtime and heap: the host writes the
+  address of its state block into the library's `hxmc_dev_state` and calls
+  `hxmc_dev_run`, which runs the program's main on a thread of its own
+  (`hxmc.dev.Hosted`). The state block holds what survives a swap: the X
+  display connection and the window (`hxmc.os`'s X11 window) and the EGL
+  display, config, context and window surface (`hxmc.gfx`'s GL back end),
+  made by the first build and taken by each next one instead of made; the
+  window keeps its size and position, its last frame shown until the new
+  build's first. At a reload the dev server names the new library
+  (`"library"`); the build snapshots, disposes (its GL objects deleted, the
+  context released from its thread, its input method closed: nothing of
+  the host's destroyed) and returns from main; its runtime gives its heap
+  back (the old space's regions, the nursery, the stacks: `Gc.releaseHeap`,
+  shared libraries only), and the host opens the new library before it
+  closes the old one, so that the system libraries both use (X11, EGL, the
+  GPU driver) stay loaded. The host's memory stays flat across swaps
+  (about 125 MB resident for ui's Counter after twelve, as after the
+  first). Only the handles and the snapshot cross: no shared heap, no old
+  code reachable. A build that ends by itself (its window closed) names no
+  next library and the host ends; the next build starts it again. A
+  program's own threads must end in its `Hot.onDispose` functions before
+  its library is closed. Release builds are the same bytes: all of this is
+  under `-D hxmc.dev-host`.
+- Disposing an instance in the browser (`host.dispose()`,
+  `@hxmc/os`'s `browser.mjs`, option `track`): the program's own disposal
+  first (`Hot.onDispose`: the view's roots, and `hxmc.gfx.Device`, which
+  releases every buffer, texture, sampler, shader and pipeline it made;
+  under `-D hxmc.dev` the GL back end deletes its objects too, the context
+  kept), then the packages' (`host.onDispose`: os ends its frames, its
+  listeners, observers and audio and keeps its canvases; gfx releases what
+  the program left, counted and logged, and leaves the device and the
+  canvases' contexts as they are, configured), then whatever the instance
+  registered with the page while it ran, recorded as it did: listeners on
+  anything it did not create, animation frames, timers, observers, audio
+  contexts, and the elements it created (removed; ui's accessibility
+  mirror, editors' layer and native controls among them). After that the
+  old instance's callbacks do nothing. None of the packages' `imports.mjs`
+  has to know about the swap beyond that.
 - A build with errors changes nothing: the last good build keeps running.
   The errors show in the terminal and, in the browser, in an overlay over
-  the page, which goes away with the next build that compiles.
-- Each reload prints its time, from the change seen to the new build's
-  first frame: `hxmc dev: reloaded in 1043 ms (build 896 ms)`.
+  the page, which goes away with the next build that compiles. (Errors are
+  the typer's; one of hxmc's own, after the page started loading again, a
+  link failure, gives the page the last good build again, with the overlay
+  and the state carried.)
+- Each swap prints its time, from the change seen to the new build's
+  first frame: `hxmc dev: swapped in 420 ms (build 346 ms)` (natively
+  without the dev host, a new process: `reloaded in`).
+- The page reconnects to the dev server when it restarts (and swaps in what
+  it built), rather than loading again.
 
 A program that ends by itself (its window closed) starts again with the
 next build. A native program without hxmc.os's app loop (a command-line
 program) cannot hand its state over: it is stopped and started again.
+
+## The dev host on macOS, Android and iOS
+
+The same host and handover as Linux's, with what each system keeps:
+
+- **macOS.** hxmc writes Mach-O dylibs (`-D hxmc.shared`: `MH_DYLIB`,
+  the image at 0, `LC_ID_DYLIB @rpath/<name>`, the exports in the export
+  trie, ad-hoc linker-signed), so `hxmc dev` runs a native program on
+  macOS in the dev host as on Linux (each build `<out>.dev/<n>.dylib`).
+  The program runs on the host's main thread (AppKit's); the first build
+  makes the `NSWindow`, its layer's view, text view and `CAMetalLayer` and
+  the window's delegate, and each next build takes them (`hxmc.dev.Hosted`
+  slots) and replaces the methods of the Objective-C classes the first
+  build made (`HxmcWindowDelegate`, `HxmcTextView`) with its own, so the
+  window's callbacks reach the running build. The Metal back end leaves
+  the layer its device. Checked in CI (gfx-macos: `mac-dev.sh`, the host
+  and three builds of `DevHostTest` as dylibs: the count kept, the same
+  process and window).
+- **Windows.** hxmc writes DLLs (`-D hxmc.shared`: no entry point, the
+  exports in an export directory, base relocations, x86-64's included,
+  from a preferred base, `-D hxmc.dll-base`, which `hxmc dev` alternates
+  between two so that the old build's and the new one's never collide),
+  so `hxmc dev` runs a native program in the dev host as elsewhere (each
+  build `<out>.dev/<n>.dll`, loaded with `LoadLibrary` on the host's main
+  thread, the thread that made the window). The first build makes the
+  window and the D3D11 device, its context and the window's swap chain;
+  each next build takes them, sets the window's procedure and its class's
+  to its own (`SetWindowLongPtr`, `SetClassLongPtr`) and makes its own
+  render target views on the swap chain's buffer. Checked in CI
+  (gfx-windows, x86-64 and arm64, on WARP: `host-dev.sh` with the host
+  and three builds as DLLs, cross-built on Linux) and here under Wine.
+- **Android.** The APK is the dev host: `hxmc dev` builds it for its own
+  socket (`-D hxmc.dev-server=127.0.0.1:<port>`, the port beside the
+  page's, `HXMC_DEV_ANDROID_PORT`; it asks for the `INTERNET` permission,
+  `-D hxmc.android-permissions`), installs it (`adb install`, `adb
+  reverse`) and starts it once. Its activity glue keeps the window, the
+  input queue, the looper and the EGL context: the statics of
+  `hxmc.os.android.Activity` and `AndroidWindow` live in the host's state
+  block (`hxmc.dev.HostedMacro`, under `-D hxmc.dev-host` only), shared
+  with every build loaded later. Each later build is the library of its
+  APK (`lib/<abi>/libmain.so`, taken by the dev server): the running build
+  fetches it over a connection of its own (`lib <n>`) into the app's files
+  directory, writes its snapshot there, hands over and returns from main,
+  and the program's thread loads the new library there and runs its
+  program, with the same looper, window and context. No reinstall, no
+  activity restart, the same process. The libraries and their heaps stay
+  loaded (the system's UI thread may still call into a build once: a
+  looper's or a frame's callback); a session's memory grows by a build's
+  heap per swap. Checked on CI's emulator (`dev-android.mjs`: two edits,
+  the same pid, the count kept).
+- **iOS, the simulator.** The app is the dev host; each later build is a
+  dylib (`-D hxmc.shared` for `ios-sim-arm64`, whose main runs the
+  program's body rather than UIKit's start), loaded by the app on the main
+  thread inside UIKit's loop once the running build's body returns having
+  handed over. The `UIWindow`, its root view controller and the
+  `CAMetalLayer`'s view stay; each build replaces the methods of
+  `HxmcView` and the app delegate's lifecycle with its own. The simulator
+  reads the Mac's files, so the dev server can name the dylib's path
+  directly. Checked in CI (ios-simulator: `ios-dev.sh`,
+  `DevHostTest.app` and two later builds as dylibs: the count kept, the
+  same process and view; `HXMC_DEV_NEXT`, libraries handed over to in
+  turn a second after the first frame, is how the test drives it without a
+  dev server). `hxmc dev` with an `.app` output for `ios-sim-arm64`
+  installs and launches the app on the booted simulator (`xcrun simctl`,
+  its output in `<out>.dev/stdout.txt`), then builds each change as a
+  dylib (`-D hxmc.shared -D hxmc.output=<out>.dev/next.dylib`, renamed
+  `<n>.dylib`) and names it in the reload message (not yet run in CI: the
+  simulator job has no compiler).
+- **iOS, a device: not possible with a dylib.** What was found (no device
+  was tried here): Apple's DTS answer to exactly this question (a dylib
+  signed with the developer's identity, sent to a development-signed app
+  on an iPhone in Developer Mode, written to its container and `dlopen`ed)
+  is no: "you can only open a library that's either built in to the OS or
+  embedded within your app" ([Apple Developer Forums
+  773210](https://developer.apple.com/forums/thread/773210), Quinn "The
+  Eskimo!"); the poster reports it worked on iOS 17 with Xcode attached
+  and fails on iOS 18 with "code signature invalid", and works once the
+  dylib is inside the app bundle. InjectionNext, which signs each dylib
+  with the identity of the app's build ("expanded codesigning identity",
+  `codesign --force -s <identity>`, no entitlements) and loads it from the
+  app's data container's `tmp/`, has the same failure open on device since
+  iOS 18.6 and on iOS 26 ([InjectionNext
+  #81](https://github.com/johnno1962/InjectionNext/issues/81): a valid
+  signature with the app's TeamIdentifier, "code signature invalid
+  (errno=1)"; the maintainer has not reproduced it, contributors conclude
+  device injection cannot work on iOS 18+). Library validation also means
+  only code signed by the team (or Apple) loads at all
+  ([forum thread 670761](https://developer.apple.com/forums/thread/670761)).
+  So `CodeSign.hx` signing each dylib with the developer identity (it signs
+  ad hoc only today) would not be enough: the only loadable place is the
+  app bundle, and installing a new bundle restarts the app. The device
+  fallback therefore stays the plan's: the program as wasm run by an
+  interpreter inside the host app (UI work, slower; nothing of it is built
+  yet), and a restart (reinstall, the snapshot carried) as the last resort.
 
 ## Fast refresh: state carried by key
 
@@ -83,6 +245,13 @@ resets it and says so:
 ```
 hxmc.dev: Counter.main.count reset: its type changed
 ```
+
+A signal's initial value is part of it too (its source, hashed, as React
+does for `useState`): editing `signal(0)` to `signal(5)` starts it at 5,
+and says so (`hxmc.dev: App.main.count reset: its initial value
+changed`); an edit elsewhere keeps its value. A class marked
+`@:hot(reset)` (or the function a signal is made in) keeps none of its
+signals: each build starts them afresh (React's `// @refresh reset`).
 
 Values go through `haxe.Serializer`, so a signal keeps data: numbers,
 strings, booleans, arrays, maps, structures, enums and class instances of
@@ -197,7 +366,7 @@ page's `/__hxmc/ws`), so editors and other tools can drive the loop:
 
 | To the program | |
 | --- | --- |
-| `{"type":"reload"}` | a new build is ready: snapshot, dispose, hand over. Natively it carries `"snapshot": <file>`: write the snapshot there, answer `saved`, exit. In the browser the page asks the module for its snapshot and loads again |
+| `{"type":"reload"}` | a new build is ready: snapshot, dispose, hand over. Natively it carries `"snapshot": <file>`: write the snapshot there, answer `saved`, exit (with the dev host, `"library": <file>` too: hand the host's handles over to that library and return from main). In the browser the page fetches the new module (`/__hxmc/app.wasm?swap`: 409 when the build failed, the running one stays), asks the running module for its snapshot, disposes it and runs the new one in the same page |
 | `{"type":"error","message":<text>}` | the build failed (the overlay); the program keeps running |
 | `{"type":"ok"}` | the build compiles again (the overlay goes) |
 | `{"type":"assets", ...}` | reserved: styles and images without a rebuild (step 4) |
@@ -217,12 +386,38 @@ browser the page gives the module the imports of `hxmc_dev`:
 `restore_length()` and `restore_take(p)` (the snapshot it was given, -1:
 none), `register(f)` (the `@:hxmc.callback` the page calls for a reload),
 `send(p, n)` (the snapshot) and `frame()`. hxmc.os's app loop reads the
-dev server's messages at each turn (an idle loop wakes every 50 ms in a dev
+dev server's messages at each turn (an idle loop wakes every 10 ms in a dev
 build) and reports the first frame.
 
 ## Times
 
-From the save to the new build's first frame, a one-line edit of the
+The browser's swap (step 3), measured as below (`dev-latency.mjs`, six
+edits, the machine less busy, load 0.8-1.3):
+
+| | build | save to frame | the reload before |
+| --- | --- | --- | --- |
+| Counter, browser (wasm) | 0.35 s | 0.42 s | 0.45-0.49 s |
+| Counter, browser (WasmGC) | 0.33 s | 0.43 s | 0.47-0.49 s |
+| Gallery, browser (wasm) | 0.72 s | 0.94 s | 1.07-1.14 s |
+| Gallery, browser (WasmGC) | 0.77 s | 1.09 s | 1.10-1.11 s |
+| Counter, native (Linux, the dev host) | 0.37 s | 0.44-0.45 s | 0.52-0.56 s |
+| Gallery, native (Linux, the dev host) | 0.81 s | 0.89 s | 0.90-0.93 s |
+| a drawn cube, Android (CI's x86-64 emulator) | 0.15 s | 0.30 s | (a reinstall, many seconds) |
+
+(Android: the dev-android.mjs edits on CI's emulator, one run: the swap
+after the build, 0.15 s, is the library taken from its APK, fetched over
+adb's reversed socket, written and loaded on the device. The iOS simulator,
+macOS and Windows are checked in CI without a timed `hxmc dev`.)
+Natively the swap after the build is 0.07-0.09 s (the snapshot, the
+dispose, loading the library and its first frame), where the restart was
+0.12-0.14 s (most of it loading Mesa and making the window, which the host
+keeps). A swap costs no more than the reload did: the reload already overlapped
+the page's loading with the build, and the swap overlaps nothing it needs
+(the old build runs on during the build); what is left after the build is
+compiling the module as it arrives, the snapshot, the dispose and the new
+build's start to its first frame.
+
+The reloads before step 3: from the save to the new build's first frame, a one-line edit of the
 program's `main` (`node packages/os/test/dev/dev-latency.mjs <compiler>
 <example> web|web-gc|native`: the medians of six edits), on a 4-core x86-64
 Linux machine, headless Chromium with SwiftShader, natively under Xvfb with
@@ -231,23 +426,48 @@ llvmpipe; ui's Counter (about 400 modules, 1700 functions) and Gallery (about
 
 | | build | save to frame | target |
 | --- | --- | --- | --- |
-| Counter, browser (wasm) | 0.93 s | 1.07 s | 0.5 s |
-| Counter, browser (WasmGC) | 0.79 s | 0.99 s | 0.5 s |
-| Counter, native | 0.88 s | 1.08 s | 0.5 s |
-| Gallery, browser (wasm) | 1.35 s | 1.61 s | 1.5 s |
-| Gallery, browser (WasmGC) | 1.38 s | 1.76 s | 1.5 s |
-| Gallery, native | 1.39 s | 1.67 s | 1.5 s |
+| Counter, browser (wasm) | 0.38-0.40 s | 0.45-0.49 s | 0.5 s |
+| Counter, browser (WasmGC) | 0.37 s | 0.47-0.49 s | 0.5 s |
+| Counter, native | 0.38-0.42 s | 0.52-0.56 s | 0.5 s |
+| Gallery, browser (wasm) | 0.88-0.93 s | 1.07-1.14 s | 1.5 s |
+| Gallery, browser (WasmGC) | 0.79-0.80 s | 1.10-1.11 s | 1.5 s |
+| Gallery, native | 0.73-0.75 s | 0.90-0.93 s | 1.5 s |
 
-(Runs vary by about 10%.) The build is most of it; the reload itself, the
-page loading again or the process starting, is 0.15-0.3 s. Of the build,
-in the compilation server: 0.4-0.5 s reads every cached module back from
-its HXB and caches each again (the server's HXB cache, as upstream's),
-the Gallery's edit types its large module of markup again (0.25 s of
-macros), DCE takes 0.1 s, and hxmc replays the lowered bodies of the
-modules not typed again (`LowerCache`, by module step: 0.1 s where
-lowering everything takes 0.2-0.35 s) and fingerprints every module to
-reuse its object (0.2-0.3 s with the link). Neither target is met yet: what
-is left is in [plans/dev-loop.md](plans/dev-loop.md).
+(Two runs each, the machine shared and busy, load 1.1-2.1; runs vary by
+about 10%. The build before these changes, measured alongside: Counter
+0.95-1.12 s save to frame, Gallery 1.53-1.85 s.) Of an edit's build, in
+the compilation server: 0.1-0.15 s is Haxe's (typing the changed module,
+DCE 0.06-0.08 s, the module checks; the Gallery's edit types its large
+module of markup again, 0.2-0.3 s of macros), and hxmc's is 0.18 s for the
+Counter, 0.35 s for the Gallery: lowering (`LowerCache` replays the
+bodies of the modules not typed again, as bindHosts left them: 0.06 s, 0.1
+s), Reach and the program's facts (0.04 s, 0.08 s), the modules' keys
+(`Fingerprint`, on every core: 0.02 s, 0.03 s), the data and the link
+(0.05 s, 0.08 s). After the build, the reload: in the browser the page
+has loaded again meanwhile (the program typed, the server says so), and
+the new module runs to its first frame in 0.05-0.1 s (the Counter) to
+0.15-0.3 s (the Gallery, WasmGC); natively the new process starts once
+the old one has written its snapshot, and its first frame is 0.12-0.14 s
+later, most of it loading Mesa (llvmpipe) and making the window.
+
+Before: the compilation server kept its typed modules as HXB (Haxe's
+default), so each build wrote every module as HXB and read each back
+(0.3-0.4 s); `-D disable-hxb-cache` (Haxe's in-memory mode) is most of the
+difference (with the HXB cache, the builds above are 0.84 s and 1.2 s
+natively). The rest: hxmc's lowering, keys and analyses made cheaper
+(bindHosts kept with the replayed bodies, an inlined callee's key text
+written once a build, string literals' names kept, Reach's and Facts'
+fixpoints walking each body once, WasmGC's IrOpt on every core, the
+processor count asked once), one connection to the server (a request per
+connection could find the server reading before it was sent, which waits
+50 ms), the page loading again during the build and fetching its module
+and fonts from its start, a 10 ms idle wake in a dev build (was 50 ms)
+and a 10 ms window for changes close together (was 20 ms).
+
+Note: the edits the measurement makes are the same each run (`"edit 1"`,
+...), so the objects of the edited module are often in the object store
+from an earlier run; a new edit compiles that module too (the Gallery's
+large one: 0.05 s more).
 
 ## Tests
 
@@ -257,13 +477,36 @@ store across a reload, natively and on Eval, a changed type reset),
 shown later), then `hxmc dev` on ui's Counter in headless Chromium (as wasm
 and as WasmGC) and natively under Xvfb: an edit keeps the count, a changed
 type resets it, a compile error shows in the overlay (the terminal) while
-the last good build keeps running, the fix reloads with the count kept.
+the last good build keeps running, the fix swaps in with the count kept.
+Natively on Linux, after each swap the window's id and the process (as
+each build prints them, `hxmc.dev: the host's window 0x... (process N)`)
+are the same, no program ended, and the last library is the bytes of a
+fresh build with the host's options. In the browser, on a WebGPU page and
+on a second page with `?gfx=webgl2`,
+after each swap: no reload (a marker set on `window` survives, Playwright
+saw one navigation, the Performance API's navigation entries and
+`timeOrigin` unchanged), the same canvas (the only one), the same
+`GPUDevice` or WebGL2 context, and no GPU objects left by the old build;
+then the compilation server's builds, asked as `hxmc dev` asks them,
+through edits of the Counter, of a module it uses whose API changes and of
+a module of markup (an attribute changed, an element added), each against
+a fresh build of the same sources, byte for byte
+(`packages/os/test/dev/dev-verify.mjs <compiler> [example] [native|web|web-gc]`).
 
+Beyond `make dev-check`, in CI: `dev-android.mjs` on the android job's
+emulator (`hxmc dev` on a drawn program built as an APK: installed once,
+two edits swapped into the same process, the count kept), `ios-dev.sh` on
+the ios-simulator job, and `host-dev.sh` on gfx-macos and gfx-windows
+(`DevHostTest`'s app or host and two or three later builds as libraries,
+handing over by themselves: the count kept, the same process and window
+or view).
 ## Not yet
 
-- Seamless swaps (step 3): natively the process restarts (the window
-  closes and opens again), in the browser the page loads again. Android
-  and iOS are not driven yet.
+- An iOS device cannot load a new build's code (above): the wasm fallback
+  is not built. The dev host is tested on macOS, Windows and the iOS
+  simulator with `DevHostTest` handing over by itself (`HXMC_DEV_NEXT`),
+  and on Linux and Android with `hxmc dev`'s own edits; `hxmc dev` itself
+  is not run in CI on macOS, Windows or the simulator.
 - Styles and assets without a rebuild (step 4).
 - The UI engine's own state (focus, scroll and selection by node key) is
   the UI session's part of step 2; ui's widgets' own signals are keyed

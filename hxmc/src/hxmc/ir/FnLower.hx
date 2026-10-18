@@ -157,7 +157,7 @@ class FnLower {
 	}
 
 	// closure body forwarding to a function (static or bound method)
-	public function forward(f:Null<FuncInfo>, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>) {
+	public function forward(f:Null<FuncInfo>, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>) {
 		boxed = new Map();
 		var args = [];
 		var self = lambda.captures.length > 0 ? 1 : 0; // (the callee's arguments start with the receiver)
@@ -168,11 +168,13 @@ class FnLower {
 			args.push((ELocal(recv) : Ex));
 		}
 		var ds = f != null ? l.defaults.get(f) : null;
+		var vars = f != null ? l.argVars.get(f) : null;
+		var argTys = [for (x in args) TRef(RObj(l.rootClass()))];
 		var last = fi.sret ? fi.args.length - 1 : fi.args.length;
 		for (k in 1...fi.args.length) {
 			var a = fi.args[k];
 			var j = k - 1 + self;
-			var target = k >= last ? a.ty : f != null ? f.args[j].ty : dispatch.sig.args[j];
+			var target = k >= last ? a.ty : f != null ? f.args[j].ty : dispatch.args[j];
 			switch a.ty {
 				// (signatures keep references as Dynamic: a nullable number is a box)
 				case TRef(_) if (target == TI32 || target == TF64 || target == TBool):
@@ -181,17 +183,24 @@ class FnLower {
 					var d = ds != null && j < ds.length ? ds[j] : null;
 					var v = newLocal("o", t);
 					var dflt = block(() -> {
-						var x = d != null ? coerce(value(d), tyOf(d), t) : nullOf(t);
+						var x = d != null ? defaultValue(d, t, j, vars, args, argTys, recv != null ? () -> ELocal(recv) : null, f.selfClass) : nullOf(t);
 						if (dispatch != null && dispatch.cls != null && recv != null) {
-							var y = receiverDefault(dispatch.cls, l.getProgram().selectors[dispatch.sel].name, ELocal(recv), j, d, t, x);
+							var y = receiverDefault(dispatch.cls, l.getProgram().selectors[dispatch.sel].name, ELocal(recv), j, d, t, x, args, argTys);
 							if (y != null) x = y;
 						}
 						out.push(SSet(v, x));
 					});
 					out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), dflt, [SSet(v, coerce(ELocal(a), a.ty, t))]));
 					args.push(ELocal(v));
+					argTys.push(t);
+				// (the function takes a closure as the type it declares, which
+				// the one passed here may not have: signatures keep it Dynamic)
+				case _ if (closureConversion(a.ty, target)):
+					args.push(coerce(ELocal(a), a.ty, target));
+					argTys.push(target);
 				case _:
 					args.push(ELocal(a));
+					argTys.push(a.ty);
 			}
 		}
 		var call = dispatch != null ? ECallDispatch(dispatch.sel, dispatch.sig, args) : ECall(f, args);
@@ -217,18 +226,22 @@ class FnLower {
 	public function forwardDefaults(f:FuncInfo) {
 		boxed = new Map();
 		var ds = l.defaults.get(f);
+		var vars = l.argVars.get(f);
 		var args:Array<Ex> = [ELocal(fi.args[0])];
+		var argTys = [fi.args[0].ty];
 		for (k in 1...fi.args.length) {
 			var a = fi.args[k], t = f.args[k].ty;
 			var d = ds != null && k < ds.length ? ds[k] : null;
 			if (a.ty == t || d == null) {
 				args.push(ELocal(a));
+				argTys.push(a.ty);
 				continue;
 			}
 			var v = newLocal("o", t);
-			out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(v, coerce(value(d), tyOf(d), t)))),
+			out.push(SIf(EBin(RefEq, ELocal(a), ENull(a.ty)), block(() -> out.push(SSet(v, defaultValue(d, t, k, vars, args, argTys, () -> ELocal(fi.args[0]), f.selfClass)))),
 				[SSet(v, coerce(ELocal(a), a.ty, t))]));
 			args.push(ELocal(v));
+			argTys.push(t);
 		}
 		if (f.ret == TVoid) {
 			out.push(SExpr(ECall(f, args)));
@@ -458,10 +471,54 @@ class FnLower {
 		return ELocal(lo);
 	}
 
-	// operands converted to the given representations (missing trailing ones: defaults)
-	function args(es:Array<TExpr>, to:Array<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0):Array<Ex> {
+	// a call's receiver o, evaluated before the statements from `before` on
+	// (its arguments'), as a local: a default value reads it (defaultValue)
+	function receiverLocal(o:Ex, t:Ty, before:Int):Ex {
+		o = spillBefore(o, t, before);
+		return isConst(o) || o.match(ELocal(_)) ? o : ELocal(asLocal(o, t));
+	}
+
+	// operands converted to the given representations (missing trailing ones:
+	// defaults; `callee` the function they are of, `recv` its receiver, when
+	// one may read its arguments or `this`: defaultValue)
+	function args(es:Array<TExpr>, to:Array<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0, ?callee:FuncInfo, ?recv:() -> Ex):Array<Ex> {
 		var xs = operands(es);
-		var r = [];
+		var vars = callee != null ? l.argVars.get(callee) : null;
+		var r = [], rTys = [];
+		// (before a default value that is not a constant, outside of the branch
+		// it may be in: the arguments as locals when it reads them or is in
+		// a branch, the receiver when it reads it)
+		function prepare(d:TExpr, branch:Bool) {
+			if (constDefault(d)) return;
+			var reads = vars != null && readsFunction(d, vars);
+			if (!reads && !branch) return;
+			for (k in 0...r.length)
+				if (!isConst(r[k]) && !r[k].match(ELocal(_))) r[k] = ELocal(asLocal(r[k], rTys[k]));
+			if (reads && recv != null) {
+				var o = recv();
+				recv = () -> o;
+			}
+		}
+		// the default value d of argument i (of `to`), after the arguments before it
+		function dflt(d:TExpr, i:Int):Ex {
+			if (constDefault(d)) return coerce(value(d), tyOf(d), to[i]);
+			var before = out.length;
+			var x = defaultValue(d, to[i], i, vars, [for (k in 0...offset) null].concat(r), [for (k in 0...offset) null].concat(rTys), recv,
+				callee != null ? callee.selfClass : null);
+			// (its effects come after the arguments: those not read yet are read first)
+			if (out.length != before) {
+				var spills = [];
+				for (k in 0...r.length)
+					if (!isConst(r[k]) && !r[k].match(ELocal(_))) {
+						var lo = newLocal("s", rTys[k]);
+						spills.push(SSet(lo, r[k]));
+						r[k] = ELocal(lo);
+					}
+				for (j in 0...spills.length)
+					out.insert(before + j, spills[j]);
+			}
+			return x;
+		}
 		for (i in 0...xs.length) {
 			var t = i + offset < to.length ? to[i + offset] : TRef(RAny);
 			var d = defaults != null && i + offset < defaults.length ? defaults[i + offset] : null;
@@ -471,18 +528,106 @@ class FnLower {
 				// to `x:Int = 1`, as a bind's closure does with an argument left out)
 				var x = asLocal(xs[i], from);
 				var v = newLocal("o", t);
-				out.push(SIf(EBin(RefEq, ELocal(x), ENull(from)), block(() -> out.push(SSet(v, coerce(value(d), tyOf(d), t)))),
+				prepare(d, true);
+				out.push(SIf(EBin(RefEq, ELocal(x), ENull(from)), block(() -> out.push(SSet(v, dflt(d, i + offset)))),
 					[SSet(v, coerce(ELocal(x), from, t))]));
 				r.push(ELocal(v));
+				rTys.push(t);
 				continue;
 			}
 			r.push(coerce(xs[i], from, t));
+			rTys.push(t);
 		}
 		for (i in xs.length + offset...to.length) {
 			var d = defaults != null && i < defaults.length ? defaults[i] : null;
-			r.push(d != null ? coerce(value(d), tyOf(d), to[i]) : nullOf(to[i]));
+			if (d != null) prepare(d, false);
+			r.push(d != null ? dflt(d, i) : nullOf(to[i]));
+			rTys.push(to[i]);
 		}
 		return r;
+	}
+
+	// A static function called or taken through one of its @:overload
+	// signatures: a copy of its field with that type and no body
+	// (typeload.ml's build_overloads), which a non-extern class implements
+	// with the function itself; an extern class's is a function of its own.
+	static function overloadImpl(c:TClass, cf:TClassField):TClassField {
+		if (cf.cfExpr != null || c.hasClassFlag(CExtern)) return cf;
+		var impl = c.clStatics.get(cf.cfName);
+		return impl != null && impl.cfExpr != null && impl.cfOverloads.indexOf(cf) >= 0 ? impl : cf;
+	}
+
+	// ---- default values
+
+	// A default value lowered outside of its function: calls pass those of
+	// numbers and Bools themselves (and of references they leave out), the
+	// forwarders of closures and dynamic calls fill them in. One reading the
+	// function's arguments or `this` (Haxe 5: `function f(a:Int, b:Int = a)`,
+	// `x:Int = this.y`) reads those of this call: `vars` are the function's
+	// argument variables (Lower.argVars; null: the receiver, `recv`, an
+	// instance of `cls`), `given` the values passed for those before argument
+	// `i` (`givenTys` their representations), locals or constants.
+	function defaultValue(d:TExpr, t:Ty, i:Int, vars:Null<Array<Null<TVar>>>, given:Array<Null<Ex>>, givenTys:Array<Null<Ty>>, recv:Null<() -> Ex>,
+			cls:Null<ClassInfo>):Ex {
+		if (vars == null || !readsFunction(d, vars)) return coerce(value(d), tyOf(d), t);
+		// (`this` there is the receiver: none outside a method)
+		var self = recv != null && cls != null ? recv() : null;
+		var saved = [];
+		for (k in 0...i) {
+			var v = k < vars.length ? vars[k] : null;
+			if (v == null) continue;
+			var lo = newLocal(v.vName, ty(v.vType));
+			out.push(SSet(lo, coerce(given[k], givenTys[k], lo.ty)));
+			saved.push({id: v.vId, lo: locals.get(v.vId), boxed: boxed.exists(v.vId)});
+			locals.set(v.vId, lo);
+			boxed.remove(v.vId);
+		}
+		var savedThis = thisLocal;
+		thisLocal = null;
+		if (self != null) {
+			thisLocal = newLocal("this", TRef(RObj(cls)));
+			out.push(SSet(thisLocal, ECast(thisLocal.ty, self)));
+		}
+		function restore() {
+			thisLocal = savedThis;
+			for (s in saved) {
+				if (s.lo != null) locals.set(s.id, s.lo) else locals.remove(s.id);
+				if (s.boxed) boxed.set(s.id, true);
+			}
+		}
+		var x = try coerce(value(d), tyOf(d), t) catch (e:Dynamic) {
+			restore();
+			throw e;
+		}
+		restore();
+		return x;
+	}
+
+	// a default value that is a constant (as every one was before Haxe 5)
+	static function constDefault(d:TExpr):Bool
+		return switch strip(d).eexpr {
+			case TConst(_): true;
+			case TUnop(_, _, e): constDefault(e);
+			case _: false;
+		}
+
+	// whether d reads the arguments `vars` or `this`
+	static function readsFunction(d:TExpr, vars:Array<Null<TVar>>):Bool {
+		var found = false;
+		function loop(e:TExpr) {
+			if (found) return;
+			switch e.eexpr {
+				case TConst(TThis | TSuper):
+					found = true;
+				case TLocal(v):
+					for (w in vars)
+						if (w != null && w.vId == v.vId) found = true;
+				case _:
+					core.Texpr.iter(loop, e);
+			}
+		}
+		loop(d);
+		return found;
 	}
 
 	static function tys(f:FuncInfo):Array<Ty>
@@ -1087,7 +1232,7 @@ class FnLower {
 				var obj = temp(TRef(RObj(ci)), ENewObj(ci));
 				if (k.clConstructor != null) {
 					var ctor = l.ctor(k);
-					var xs = args(cargs, tys(ctor), l.defaults.get(ctor), 1);
+					var xs = args(cargs, tys(ctor), l.defaults.get(ctor), 1, ctor, () -> obj);
 					out.push(SExpr(ECall(ctor, [obj].concat(xs))));
 				}
 				coerce(obj, TRef(RObj(ci)), tyOf(e));
@@ -1196,6 +1341,7 @@ class FnLower {
 						coerce(EField(ci, idx, value(obj)), ci.fields[idx].ty, tyOf(e));
 				}
 			case FStatic(c, cf):
+				var cf = overloadImpl(c, cf);
 				switch cf.cfKind {
 					case Var(_) if (c.hasClassFlag(CExtern)):
 						var t = ty(cf.cfType);
@@ -1303,10 +1449,10 @@ class FnLower {
 		}
 		var li:LambdaInfo;
 		if (l.needsDispatch(c, cf.cfName)) {
-			var d = dispatchSig(c, cf);
+			var d = dispatchType(c, cf);
 			var impl = l.lookupMethod(c, cf.cfName);
 			var f = impl != null ? l.method(impl.cls, impl.field) : null;
-			li = l.boundClosure(f, {sel: l.selector(cf.cfName, d), sig: d, cls: c}, fi);
+			li = l.boundClosure(f, {sel: l.selector(cf.cfName, d.sig), sig: d.sig, args: d.args, cls: c}, fi);
 		} else {
 			var impl = l.lookupMethod(c, cf.cfName);
 			if (impl == null) fail("no implementation of " + cf.cfName, e);
@@ -1322,7 +1468,10 @@ class FnLower {
 	// receiver (`to` with it).
 	function overrideDefaults(c:TClass, name:String, o:Ex, xs:Array<Ex>, given:Int, to:Array<Ty>, ds:Null<Array<Null<TExpr>>>) {
 		for (i in given + 1...to.length) {
-			var x = receiverDefault(c, name, o, i, ds != null && i < ds.length ? ds[i] : null, to[i], xs[i - 1]);
+			var all:Array<Null<Ex>> = [o].concat(xs);
+			var x = receiverDefault(c, name, o, i, ds != null && i < ds.length ? ds[i] : null, to[i], xs[i - 1], all, to);
+			for (k in 1...all.length)
+				xs[k - 1] = all[k];
 			if (x != null) xs[i - 1] = x;
 		}
 	}
@@ -1332,7 +1481,7 @@ class FnLower {
 	// disagree with `base` (that of the method c finds), else null: a number or
 	// a Bool is `x` (base's value) changed by a test of the receiver's class for
 	// each implementation, each after its superclass's; a reference is null.
-	function receiverDefault(c:TClass, name:String, o:Ex, i:Int, base:Null<TExpr>, t:Ty, x:Ex):Null<Ex> {
+	function receiverDefault(c:TClass, name:String, o:Ex, i:Int, base:Null<TExpr>, t:Ty, x:Ex, given:Array<Null<Ex>>, givenTys:Array<Null<Ty>>):Null<Ex> {
 		inline function defaultOf(f:TClassField):Null<TExpr> {
 			var tf = switch f.cfExpr.eexpr { case TFunction(tf): tf; case _: null; };
 			return tf != null && i - 1 < tf.tfArgs.length ? tf.tfArgs[i - 1].defaultValue : null;
@@ -1345,11 +1494,26 @@ class FnLower {
 		// (a reference: null, which the callee replaces with its own default)
 		if (t != TI32 && t != TF64 && t != TBool) return nullOf(t);
 		var r = newLocal("d", t);
+		inline function varsOf(f:TClassField):Null<Array<Null<TVar>>>
+			return switch f.cfExpr.eexpr {
+				case TFunction(tf): [null].concat([for (a in tf.tfArgs) a.variable]);
+				case _: null;
+			};
+		// (the arguments as locals, for defaults reading them: defaultValue)
+		var reads = false;
+		for (k in impls) {
+			var d = defaultOf(k.field), vars = varsOf(k.field);
+			if (d != null && vars != null && !constDefault(d) && readsFunction(d, vars)) reads = true;
+		}
+		if (reads)
+			for (k in 1...i)
+				if (k < given.length && !isConst(given[k]) && !given[k].match(ELocal(_))) given[k] = ELocal(asLocal(given[k], givenTys[k]));
 		out.push(SSet(r, x));
 		for (k in impls) {
 			var d = defaultOf(k.field);
+			var vars = varsOf(k.field);
 			var test = ECallHost(l.native("hx_is"), [coerce(o, TRef(RObj(l.rootClass())), TRef(RAny)), EType(TRClass(l.classInfo(k.cls)))], TBool);
-			out.push(SIf(test, block(() -> out.push(SSet(r, d != null ? coerce(value(d), tyOf(d), t) : nullOf(t)))), []));
+			out.push(SIf(test, block(() -> out.push(SSet(r, d != null ? defaultValue(d, t, i, vars, given, givenTys, () -> o, l.classInfo(k.cls)) : nullOf(t)))), []));
 		}
 		return ELocal(r);
 	}
@@ -1365,20 +1529,25 @@ class FnLower {
 		}
 	}
 
-	// the selector signature of a method: its root declaration's
-	function dispatchSig(c:TClass, cf:TClassField):SigInfo {
+	// the selector signature of a method (its root declaration's), and the
+	// types of its arguments and result there: the signature keeps references
+	// as Dynamic, but an implementation takes a closure argument as a closure
+	// of the declared type (Lower.method), so a call converts to these
+	function dispatchType(c:TClass, cf:TClassField):{sig:SigInfo, args:Array<Ty>, ret:Ty} {
 		var decl = l.rootDecl(c, cf.cfName);
 		var impl = l.lookupMethod(c, cf.cfName);
+		var args:Array<Ty>, ret:Ty;
 		if (impl != null) {
 			var f = l.method(impl.cls, impl.field);
-			return l.getProgram().sig([for (a in f.args) a.ty], f.ret);
-		}
-		return switch Lower.followFun((decl != null ? decl : cf).cfType) {
+			args = [for (a in f.args) a.ty];
+			ret = f.ret;
+		} else switch Lower.followFun((decl != null ? decl : cf).cfType) {
 			case TFun(s):
-				var rt = ty(s.ret);
-				l.getProgram().sig([TRef(RObj(l.rootClass()))].concat([for (a in s.args) ty(a.type)]).concat(rt.match(TStruct(_)) ? [TI64] : []), rt);
-			case _: fail("method type");
+				ret = ty(s.ret);
+				args = [TRef(RObj(l.rootClass()))].concat([for (a in s.args) ty(a.type)]).concat(ret.match(TStruct(_)) ? [TI64] : []);
+			case _: return fail("method type");
 		}
+		return {sig: l.getProgram().sig(args, ret), args: args, ret: ret};
 	}
 
 	// ---- operators
@@ -1393,7 +1562,10 @@ class FnLower {
 				var eq = structEq(a, b, structOf(a.etype), e);
 				return op == OpEq ? eq : ENot(eq);
 			case OpAssignOp(op2):
-				return assign(a, null, e, (cur, curTy) -> arith(op2, cur, curTy, () -> {x: value(b), t: tyOf(b)}, tyOf(a), e));
+				// (the result in the representation of what a holds, curTy, as
+				// assign stores it: a Dynamic array's element typed Float, a
+				// generic field read as Int are references there)
+				return assign(a, null, e, (cur, curTy) -> arith(op2, cur, curTy, () -> {x: value(b), t: tyOf(b)}, curTy, e));
 			case OpBoolAnd | OpBoolOr:
 				var lo = newLocal("c", TBool);
 				out.push(SSet(lo, cond(a)));
@@ -1675,9 +1847,10 @@ class FnLower {
 				if (flag == Prefix) assign(e1, null, e, (cur, t) -> arith(bop, cur, t, one, t, e)) else {
 					var t1 = tyOf(e1);
 					var old = newLocal("old", t1);
+					// (the target may hold another representation, t: a generic field read as Int)
 					assign(e1, null, e, (cur, t) -> {
-						out.push(SSet(old, cur));
-						arith(bop, ELocal(old), t, one, t, e);
+						out.push(SSet(old, coerce(cur, t, t1)));
+						arith(bop, ELocal(old), t1, one, t, e);
 					});
 					coerce(ELocal(old), t1, tyOf(e));
 				}
@@ -1703,8 +1876,24 @@ class FnLower {
 	function call(f:TExpr, cargs:Array<TExpr>, e:TExpr):Ex {
 		var rt = tyOf(e);
 		switch strip(f).eexpr {
+			case TField(o, FStatic(c, cf)) if (overloadImpl(c, cf) != cf):
+				// (its arguments and result converted from the overload's types)
+				f = {eexpr: TField(o, FStatic(c, overloadImpl(c, cf))), etype: f.etype, epos: f.epos};
+			case _:
+		}
+		switch strip(f).eexpr {
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);
+			case TIdent("__resources__") if (cargs.length == 0):
+				// haxe.Resource's content: an object per resource with its name
+				// and its data in base64 (Lower.resources), as genjs writes it
+				var sh = l.getProgram().shape([{name: "name", ty: TRef(RStr)}, {name: "data", ty: TRef(RStr)}]);
+				var objs:Array<Ex> = [
+					for (r in Lower.resources)
+						temp(TRef(RAnon), ENewAnon(sh, [for (f in sh.fields) EStr(f.name == "name" ? r.name : r.data)]))
+				];
+				var at = TRef(RArr(TRef(RAnon)));
+				return coerce(temp(at, ENewArr(TRef(RAnon), objs)), at, rt);
 			case TField(_, FStatic(c, cf)) if (c.hasClassFlag(CExtern) || cf.cfExpr == null):
 				var s = switch TFunctions.follow(cf.cfType) {
 					case TFun(s): s;
@@ -1742,13 +1931,13 @@ class FnLower {
 				return callClos(s, ELocal(cl), xs, rt);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
-				var xs = args(cargs, callTys(fn), l.defaults.get(fn));
+				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 0, fn);
 				return callFn(fn, xs, rt);
 			case TField({eexpr: TConst(TSuper)}, FInstance(c, _, cf)):
 				var impl = l.lookupMethod(c, cf.cfName);
 				if (impl == null) fail("super." + cf.cfName + " without implementation", e);
 				var fn = l.method(impl.cls, impl.field);
-				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1);
+				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1, fn, () -> ELocal(thisLocal));
 				return callFn(fn, [(ELocal(thisLocal) : Ex)].concat(xs), rt);
 			case TConst(TSuper):
 				var sup = l.superOf(self);
@@ -1756,7 +1945,7 @@ class FnLower {
 					sup = sup.clSuper.cls;
 				if (sup == null || sup.clConstructor == null) return EInt(0);
 				var fn = l.ctor(sup);
-				var xs = args(cargs, tys(fn), l.defaults.get(fn), 1);
+				var xs = args(cargs, tys(fn), l.defaults.get(fn), 1, fn, () -> ELocal(thisLocal));
 				out.push(SExpr(ECall(fn, [(ELocal(thisLocal) : Ex)].concat(xs))));
 				return EInt(0);
 			case TField(obj, FInstance(c, _, cf)) if (Lower.isCore(c, "Array") && cf.cfName == "push"):
@@ -1794,15 +1983,17 @@ class FnLower {
 					case Method(_):
 				}
 				if (l.needsDispatch(c, cf.cfName)) {
-					var sig = dispatchSig(c, cf);
+					var d = dispatchType(c, cf);
+					var sig = d.sig;
 					var decl = l.rootDecl(c, cf.cfName);
 					var impl = l.lookupMethod(c, cf.cfName);
-					var ds = impl != null ? l.defaults.get(l.method(impl.cls, impl.field)) : null;
+					var implFn = impl != null ? l.method(impl.cls, impl.field) : null;
+					var ds = implFn != null ? l.defaults.get(implFn) : null;
 					var rootTy = TRef(RObj(l.rootClass()));
 					var o = coerce(value(obj), tyOf(obj), rootTy);
 					var before = out.length;
-					var to = sig.ret.match(TStruct(_)) ? sig.args.slice(0, sig.args.length - 1) : sig.args;
-					var xs = args(cargs, to, ds, 1);
+					var to = sig.ret.match(TStruct(_)) ? d.args.slice(0, d.args.length - 1) : d.args;
+					var xs = args(cargs, to, ds, 1, implFn, () -> o = receiverLocal(o, rootTy, before));
 					o = spillBefore(o, rootTy, before);
 					if (cargs.length + 1 < to.length && !o.match(ELocal(_))) o = ELocal(asLocal(o, rootTy)); // (the defaults may test it)
 					overrideDefaults(c, cf.cfName, o, xs, cargs.length, to, ds);
@@ -1812,14 +2003,14 @@ class FnLower {
 						out.push(SExpr(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs).concat([ELocal(s)]))));
 						return coerce(ELocal(s), sig.ret, rt);
 					}
-					return coerceRhs(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs)), sig.ret, rt);
+					return coerceRhs(ECallDispatch(l.selector(cf.cfName, sig), sig, [o].concat(xs)), d.ret, rt);
 				}
 				var impl = l.lookupMethod(c, cf.cfName);
 				if (impl == null) fail("no implementation of " + cf.cfName, e);
 				var fn = l.method(impl.cls, impl.field);
 				var o = value(obj);
 				var before = out.length;
-				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1);
+				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 1, fn, () -> o = receiverLocal(o, tyOf(obj), before));
 				return callFn(fn, [spillBefore(o, tyOf(obj), before)].concat(xs), rt);
 			case TField(_, FEnum(en, ef)):
 				var ci = l.ctorInfo(ef, en);
@@ -2260,7 +2451,7 @@ class FnLower {
 			return s;
 		}
 		var ctor = l.structCtor(c);
-		var xs = args(cargs, tys(ctor), l.defaults.get(ctor), 1);
+		var xs = args(cargs, tys(ctor), l.defaults.get(ctor), 1, ctor);
 		zeroStruct(ELocal(s), c);
 		out.push(SExpr(ECall(ctor, [(ELocal(s) : Ex)].concat(xs))));
 		return s;

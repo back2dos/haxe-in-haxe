@@ -50,7 +50,7 @@ editors, lix and rebuilding the compiler from source:
 | `-D hxmc.libc=glibc` | Linux: link dynamically against the system's glibc (2.17+) instead of static musl, so shared libraries can be imported (`@:hxmc.lib("libGL.so.1")`) or loaded at run time |
 | `--custom-target hxmc=app.apk` | Android: an APK with the program as its `NativeActivity` (`-D hxmc.android-package=<id>`, ...: [docs/hxmc.md](docs/hxmc.md#android)); a `.so` output: the shared library alone |
 | `--custom-target hxmc=App.app` | iOS: an app bundle, ad hoc signed (`.ipa`: zipped; `-D hxmc.ios-bundle-id=<id>`, ...: [docs/hxmc.md](docs/hxmc.md#ios)) |
-| `-D hxmc.shared` | a shared library (Linux in the glibc mode; Android's always is one), exporting `-D hxmc.exports=<names>` |
+| `-D hxmc.shared` | a shared library (Linux in the glibc mode; a dylib on macOS and iOS; Android's always is one), exporting `-D hxmc.exports=<names>` |
 | `-debug`, `-D hxmc.symbols` | a symbol table for profilers (wasm: a name section) |
 | `-D hxmc.jobs=<n>` | parallel module compilations (default: the cores) |
 | `-D hxmc.wasm-eh=legacy` | wasm: legacy exception handling, for older browsers and runtimes |

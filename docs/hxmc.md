@@ -351,6 +351,7 @@ adb logcat -s hxmc        # what the app prints (stdout and stderr)
 | `-D hxmc.android-label=<text>` | the launcher's label (the output's name) |
 | `-D hxmc.android-version=<n>`, `-D hxmc.android-version-name=<text>` | `versionCode` (1), `versionName` (1.0) |
 | `-D hxmc.android-min-sdk=<n>`, `-D hxmc.android-target-sdk=<n>` | 29 (the floor: ELF TLS), 35 |
+| `-D hxmc.android-permissions=<names>` | `uses-permission`s (`INTERNET`: `android.permission.INTERNET`; a name with a dot as it is); none by default |
 | `-D hxmc.android-key=<file>`, `HXMC_ANDROID_KEY` | the debug key's file (default `<cache>/android/debug-key`, made on first use) |
 | `-D hxmc.exports=<names>` | what the library exports besides `ANativeActivity_onCreate` |
 

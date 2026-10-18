@@ -57,18 +57,30 @@ class LowerCache {
 	var target = -1; // the target the bodies were lowered for (they fold its tests)
 	var platform = -1; // (and its Apple platform: Mem.platform)
 	var lines = false; // and whether they have their positions (Lower.lines)
+	var wasmGc = false; // (and the runtime's implementations they call: Lower.wasmGc)
+	var resources:Array<{name:String, data:String}> = []; // (and haxe.Resource's content: Lower.resources)
+
+	static function sameResources(a:Array<{name:String, data:String}>, b:Array<{name:String, data:String}>):Bool {
+		if (a.length != b.length) return false;
+		for (i in 0...a.length)
+			if (a[i].name != b[i].name || a[i].data != b[i].data) return false;
+		return true;
+	}
 
 	public function lower(main:TClass, types:Array<ModuleType>, basic:BasicTypes):Program {
 		hits = misses = keyed = 0;
 		why = null;
 		build++;
-		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines) {
+		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines || Lower.wasmGc != wasmGc
+			|| !sameResources(Lower.resources, resources)) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
 			byKey = new Map();
 			target = Lower.targetCode;
 			platform = Lower.targetPlatform;
 			lines = Lower.lines;
+			wasmGc = Lower.wasmGc;
+			resources = Lower.resources;
 		}
 		var l = new CachedLower(this, true, types);
 		var prog = try Lower.program(main, types, basic, l) catch (m:Mismatch) {
@@ -115,6 +127,7 @@ class Entry {
 	public var tests:Null<haxe.ds.ObjectMap<{}, Ex>> = null; // per catch with a test: the test applied to MARK
 	public var gen = 0; // the build that recorded it: its global and selector numbers are that build's
 	public var processed = 0; // its module's compilation step then (0: unknown)
+	public var bound = false; // its body as bindHosts made it (its calls of the runtime's Haxe functions in the log)
 
 	public function new(tf, fi) {
 		this.tf = tf;
@@ -138,8 +151,9 @@ enum LCall {
 	CStaticClos(f:FuncInfo, r:LambdaInfo);
 	CHostClos(name:String, sig:SigInfo, self:Null<Ty>, r:LambdaInfo);
 	CCtorClos(ci:CtorInfo, sig:SigInfo, r:LambdaInfo);
-	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
+	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
 	CAdapter(from:SigInfo, to:SigInfo, r:LambdaInfo);
+	CDynAdapter(to:SigInfo, r:LambdaInfo);
 	CLambda(sig:SigInfo, captures:Array<Local>, name:String, module:String, r:LambdaInfo);
 	CSelector(name:String, sig:SigInfo, r:Int);
 	CNeedsDispatch(c:TClass, name:String, r:Bool);
@@ -277,6 +291,7 @@ class CachedLower extends Lower {
 			if (old != null && tf != null && (byKey || old.tf == tf)) {
 				translating = byKey;
 				replay(fi, old);
+				if (old.bound) replayed.set(fi, true);
 				translating = false;
 				newEntries.set(key, old);
 				if (skey != null) newByKey.set(skey, old);
@@ -295,6 +310,7 @@ class CachedLower extends Lower {
 		if (old != null) {
 			translating = staleLambdas.exists(fi);
 			replay(fi, old);
+			if (old.bound) replayed.set(fi, true);
 			translating = false;
 			newLambdas.set(old.fi, old);
 			hits++;
@@ -307,6 +323,7 @@ class CachedLower extends Lower {
 	function recordBody(fi:FuncInfo, tf:Null<TFunc>, run:() -> Void):Entry {
 		var e = new Entry(tf, fi);
 		e.gen = cache.build;
+		recorded.set(fi, e);
 		cur = e;
 		run();
 		cur = null;
@@ -327,6 +344,45 @@ class CachedLower extends Lower {
 		ident = false;
 		fi.locals = e.locals.copy();
 		return e;
+	}
+
+	// the functions just replayed from a bound body (bindHosts has nothing to
+	// do), and the entry of each just recorded: what bindHosts then calls is
+	// logged with it and its body is kept as bindHosts makes it, so that a
+	// replay needs no bindHosts (a walk and a copy of every body each build)
+	var replayed = new haxe.ds.ObjectMap<FuncInfo, Bool>();
+	var recorded = new haxe.ds.ObjectMap<FuncInfo, Entry>();
+
+	override function bindHosts(fi:FuncInfo) {
+		if (replayed.exists(fi)) {
+			replayed.remove(fi);
+			return;
+		}
+		var e = recorded.get(fi);
+		if (e == null) {
+			super.bindHosts(fi);
+			return;
+		}
+		recorded.remove(fi);
+		depth = 0;
+		cur = e;
+		super.bindHosts(fi);
+		cur = null;
+		e.body = fi.body;
+		e.bound = true;
+		// (the catches' tests as bound: bindHosts called them once already, so
+		// the runtime's functions they name are there, and calling them again
+		// does nothing more)
+		e.tests = null;
+		if (e.hasTry)
+			walkTries(e.body, c -> if (c.test != null) {
+				if (e.tests == null) e.tests = new haxe.ds.ObjectMap();
+				e.tests.set(c, c.test(ELocal(MARK)));
+			});
+		ident = true;
+		tests = e.tests;
+		fi.body = stmts(e.body);
+		ident = false;
 	}
 
 	function replay(fi:FuncInfo, old:Entry) {
@@ -468,7 +524,7 @@ class CachedLower extends Lower {
 		return r;
 	}
 
-	override public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo):LambdaInfo {
+	override public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>, owner:FuncInfo):LambdaInfo {
 		depth++;
 		var r = super.boundClosure(f, dispatch, owner);
 		depth--;
@@ -481,6 +537,17 @@ class CachedLower extends Lower {
 		var r = super.adapter(from, to);
 		depth--;
 		log(CAdapter(from, to, r));
+		return r;
+	}
+
+	// (one per signature in the program, as adapter: a replayed body asks
+	// the lowering for it again, rather than making a closure of its own
+	// that the next body asking for the same signature would make twice)
+	override public function dynAdapter(to:SigInfo):LambdaInfo {
+		depth++;
+		var r = super.dynAdapter(to);
+		depth--;
+		log(CDynAdapter(to, r));
 		return r;
 	}
 
@@ -590,9 +657,11 @@ class CachedLower extends Lower {
 			case CCtorClos(ci, s, r):
 				bindLambda(r, ctorClosure(obj(ci), obj(s)));
 			case CBoundClos(f, d, owner, r):
-				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), cls: d.cls == null ? null : tc(d.cls)}, obj(owner)));
+				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), args: [for (t in d.args) mapTy(t)], cls: d.cls == null ? null : tc(d.cls)}, obj(owner)));
 			case CAdapter(from, to, r):
 				bindLambda(r, adapter(obj(from), obj(to)));
+			case CDynAdapter(to, r):
+				bindLambda(r, dynAdapter(obj(to)));
 			case CLambda(s, caps, name, module, r):
 				var body = cache.lambdaEntry(r.fn);
 				if (body == null) mismatch("closure " + name + " without its body");
@@ -623,10 +692,11 @@ class CachedLower extends Lower {
 				if (superOf(obj(ci)) != (r == null ? null : tc(r))) mismatch("superclass changed");
 			case CRoot(r):
 				bindClass(r, rootClass());
+			// (bound already: the program has it, found again by the same key, with no effect)
 			case CSig(args, ret, r):
-				bindSig(r, prog.sig([for (a in args) mapTy(a)], mapTy(ret)));
+				if (!map.exists(r)) bindSig(r, prog.sig([for (a in args) mapTy(a)], mapTy(ret)));
 			case CShape(fields, r):
-				bindShape(r, prog.shape([for (f in fields) {name: f.name, ty: mapTy(f.ty)}]));
+				if (!map.exists(r)) bindShape(r, prog.shape([for (f in fields) {name: f.name, ty: mapTy(f.ty)}]));
 		}
 	}
 

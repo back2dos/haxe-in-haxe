@@ -673,8 +673,9 @@ jobs:
             make gfx-programs ui-programs 3d-programs GFX_TARGET=$t
             cp bin/3d/$t/RenderTest.exe bin/gfx/$t/
             make audio-programs AUDIO_TARGET=$t
+            make devhost-programs GFX_TARGET=$t
             cp bin/audio/$t/AudioTest.exe bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/ui/$t/EmojiTest.exe bin/ui/$t/WindowTest.exe bin/gfx/$t/
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe WindowTest.exe RenderTest.exe
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe WindowTest.exe RenderTest.exe dev
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -726,7 +727,9 @@ jobs:
   # then AndroidTest.apk on an x86-64 emulator with KVM (android.sh: the cube
   # headless against cube.png, frames in the window, input (a drag held on
   # the cube, a fling), Home and back, Back; the screenshot and logcat as an
-  # artifact; android-touch.sh: a fling in a drawn scroll box). Not a required check yet
+  # artifact; android-touch.sh: a fling in a drawn scroll box; dev-android.mjs:
+  # hxmc dev on the Counter, two edits swapped into the same process, the count
+  # kept: docs/dev.md, "No reloads"). Not a required check yet
   # (continue-on-error): emulators on hosted runners are slow to boot and
   # sometimes flaky.
   android:
@@ -772,6 +775,7 @@ jobs:
             sh packages/ui/test/android-native.sh bin/android/android-x86_64/AndroidNativeTest.apk bin/android/android-x86_64
             sh packages/ui/test/android-mix.sh bin/android/android-x86_64/AndroidMixTest.apk bin/android/android-x86_64/AndroidTextTest.apk bin/android/android-x86_64
             sh packages/os/test/android-touch.sh bin/android/android-x86_64/AndroidTouchTest.apk bin/android/android-x86_64
+            ulimit -s unlimited 2>/dev/null || true; DEV_ANDROID_LOG=bin/android/android-x86_64/dev-logcat.txt node packages/os/test/dev/dev-android.mjs bin/hxmc/hxmc bin/dev/android android-x86_64
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -838,6 +842,9 @@ jobs:
           mkdir -p bin && tar xzf dl/ios.tar.gz -C bin
           xcodebuild -version
           sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
+      - name: hxmc dev's host on an iPhone simulator (two builds swapped into the running app)
+        if: ${{ !cancelled() }}
+        run: sh packages/gfx/test/ios-dev.sh bin/ios/ios-sim-arm64 bin/ios/ios-sim-arm64
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -890,6 +897,9 @@ jobs:
           gfx/WindowTest.exe
           # (packages/3d's frames on WARP)
           sh packages/3d/test/check.sh gfx
+      - name: hxmc dev's host (two builds swapped into the running process, docs/dev.md)
+        if: ${{ !cancelled() }}
+        run: HXMC_GFX_SOFTWARE=1 sh packages/gfx/test/host-dev.sh gfx/dev dll host.exe
       - name: audio (WASAPI)
         run: sh packages/os/test/audio.sh gfx
       - uses: actions/upload-artifact@v7
@@ -958,6 +968,15 @@ jobs:
           # (hxmc.ui.native on AppKit's controls)
           npx haxe -lib hxmc.ui -cp "$u/test" -cp "$u/examples" -main NativeTest --custom-target hxmc=gfx/NativeTest
           gfx/NativeTest gfx/native-macos.png
+      - name: hxmc dev's host (two builds swapped into the running process, docs/dev.md)
+        if: ${{ !cancelled() }}
+        run: |
+          set -ex
+          cd "$RUNNER_TEMP/app"
+          g="$GITHUB_WORKSPACE/repo/packages/gfx"
+          npx haxe -lib hxmc.os -main hxmc.dev.DevHost --custom-target hxmc=dev/host
+          for v in 1 2 3; do npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main DevHostTest -D hxmc.dev -D hxmc.dev-host -D hxmc.shared -D hxmc.exports=hxmc_dev_run,hxmc_dev_state -D devhost_version=$v --custom-target hxmc=dev/DevHost$v.dylib; done
+          sh "$g/test/host-dev.sh" dev dylib host
       - name: audio (CoreAudio)
         run: |
           set -ex
