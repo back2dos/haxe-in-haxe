@@ -571,8 +571,8 @@ its index in the exported `__indirect_function_table` (corpus case
 ### WasmGC (-D hxmc.wasm-gc, an experiment)
 
 With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the IR after Lower
-becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): objects live in the
-engine's collector, with no linear memory, shadow stack or barriers. What is
+becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): Haxe's values live
+in the engine's collector, with no shadow stack or barriers. What is
 emitted is what the reachability above keeps (method-level, by name), run
 twice: before and after each function's body goes through `IrOpt`, so a
 function inlined everywhere is dropped (the runtime's exports are live
@@ -604,13 +604,36 @@ generated code does inline), whose `@:hxmc.wasmgc` classes and the
 `@:hxmc.anyHeap` ones are the only ones whose `@:hxmc.host` functions are
 bound; Math's transcendental functions, float
 formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
-runs a module under node). `@:hxmc.lib` externs taking and returning
-numbers are the module's imports (`HXMC_WASM_IMPORTS`, as `wasi.mjs` takes
-them); pointers are not, there being no linear memory. A runtime function
+runs a module under node; `packages/os/browser.mjs` gives the same host in
+a browser).
+
+A program that uses `hxmc.unsafe` or C functions gets a small linear
+memory besides (a hybrid module, `GcModule.memory`): `Mem`'s loads and
+stores, `Ptr`, frame areas (`Mem.stack`, a struct's slot: a stack pointer
+global, each frame given back on return and where an exception is
+caught), C string literals in a data segment, malloc's heap
+(`hxmc.rt.wasm.Heap`, `@:hxmc.anyHeap`), `Arena` and `CString` work on
+it as in linear memory. It is exported as `memory`, with the
+`@:hxmc.callback` functions in `__indirect_function_table`, so the
+packages' imports (`imports.mjs`) and `browser.mjs` treat the module as
+a linear one: `@:hxmc.lib` externs are imports with wasm32's C ABI
+(pointers as i32 into that memory, floats as f32). A Bytes stays an array
+of the collector; where it crosses to C, `hxmc.unsafe.BytesPtr` copies
+it through the linear memory (in linear memory: its own address, no
+copy); strings cross as UTF-8 through it (`Repr.utf8To`,
+`Repr.octetsAt`). A `@:hxmc.struct` class whose fields are all final is
+an object here (a value that cannot change needs no copies); the others
+live in the linear memory. Statements after one that always leaves, and
+the branch an if on a constant does not take, are dropped before
+emission (`IrOpt.live`: what follows `if (Mem.os() == 3) {...; return;}`
+is another target's, as Mir drops it). The name section is written with
+`-debug`, `-D hxmc.symbols` or `HXMC_SYMBOLS=1`, as linear memory's.
+`make gfx-web-check` and `ui-web-check` run their browser tests on such
+builds too. A runtime function
 not covered yet fails the build with its name; `HXMC_GC_SURVEY=1` lists
 every such construct of a program instead (`=2` also writes the module,
 those functions trapping). `make wasmgc-check` compares `hxmc/test/wasmgc`'s
-programs with their native output; `make wasmgc-bench` adds the
+programs with their native output (`Unsafe.hx`: the linear memory); `make wasmgc-bench` adds the
 linear-memory build: times, peak RSS, sizes.
 
 ## Origin

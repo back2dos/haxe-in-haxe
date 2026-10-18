@@ -177,6 +177,22 @@ class GcRepr {
 		return b;
 	}
 
+	static var lent = hxmc.unsafe.Ptr.nil();
+	static var lentCap = 0;
+
+	// b's bytes [pos, pos + n) copied into a buffer of the linear memory kept
+	// for this (hxmc.unsafe.BytesPtr.of), its address
+	public static function lend(b:haxe.io.Bytes, pos:Int, n:Int):hxmc.unsafe.Ptr {
+		if (pos < 0 || n < 0 || pos + n > W.bytesLen(b)) throw "OutsideBounds";
+		if (n > lentCap) {
+			if (!lent.isNull()) hxmc.unsafe.LibC.free(lent);
+			lentCap = n < 4096 ? 4096 : n;
+			lent = hxmc.unsafe.LibC.malloc(lentCap);
+		}
+		W.bytesToMem(lent, b, pos, n);
+		return lent;
+	}
+
 	public static inline function utf8To(s:String, p:hxmc.unsafe.Ptr):Int {
 		var b = scratch(3 * W.strLen(s) + 1);
 		var n = hxmc.rt.Str.utf8Into(s, b);

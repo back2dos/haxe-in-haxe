@@ -103,7 +103,65 @@ class GcNative {
 		return x;
 	}
 
+	// an Array's or a String's field by name (structural and Dynamic access:
+	// Iterable<T>'s iterator(), length): its methods as closures bound to it
+	static function builtin(o:Dynamic, name:String):Dynamic {
+		if (W.kind(o) == 4) {
+			var s:String = o;
+			return switch name {
+				case "length": s.length;
+				case "charAt": s.charAt;
+				case "charCodeAt": s.charCodeAt;
+				case "indexOf": s.indexOf;
+				case "lastIndexOf": s.lastIndexOf;
+				case "substr": s.substr;
+				case "substring": s.substring;
+				case "toLowerCase": s.toLowerCase;
+				case "toUpperCase": s.toUpperCase;
+				case "toString": s.toString;
+				case "split": s.split;
+				case _: null;
+			}
+		}
+		var a:Array<Dynamic> = o;
+		return switch name {
+			case "length": a.length;
+			case "iterator": a.iterator;
+			case "keyValueIterator": a.keyValueIterator;
+			case "join": a.join;
+			case "push": (x:Dynamic) -> a.push(x);
+			case "pop": a.pop;
+			case "shift": a.shift;
+			case "copy": a.copy;
+			case "concat": a.concat;
+			case "indexOf": a.indexOf;
+			case "lastIndexOf": a.lastIndexOf;
+			case "contains": a.contains;
+			case "remove": a.remove;
+			case "insert": a.insert;
+			case "unshift": a.unshift;
+			case "reverse": a.reverse;
+			case "slice": a.slice;
+			case "splice": a.splice;
+			case "toString": a.toString;
+			case "sort": a.sort;
+			case "filter": a.filter;
+			case "map": a.map;
+			case "resize": a.resize;
+			case _: null;
+		}
+	}
+
+	// (the iterators of an Array taken as values: linear memory's are the runtime's hx_array_iterator)
+	@:hxmc.host("Array_iterator") static function arrayIterator(a:Array<Dynamic>):Dynamic
+		return new haxe.iterators.ArrayIterator(a);
+
+	@:hxmc.host("Array_keyValueIterator") static function arrayKeyValueIterator(a:Array<Dynamic>):Dynamic
+		return new haxe.iterators.ArrayKeyValueIterator(a);
+
 	public static function getField(o:Dynamic, name:String):Dynamic {
+		var k = W.kind(o);
+		if (k == 4 || k == 7) return builtin(o, name);
 		var names:Array<String> = W.fieldNames(o);
 		if (names != null) {
 			var i = find(names, name);

@@ -71,9 +71,31 @@ class GcModule {
 
 	public final meta:Meta;
 
-	public function new(prog:Program, uses:Uses) {
+	// ---- linear memory: what hxmc.unsafe works on (Mem, Ptr, malloc's heap,
+	// C strings) and the imports that take pointers read, made when the
+	// program uses any of it (Uses.memory). From 1024: the frame areas
+	// (Mem.stack, a struct's slot) from STACK_TOP down, the static data (C
+	// string literals), then the heap (hxmc.rt.wasm.Heap, from __heap_base)
+	public var memory(default, null) = false;
+	public var spGlobal(default, null) = -1; // the frame areas' top (i32)
+	public var heapGlobal(default, null) = -1; // __heap_base (i32)
+	final heapInit = new Buf();
+	final memData = new Buf();
+	final cstrAt = new Map<String, Int>();
+	// the @:hxmc.callback functions, the table the host calls them through (from 1, as linear memory's)
+	final callbacks:Array<Int> = [];
+	final callbackSlot = new Map<Int, Int>();
+
+	public static inline var STACK_TOP = 1024 + 256 * 1024;
+
+	// the name section (functions' names: stack traces, profiles), as linear
+	// memory's: with -debug, -D hxmc.symbols or HXMC_SYMBOLS=1
+	final names:Bool;
+
+	public function new(prog:Program, uses:Uses, names:Bool) {
 		this.prog = prog;
 		this.uses = uses;
+		this.names = names;
 		meta = new Meta(this);
 	}
 
@@ -125,6 +147,7 @@ class GcModule {
 			case "f": b.u8(Enc.F64);
 			case "l": b.u8(Enc.I64);
 			case "p": b.u8(EQREF);
+			case "F": b.u8(0x7D); // (f32: an import's float)
 			case _: throw "valType " + r;
 		}
 
@@ -350,6 +373,19 @@ class GcModule {
 
 	public function build():haxe.io.Bytes {
 		buildTypes();
+		if (uses.memory) {
+			memory = true;
+			var tb = new Buf();
+			tb.u8(Enc.I32);
+			var ib = new Buf();
+			ib.u8(0x41);
+			Enc.sleb(ib, STACK_TOP);
+			ib.u8(0x0B);
+			spGlobal = newGlobal(tb, ib, true);
+			var hb = new Buf();
+			hb.u8(Enc.I32);
+			heapGlobal = newGlobal(hb, heapInit, false);
+		}
 		// imports first: their indices come before the module's functions
 		importFunc("hxmc", "write", "ip_v");
 		importFunc("hxmc", "now", "_f");
@@ -448,14 +484,18 @@ class GcModule {
 	public function importOf(name:String):Int
 		return importIndex.get(name);
 
-	// an import's signature by representation, when its C types are numbers (no pointers: no linear memory)
+	// an import's signature by representation (wasm32's C ABI, as linear
+	// memory's: pointers into the linear memory as i32, floats as f32, structs
+	// by CAbi.wasmSig), or null
 	static function foreignKey(sym:String):Null<String> {
 		var lib = hxmc.ir.CInterop.LIBS.get(sym), sig = hxmc.ir.CInterop.SIGS.get(sym);
 		if (lib == null || sig == null) return null;
+		sig = hxmc.CAbi.wasmSig(sig);
 		function r(t:hxmc.ir.CInterop.CTy):Null<String>
 			return switch t {
-				case CBool | CI8 | CU8 | CI16 | CU16 | CI32: "i";
+				case CBool | CI8 | CU8 | CI16 | CU16 | CI32 | CPtr: "i";
 				case CI64: "l";
+				case CF32: "F";
 				case CF64: "f";
 				case CVoid: "v";
 				case _: null;
@@ -597,6 +637,38 @@ class GcModule {
 		}
 
 	// ======== what FuncGen asks
+
+	// the address of a C string literal's UTF-8 bytes and NUL, in the static data
+	public function cstr(s:String):Int {
+		var a = cstrAt.get(s);
+		if (a != null) return a;
+		a = STACK_TOP + memData.len;
+		var bs = haxe.io.Bytes.ofString(s);
+		memData.bytes(bs);
+		memData.u8(0);
+		cstrAt.set(s, a);
+		return a;
+	}
+
+	// the address the host calls a @:hxmc.callback through: its slot in the exported table
+	public function callbackOf(f:FuncInfo):Int {
+		var i = funcOf(f);
+		var s = callbackSlot.get(i);
+		if (s != null) return s;
+		callbacks.push(i);
+		callbackSlot.set(i, callbacks.length);
+		return callbacks.length;
+	}
+
+	// the function exported under the symbol (a callback's), or null
+	public function symbolFunc(sym:String):Null<FuncInfo> {
+		for (f in funcs)
+			if (f.cSymbol == sym) return f;
+		return null;
+	}
+
+	public function callbackType(key:String):Int
+		return funcType(key);
 
 	// the runtime's function exported under the symbol (@:hxmc.export), which the reachability kept
 	public function exportOf(sym:String):Int {
@@ -1097,11 +1169,28 @@ class GcModule {
 		var ncls = clsList.length;
 		var size = ncls * nsel;
 		var tb = new Buf();
-		tb.u8(1);
+		tb.u8(memory ? 2 : 1);
 		tb.u8(0x70);
 		tb.u8(0);
 		Enc.uleb(tb, size);
+		if (memory) {
+			// (the callbacks')
+			tb.u8(0x70);
+			tb.u8(0);
+			Enc.uleb(tb, callbacks.length + 1);
+		}
 		section(4, tb);
+		if (memory) {
+			var heapBase = (STACK_TOP + memData.len + 15) & ~15;
+			heapInit.u8(0x41);
+			Enc.sleb(heapInit, heapBase);
+			heapInit.u8(0x0B);
+			var ms = new Buf();
+			ms.u8(1);
+			ms.u8(0);
+			Enc.uleb(ms, (heapBase + 65535) >> 16);
+			section(5, ms);
+		}
 		// the exception tag
 		var tg = new Buf();
 		tg.u8(1);
@@ -1119,11 +1208,20 @@ class GcModule {
 		section(6, gs);
 		// exports
 		var es = new Buf();
-		Enc.uleb(es, exports.length);
+		Enc.uleb(es, exports.length + (memory ? 2 : 0));
 		for (e in exports) {
 			Enc.name(es, e.name);
 			es.u8(0);
 			Enc.uleb(es, e.func);
+		}
+		if (memory) {
+			// (as linear memory's: the host's packages read and write it, call the callbacks)
+			Enc.name(es, "memory");
+			es.u8(2);
+			es.u8(0);
+			Enc.name(es, "__indirect_function_table");
+			es.u8(1);
+			es.u8(1);
 		}
 		section(7, es);
 		// elements: the dispatch table, then the functions taken by ref.func
@@ -1150,6 +1248,18 @@ class GcModule {
 					seg.u8(0x0B);
 				}
 		}
+		if (callbacks.length > 0) {
+			segs++;
+			seg.u8(2);
+			seg.u8(1);
+			seg.u8(0x41);
+			seg.u8(1);
+			seg.u8(0x0B);
+			seg.u8(0);
+			Enc.uleb(seg, callbacks.length);
+			for (i in callbacks)
+				Enc.uleb(seg, i);
+		}
 		var decl = [for (k in declared.keys()) k];
 		if (decl.length > 0) {
 			segs++;
@@ -1163,9 +1273,11 @@ class GcModule {
 		Enc.uleb(el, segs);
 		el.buf(seg);
 		section(9, el);
-		if (dataSegs.length > 0) {
+		// (the static data last: the passive segments' indices stay)
+		var nseg = dataSegs.length + (memData.len > 0 ? 1 : 0);
+		if (nseg > 0) {
 			var dc = new Buf();
-			Enc.uleb(dc, dataSegs.length);
+			Enc.uleb(dc, nseg);
 			section(12, dc);
 		}
 		// code
@@ -1189,19 +1301,28 @@ class GcModule {
 		}
 		section(10, cs);
 		// the long literals' characters (passive segments)
-		if (dataSegs.length > 0) {
+		if (nseg > 0) {
 			var ds = new Buf();
-			Enc.uleb(ds, dataSegs.length);
+			Enc.uleb(ds, nseg);
 			for (d in dataSegs) {
 				ds.u8(1);
 				Enc.uleb(ds, d.length);
 				ds.bytes(d);
 			}
+			if (memData.len > 0) {
+				ds.u8(0);
+				ds.u8(0x41);
+				Enc.sleb(ds, STACK_TOP);
+				ds.u8(0x0B);
+				Enc.uleb(ds, memData.len);
+				ds.buf(memData);
+			}
 			section(11, ds);
 		}
+		if (!names) return out.toBytes();
 		// the functions' names (stack traces, profiles)
-		var names = new Buf();
-		Enc.name(names, "name");
+		var ns = new Buf();
+		Enc.name(ns, "name");
 		var fn = new Buf();
 		Enc.uleb(fn, imports.length + funcs.length + helpers.length);
 		for (i in 0...imports.length) {
@@ -1216,9 +1337,9 @@ class GcModule {
 			Enc.uleb(fn, imports.length + funcs.length + i);
 			Enc.name(fn, "hxmc." + helpers[i].name);
 		}
-		names.u8(1);
-		Enc.sized(names, fn);
-		section(0, names);
+		ns.u8(1);
+		Enc.sized(ns, fn);
+		section(0, ns);
 		return out.toBytes();
 	}
 }

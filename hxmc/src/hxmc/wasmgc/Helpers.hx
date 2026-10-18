@@ -855,4 +855,73 @@ class Helpers {
 		}
 		return m.addHelper(name, wide ? "pil_v" : "pii_v", b, []);
 	}
+
+	// n bytes of the linear memory at p (local 2) into Bytes b (local 0) at pos (local 1)
+	public static function memToBytes(m:GcModule):Int {
+		var h = m.hasHelper("mem_to_bytes");
+		if (h != null) return h;
+		var b = new Buf();
+		copyLoop(m, b, false);
+		return m.addHelper("mem_to_bytes", "pili_v", b, [Enc.I32]);
+	}
+
+	// n bytes of Bytes b (local 1) at pos (local 2) into the linear memory at p (local 0)
+	public static function bytesToMem(m:GcModule):Int {
+		var h = m.hasHelper("bytes_to_mem");
+		if (h != null) return h;
+		var b = new Buf();
+		copyLoop(m, b, true);
+		return m.addHelper("bytes_to_mem", "lpii_v", b, [Enc.I32]);
+	}
+
+	// (a byte a step: local 4 the index)
+	static function copyLoop(m:GcModule, b:Buf, toMem:Bool) {
+		var bytes = toMem ? 1 : 0, pos = toMem ? 2 : 1, ptr = toMem ? 0 : 2;
+		b.u8(0x02);
+		b.u8(0x40);
+		b.u8(0x03);
+		b.u8(0x40);
+		get(b, 4);
+		get(b, 3);
+		b.u8(0x4E); // i32.ge_s: done
+		b.u8(0x0D);
+		b.u8(1);
+		if (toMem) {
+			get(b, ptr);
+			b.u8(0xA7);
+			get(b, 4);
+			b.u8(0x6A);
+			get(b, bytes);
+			m.castTo(b, m.bytesType);
+			get(b, pos);
+			get(b, 4);
+			b.u8(0x6A);
+			m.gc(b, 0x0D, m.bytesType);
+			b.u8(0x3A);
+			b.u8(0);
+			b.u8(0);
+		} else {
+			get(b, bytes);
+			m.castTo(b, m.bytesType);
+			get(b, pos);
+			get(b, 4);
+			b.u8(0x6A);
+			get(b, ptr);
+			b.u8(0xA7);
+			get(b, 4);
+			b.u8(0x6A);
+			b.u8(0x2D);
+			b.u8(0);
+			b.u8(0);
+			m.gc(b, 0x0E, m.bytesType);
+		}
+		get(b, 4);
+		i32(b, 1);
+		b.u8(0x6A);
+		set(b, 4);
+		b.u8(0x0C);
+		b.u8(0);
+		b.u8(0x0B);
+		b.u8(0x0B);
+	}
 }

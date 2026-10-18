@@ -20,12 +20,12 @@ class GcGen {
 		u.scan();
 		var survey = Sys.getEnv("HXMC_GC_SURVEY");
 		if (survey != "1" && survey != "2") {
-			sys.io.File.saveBytes(out, new GcModule(prog, u).build());
+			sys.io.File.saveBytes(out, new GcModule(prog, u, !o.strip).build());
 			return;
 		}
 		u.report();
 		GcModule.survey = new Map();
-		var bytes = try new GcModule(prog, u).build() catch (e:Dynamic) {
+		var bytes = try new GcModule(prog, u, !o.strip).build() catch (e:Dynamic) {
 			GcModule.note(Std.string(e), "(the module)");
 			null;
 		}
@@ -62,12 +62,16 @@ class Uses {
 	public final lambdas = new Map<LambdaInfo, Bool>();
 	public final shapes = new Map<ShapeInfo, Bool>();
 	public final bodies = new Map<FuncInfo, {body:Array<Stmt>, locals:Array<Local>}>();
+	// the program works on linear memory (hxmc.unsafe, C functions: GcModule.memory)
+	public var memory = false;
 
 	public function new(prog:Program, optimize:Bool) {
 		this.prog = prog;
 		var opt = new IrOpt();
-		for (f in prog.funcs)
-			bodies.set(f, opt.run(f, optimize));
+		for (f in prog.funcs) {
+			var b = opt.run(f, optimize);
+			bodies.set(f, {body: IrOpt.live(b.body), locals: b.locals});
+		}
 	}
 
 	// (the functions the program keeps: what they use)
@@ -95,6 +99,8 @@ class Uses {
 			case ECallDispatch(sel, _, _): sels.set(sel, true);
 			case ECallHost(n, args, _):
 				hosts.set(n, (hosts.exists(n) ? hosts.get(n) : 0) + 1);
+				if (StringTools.startsWith(n, "hxmc_unsafe_Mem_") || n == "hxmc_rt_gc_W_memToBytes" || n == "hxmc_rt_gc_W_bytesToMem"
+					|| hxmc.ir.CInterop.SIGS.exists(n)) memory = true;
 				if (n == "Type_createEmptyInstance") switch args[0] {
 					case EType(TRClass(c)): cls(c);
 					case _:

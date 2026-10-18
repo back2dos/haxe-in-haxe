@@ -59,6 +59,38 @@ class IrOpt {
 		return {body: body, locals: locals};
 	}
 
+	// the statements that can run: an if on a constant (a target's test, Lower's
+	// fold) as its branch, nothing after a statement that always leaves (as
+	// Mir's dead code is dropped for linear memory: what follows
+	// `if (Mem.os() == 3) {...; return;}` is another target's)
+	public static function live(ss:Array<Stmt>):Array<Stmt> {
+		var out = [];
+		for (s in ss) {
+			switch s {
+				case SIf(EInt(c), a, b):
+					for (x in live(c != 0 ? a : b))
+						out.push(x);
+				case SIf(c, a, b): out.push(SIf(c, live(a), live(b)));
+				case SLoop(body): out.push(SLoop(live(body)));
+				case SSwitch(e, cases, def): out.push(SSwitch(e, [for (k in cases) {values: k.values, body: live(k.body)}], live(def)));
+				case STry(body, catches): out.push(STry(live(body), [for (c in catches) {test: c.test, l: c.l, body: live(c.body)}]));
+				case SCold(id, x):
+					var y = live([x]);
+					if (y.length == 1) out.push(SCold(id, y[0])) else for (z in y) out.push(z);
+				case _: out.push(s);
+			}
+			if (out.length > 0 && leaves(out[out.length - 1])) break;
+		}
+		return out;
+	}
+
+	static function leaves(s:Stmt):Bool
+		return switch s {
+			case SReturn(_) | SThrow(_) | SBreak | SContinue: true;
+			case SIf(_, a, b): a.length > 0 && b.length > 0 && leaves(a[a.length - 1]) && leaves(b[b.length - 1]);
+			case _: false;
+		}
+
 	public function fresh(name:String, t:Ty):Local {
 		var l = new Local(nextId++, name, t);
 		locals.push(l);

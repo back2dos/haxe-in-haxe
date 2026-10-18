@@ -129,7 +129,7 @@ class Reach {
 		for (f in p.funcs)
 			if (f.cSymbol != null) {
 				// (the runtime's, with RuntimeCalls: where live code needs them)
-				if (calls != null && StringTools.startsWith(f.module, "hxmc.")) bySymbol.set(f.cSymbol, f) else mark(f);
+				if (calls != null && StringTools.startsWith(f.module, "hxmc.rt.")) bySymbol.set(f.cSymbol, f) else mark(f);
 			}
 		for (c in p.classes)
 			for (name => m in c.methods)

@@ -98,7 +98,7 @@ class NativeSys {
 	// WebAssembly: the buffered standard output written out (elsewhere writes
 	// are not buffered)
 	public static inline function fileFlush(fd:Int):Void {
-		#if (hxmc.target == "wasm32-wasi") WasiSys.fileFlush(fd); #end
+		#if (hxmc.wasm_gc) #elseif (hxmc.target == "wasm32-wasi") WasiSys.fileFlush(fd); #end
 	}
 
 	public static inline function fileClose(fd:Int):Void {
