@@ -86,6 +86,9 @@ class Basics {
 		Sys.println(kind("pear") + " " + kind("carrot") + " " + kind("rock"));
 		// numbers
 		Sys.println(1.5 + " " + (1 / 3) + " " + 1e21 + " " + 0.000001 + " " + 1e-7 + " " + (-2.5) + " " + Math.sqrt(2) + " " + Std.int(3.99) + " " + Math.floor(-1.5) + " " + Math.round(2.5));
+		// (out of range: modulo 2^32, as the native targets)
+		var big = 4109205400.0, nan = Math.NaN;
+		Sys.println(Std.int(big) + " " + Std.int(-big) + " " + Math.round(big) + " " + Std.int(nan) + " " + Std.int(1e20) + " " + Std.int(-2147483648.5));
 		Sys.println((7 % 3) + " " + (-7 % 3) + " " + (1 << 31) + " " + (-16 >> 2) + " " + (-16 >>> 28) + " " + (5.5 % 2) + " " + Std.parseInt("42") + " " + Std.parseFloat("3.25"));
 		// arrays
 		var a = [3, 1, 2];

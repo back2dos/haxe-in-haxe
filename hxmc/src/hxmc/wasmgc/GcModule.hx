@@ -24,7 +24,7 @@ import hxmc.wasmgc.GcGen.Reach;
 // value (node 22 runs them without flags).
 class GcModule {
 	final prog:Program;
-	final reach:Reach;
+	public final reach:Reach;
 
 	// ---- types
 	final types:Array<Buf> = []; // each subtype's encoding, in index order
@@ -97,6 +97,15 @@ class GcModule {
 
 	static inline var EQREF = 0x6D;
 
+	// (HXMC_GC_SURVEY=1: what is not supported, by construct, the functions with it; GcGen)
+	public static var survey:Null<Map<String, Array<String>>>;
+
+	public static function note(what:String, where:String) {
+		var l = survey.get(what);
+		if (l == null) survey.set(what, l = []);
+		if (!l.contains(where)) l.push(where);
+	}
+
 	public static function repr(t:Ty):String
 		return switch t {
 			case TI32 | TBool: "i";
@@ -104,7 +113,10 @@ class GcModule {
 			case TI64: "l";
 			case TVoid: "v";
 			case TRef(_): "p";
-			case TStruct(n, _): throw 'hxmc: -D hxmc.wasm-gc: struct values ($n) are not supported';
+			case TStruct(n, _):
+				if (survey == null) throw 'hxmc: -D hxmc.wasm-gc: struct values ($n) are not supported';
+				note("struct values", n);
+				"l";
 		}
 
 	static function valType(b:Buf, r:String)
@@ -133,6 +145,7 @@ class GcModule {
 		var t = newType();
 		var b = types[t];
 		b.u8(open ? 0x50 : 0x4F);
+		if (sup >= 0) superOf.set(t, sup);
 		if (sup >= 0) {
 			b.u8(1);
 			Enc.uleb(b, sup);
@@ -202,24 +215,50 @@ class GcModule {
 		return t;
 	}
 
-	// a type the IR's type proves (a class's), else the representation (as FuncGen's locals)
+	// a type the IR's type proves (a class's, an array's, an enum's, a closure's),
+	// else the representation (as FuncGen's locals)
 	public function keyOf(t:Ty):String
 		return switch t {
 			case TRef(RObj(c)) if (!c.isInterface): "t" + classType(c);
 			case TRef(RStr): "t" + tString;
+			case TRef(RArr(_)): "t" + tArrBase;
+			case TRef(REnum(e)): "t" + (e == null ? tEnum : enumBase(e));
+			case TRef(RClos(s)): "t" + closType(s);
+			case TRef(RNative("haxe_io_Bytes")): "t" + tBytes;
 			case _: repr(t);
 		}
 
-	// called only directly (not a method in the dispatch table, a closure's body or
-	// an export): its signature is its own, its class-typed parameters and result typed
-	public function directOnly(f:FuncInfo):Bool
-		return f.lambda == null && f.selfClass == null && f.cSymbol == null;
+	// not a closure's body or an export: its signature is its own, its parameters
+	// (a method's this: its class) and result typed (keyOf); the dispatch table
+	// and structural calls reach a method through a wrapper of the table's
+	// signature (tableFunc)
+	public function precise(f:FuncInfo):Bool
+		return f.lambda == null && f.cSymbol == null;
 
 	public function paramKey(f:FuncInfo, i:Int):String
-		return directOnly(f) ? keyOf(f.args[i].ty) : repr(f.args[i].ty);
+		return !precise(f) ? repr(f.args[i].ty) : i == 0 && f.selfClass != null ? "t" + classType(f.selfClass) : keyOf(f.args[i].ty);
 
 	public function retKey(f:FuncInfo):String
-		return directOnly(f) ? keyOf(f.ret) : repr(f.ret);
+		return precise(f) ? keyOf(f.ret) : repr(f.ret);
+
+	// the function of f with the table's signature (by representation): f, or its wrapper
+	public function tableFunc(f:FuncInfo):Int {
+		var fi = funcOf(f);
+		if (!precise(f)) return fi;
+		var name = "table:" + fi;
+		var h = hasHelper(name);
+		if (h != null) return h;
+		var b = new Buf();
+		for (i in 0...f.args.length) {
+			b.u8(0x20);
+			Enc.uleb(b, i);
+			var k = paramKey(f, i);
+			if (k.charAt(0) == "t") castTo(b, Std.parseInt(k.substr(1)));
+		}
+		b.u8(0x10);
+		Enc.uleb(b, fi);
+		return addHelper(name, funcKey(f), b, []);
+	}
 
 	public static function sigKey(args:Array<Ty>, ret:Ty):String
 		return [for (a in args) repr(a)].join("") + "_" + repr(ret);
@@ -241,11 +280,13 @@ class GcModule {
 		tEnum = structType([{r: "i", mut: false}, {r: "i", mut: false}], -1, true);
 		tFunBase = structType([], -1, true);
 		// {added fields (GcFields), layout index}
-		tAnonBase = structType([{r: "p", mut: true}, {r: "i", mut: false}], -1, true);
+		tAnonBase = structType([{r: "p", mut: true}, {r: "i", mut: true}], -1, true);
 		for (k in ["i", "f", "l", "b"])
 			tDyn.set(k, structType([{r: k == "b" ? "i" : k, mut: false}], -1, false));
 		for (k in ["i", "f", "l", "p"])
 			tBox.set(k, structType([{r: k, mut: true}], -1, false));
+		for (e in prog.enums)
+			enumBase(e);
 		// classes in preorder: a superclass before its subclasses
 		var cs = [for (c in reach.classes.keys()) c];
 		cs.sort((a, b) -> a.id - b.id);
@@ -255,17 +296,31 @@ class GcModule {
 			clsList.push(c);
 			if (c.sup == null) tObj = tClass.get(c);
 		}
-		for (e in prog.enums) {
-			var te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, true);
-			tEnumOf.set(e, te);
-			for (c in e.ctors)
-				if (c.params.length > 0)
-					tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false));
-		}
 		for (l in reach.lambdas.keys())
 			lambdaType(l);
 		for (s in prog.shapes)
-			tShape.set(s, structType([{r: "p", mut: true}, {r: "i", mut: false}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
+			// (by representation: a layout is shared by the literals of its names and representations)
+			tShape.set(s, structType([{r: "p", mut: true}, {r: "i", mut: true}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
+	}
+
+	// an enum's type and its constructors' (made when first asked for: their
+	// arguments may be of other enums', or of their own)
+	function enumBase(e:EnumInfo):Int {
+		var te = tEnumOf.get(e);
+		if (te != null) return te;
+		te = structType([{r: "i", mut: false}, {r: "i", mut: false}], tEnum, Lambda.exists(e.ctors, c -> c.params.length > 0));
+		tEnumOf.set(e, te);
+		for (c in e.ctors)
+			if (c.params.length > 0)
+				tCtor.set(c, structType([{r: "i", mut: false}, {r: "i", mut: false}].concat([for (p in c.params) {r: repr(p), mut: false}]), te, false,
+					[null, null].concat([for (p in c.params) b -> fieldType(b, p)])));
+		return te;
+	}
+
+	// a field's value type: its type when keyOf proves one (a cast less where it is read)
+	function fieldType(b:Buf, t:Ty) {
+		var k = keyOf(t);
+		if (k.charAt(0) == "t") refType(b, Std.parseInt(k.substr(1))) else valType(b, repr(t));
 	}
 
 	function closType(s:SigInfo):Int {
@@ -285,7 +340,7 @@ class GcModule {
 		var base = closType(l.sig);
 		var ft = tFn.get(l.sig.key);
 		var fields = [{r: "p", mut: false}].concat([for (c in l.captures) {r: repr(c.ty), mut: false}]);
-		var ftys:Array<Buf->Void> = [b -> refType(b, ft, false)];
+		var ftys:Array<Buf->Void> = [b -> refType(b, ft, false)].concat([for (c in l.captures) b -> fieldType(b, c.ty)]);
 		t = structType(fields, base, false, ftys);
 		tLambda.set(l, t);
 		return t;
@@ -307,6 +362,13 @@ class GcModule {
 		importFunc("hxmc", "readFile", "p_p");
 		importFunc("hxmc", "writeFile", "ppi_i");
 		importFunc("hxmc", "dateNum", "ifiiiiii_f");
+		// the program's imports (@:hxmc.lib externs) that take and return numbers only
+		var foreign = [for (n in reach.hosts.keys()) n];
+		foreign.sort(Reflect.compare);
+		for (n in foreign) {
+			var key = foreignKey(n);
+			if (key != null) importFunc(hxmc.ir.CInterop.LIBS.get(n), n, key);
+		}
 		var tagType = funcType("p_v");
 		for (f in reach.funcs) {
 			funcIndex.set(f, imports.length + funcs.length);
@@ -318,7 +380,7 @@ class GcModule {
 			var g = prog.globals[i];
 			var r = repr(g.ty);
 			var tb = new Buf();
-			valType(tb, r);
+			fieldType(tb, g.ty);
 			var ib = new Buf();
 			if (g.init != null && g.init.params.length == 0) {
 				// an enum singleton: its constructor's tag
@@ -340,23 +402,41 @@ class GcModule {
 		var codes = [
 			for (f in funcs) {
 				if (trace) Sys.println("wasm-gc: " + f.name);
-				new FuncGen(this, f).emit();
+				if (survey == null) emitFunc(f) else try emitFunc(f) catch (e:Dynamic) {
+					var s = Std.string(e), at = s.indexOf(": ", s.indexOf(f.display != null ? f.display : f.name));
+					note(at < 0 ? s : s.substr(at + 2), f.display != null ? f.display : f.name);
+					var u = new Buf();
+					u.u8(0);
+					u.u8(0x00);
+					u.u8(0x0B);
+					u;
+				}
 			}
 		];
 		if (dynCallBody != null) writeDynCall();
+		// (the table's wrappers, before the module is written)
+		for (c in clsList)
+			for (s in reach.sels.keys()) {
+				var f = c.findMethod(prog.selectors[s].name);
+				if (f != null && funcIndex.exists(f)) tableFunc(f);
+			}
 		// the start: Meta's tables, the initializers, then main
 		var start = new Buf();
-		meta.fill(start);
-		for (f in prog.inits)
-			if (funcIndex.exists(f)) {
-				start.u8(0x10);
-				Enc.uleb(start, funcIndex.get(f));
-			}
-		start.u8(0x10);
-		Enc.uleb(start, funcIndex.get(prog.main));
 		var startIdx = addHelper("_start", "_v", start, []);
 		exports.push({name: "_start", func: startIdx});
 		strHelpers();
+		var run = new Buf();
+		meta.fill(run);
+		for (f in prog.inits)
+			if (funcIndex.exists(f)) {
+				run.u8(0x10);
+				Enc.uleb(run, funcIndex.get(f));
+			}
+		run.u8(0x10);
+		Enc.uleb(run, funcIndex.get(prog.main));
+		// (the long literals first: made when every one is known)
+		lateStrings(start);
+		start.buf(run);
 		return write(tagType, codes);
 	}
 
@@ -368,7 +448,44 @@ class GcModule {
 	public function importOf(name:String):Int
 		return importIndex.get(name);
 
-	// a function written here (its body without the final end), after the program's
+	// an import's signature by representation, when its C types are numbers (no pointers: no linear memory)
+	static function foreignKey(sym:String):Null<String> {
+		var lib = hxmc.ir.CInterop.LIBS.get(sym), sig = hxmc.ir.CInterop.SIGS.get(sym);
+		if (lib == null || sig == null) return null;
+		function r(t:hxmc.ir.CInterop.CTy):Null<String>
+			return switch t {
+				case CBool | CI8 | CU8 | CI16 | CU16 | CI32: "i";
+				case CI64: "l";
+				case CF64: "f";
+				case CVoid: "v";
+				case _: null;
+			}
+		var ps = "";
+		for (a in sig.args) {
+			var x = r(a);
+			if (x == null || x == "v") return null;
+			ps += x;
+		}
+		var ret = r(sig.ret);
+		return ret == null ? null : ps + "_" + ret;
+	}
+
+	// the import of a @:hxmc.lib extern (foreignKey), or null
+	public function foreignOf(sym:String):Null<Int> {
+		var lib = hxmc.ir.CInterop.LIBS.get(sym);
+		return lib == null ? null : importIndex.get(lib + "." + sym);
+	}
+
+	// a function's code: emitted again when locals can be given a type (FuncGen.refine)
+	function emitFunc(f:FuncInfo):Buf {
+		var g = new FuncGen(this, f);
+		var code = g.emit();
+		var r = g.refine();
+		return r == null ? code : new FuncGen(this, f, r).emit();
+	}
+
+	// a function written here (its body without the final end), after the program's;
+	// its locals' types (a value type's byte, or -1 - t: a (ref null t))
 	public function addHelper(name:String, key:String, body:Buf, locals:Array<Int>):Int {
 		var i = helperIndex.get(name);
 		if (i != null) return i;
@@ -498,11 +615,19 @@ class GcModule {
 	}
 
 	public function typeOfFunc(f:FuncInfo):Int
-		return directOnly(f) ? funcTypeTokens([for (i in 0...f.args.length) paramKey(f, i)], retKey(f)) : funcType(funcKey(f));
+		return precise(f) ? funcTypeTokens([for (i in 0...f.args.length) paramKey(f, i)], retKey(f)) : funcType(funcKey(f));
+
+	// the classes some class extends (the others' types are final: a cast to one compares the type alone)
+	var extended:Null<Map<ClassInfo, Bool>>;
 
 	// a class's type, made when first asked for (after its superclass's; its index
 	// taken before its fields are written: they may name classes that name it)
 	public function classType(c:ClassInfo):Int {
+		if (extended == null) {
+			extended = new Map();
+			for (k in prog.classes)
+				if (k.sup != null) extended.set(k.sup, true);
+		}
 		var t = tClass.get(c);
 		if (t != null) return t;
 		var sup = c.sup == null ? -1 : classType(c.sup);
@@ -510,9 +635,9 @@ class GcModule {
 		if (t != null) return t;
 		t = newType();
 		tClass.set(c, t);
-		classOfType.set(t, c);
+		if (sup >= 0) superOf.set(t, sup);
 		var b = types[t];
-		b.u8(0x50);
+		b.u8(extended.exists(c) ? 0x50 : 0x4F);
 		if (sup >= 0) {
 			b.u8(1);
 			Enc.uleb(b, sup);
@@ -520,7 +645,7 @@ class GcModule {
 		b.u8(0x5F);
 		Enc.uleb(b, c.fields.length + 1);
 		valType(b, "i");
-		b.u8(0);
+		b.u8(1);
 		for (f in c.fields) {
 			var k = keyOf(f.ty);
 			if (k.charAt(0) == "t") refType(b, Std.parseInt(k.substr(1))) else valType(b, repr(f.ty));
@@ -533,17 +658,14 @@ class GcModule {
 	public function fieldKey(c:ClassInfo, idx:Int):String
 		return keyOf(c.fields[idx].ty);
 
-	// whether type a is t or a subtype (classes: by their hierarchy)
-	final classOfType = new Map<Int, ClassInfo>();
+	// whether type a is t or a subtype (by the declared supertypes)
+	final superOf = new Map<Int, Int>();
 
 	public function isSubtype(a:Int, t:Int):Bool {
-		if (a == t) return true;
-		var ca = classOfType.get(a), ct = classOfType.get(t);
-		if (ca == null || ct == null) return false;
-		var k = ca;
+		var k:Null<Int> = a;
 		while (k != null) {
-			if (k == ct) return true;
-			k = k.sup;
+			if (k == t) return true;
+			k = superOf.get(k);
 		}
 		return false;
 	}
@@ -651,7 +773,7 @@ class GcModule {
 					constZero(b, "p");
 				case "p":
 				case _:
-					gc(b, 0x00, dynType(s.ret));
+					box(b, s.ret);
 			}
 			b.u8(0x0F);
 			b.u8(0x0B);
@@ -691,6 +813,34 @@ class GcModule {
 	public static function elemKind(t:Ty):String
 		return t == TBool ? "b" : repr(t);
 
+	// An object's first i32 (a class instance's class index, an anonymous
+	// structure's layout index) holds its identity hash in its top 16 bits,
+	// set when first asked for (Helpers.objHash), as the native header's.
+	// The index of the object on the stack (a class instance, or with anon an
+	// anonymous structure, cast):
+	public function indexOf(b:Buf, anon = false) {
+		gc(b, 0x02, anon ? tAnonBase : tObj, anon ? 1 : 0);
+		b.u8(0x41);
+		Enc.sleb(b, 0xFFFF);
+		b.u8(0x71);
+	}
+
+	// the scalar of type t on the stack boxed as Dynamic (Ints: Helpers.boxInt)
+	public function box(b:Buf, t:Ty)
+		switch t {
+			case TI32:
+				b.u8(0x10);
+				Enc.uleb(b, Helpers.boxInt(this));
+			case TBool | TF64 | TI64: gc(b, 0x00, dynType(t));
+			case _:
+		}
+
+	// a global of the type and constant initializer
+	public function newGlobal(type:Buf, init:Buf, mut:Bool):Int {
+		globals.push({type: type, init: init, mut: mut});
+		return globals.length - 1;
+	}
+
 	public function dynType(t:Ty):Int
 		return tDyn.get(t == TBool ? "b" : repr(t));
 
@@ -716,6 +866,16 @@ class GcModule {
 
 	public function globalOf(g:Int):Int
 		return progGlobal.get(g);
+
+	// the keys (keyOf) of a program global, an enum constructor's argument, a closure's capture
+	public function globalKey(g:Int):String
+		return keyOf(prog.globals[g].ty);
+
+	public function ctorParamKey(c:CtorInfo, idx:Int):String
+		return keyOf(c.params[idx]);
+
+	public function captureKey(l:LambdaInfo, idx:Int):String
+		return keyOf(l.captures[idx].ty);
 
 	public function selOf(sel:Int):Int
 		return selIndex.get(sel);
@@ -753,7 +913,7 @@ class GcModule {
 		var g = typeGlobal.get(key);
 		if (g != null) return g;
 		typeType();
-		var s = strLit(name);
+		var s = strLit(name, true);
 		var tb = new Buf();
 		refType(tb, tType, false);
 		var ib = new Buf();
@@ -771,10 +931,25 @@ class GcModule {
 		return g;
 	}
 
-	// a string literal: an immutable global made by array.new_fixed
-	public function strLit(s:String):Int {
+	// a string literal: a global made by array.new_fixed (immutable: constant,
+	// for other globals' initializers), or when long one _start makes from a
+	// data segment (lateStrings: 1 byte a character for Latin-1, else 2)
+	public function strLit(s:String, constant = false):Int {
 		var g = strGlobal.get(s);
-		if (g != null) return g;
+		if (g != null && (!constant || !lateStr.exists(g))) return g;
+		if (!constant && s.length >= LATE_STR) {
+			var tb = new Buf();
+			refType(tb, tString);
+			var ib = new Buf();
+			constZero(ib, "p");
+			ib.u8(0x0B);
+			g = globals.length;
+			globals.push({type: tb, init: ib, mut: true});
+			strGlobal.set(s, g);
+			lateStr.set(g, s);
+			lateOrder.push(g);
+			return g;
+		}
 		var tb = new Buf();
 		refType(tb, tString, false);
 		var ib = new Buf();
@@ -790,6 +965,89 @@ class GcModule {
 		globals.push({type: tb, init: ib, mut: false});
 		strGlobal.set(s, g);
 		return g;
+	}
+
+	static inline var LATE_STR = 24;
+	final lateStr = new Map<Int, String>();
+	final lateOrder:Array<Int> = [];
+	final dataSegs:Array<haxe.io.Bytes> = [];
+
+	// _start's code that makes the long literals (strLit) from their data segments
+	function lateStrings(b:Buf) {
+		var latin1 = -1;
+		for (g in lateOrder) {
+			var s = lateStr.get(g);
+			var narrow = true;
+			for (i in 0...s.length)
+				if (StringTools.fastCodeAt(s, i) > 255) narrow = false;
+			var d = haxe.io.Bytes.alloc(narrow ? s.length : 2 * s.length);
+			for (i in 0...s.length)
+				if (narrow) d.set(i, StringTools.fastCodeAt(s, i)) else d.setUInt16(2 * i, StringTools.fastCodeAt(s, i));
+			b.u8(0x41);
+			b.u8(0);
+			b.u8(0x41);
+			Enc.sleb(b, s.length);
+			gc(b, 0x09, narrow ? tBytes : tString, dataSegs.length);
+			dataSegs.push(d);
+			if (narrow) {
+				if (latin1 < 0) latin1 = latin1Helper();
+				b.u8(0x10);
+				Enc.uleb(b, latin1);
+				castTo(b, tString);
+			}
+			b.u8(0x24);
+			Enc.uleb(b, g);
+		}
+	}
+
+	// a string of the bytes (Latin-1)
+	function latin1Helper():Int {
+		var b = new Buf();
+		// (local 1: the string, local 2: the index)
+		b.u8(0x20);
+		b.u8(0);
+		castTo(b, tBytes);
+		gc(b, 0x0F);
+		gc(b, 0x07, tString);
+		b.u8(0x21);
+		b.u8(1);
+		b.u8(0x02);
+		b.u8(0x40);
+		b.u8(0x03);
+		b.u8(0x40);
+		b.u8(0x20);
+		b.u8(2);
+		b.u8(0x20);
+		b.u8(1);
+		gc(b, 0x0F);
+		b.u8(0x4E);
+		b.u8(0x0D);
+		b.u8(1);
+		b.u8(0x20);
+		b.u8(1);
+		b.u8(0x20);
+		b.u8(2);
+		b.u8(0x20);
+		b.u8(0);
+		castTo(b, tBytes);
+		b.u8(0x20);
+		b.u8(2);
+		gc(b, 0x0D, tBytes);
+		gc(b, 0x0E, tString);
+		b.u8(0x20);
+		b.u8(2);
+		b.u8(0x41);
+		b.u8(1);
+		b.u8(0x6A);
+		b.u8(0x21);
+		b.u8(2);
+		b.u8(0x0C);
+		b.u8(0);
+		b.u8(0x0B);
+		b.u8(0x0B);
+		b.u8(0x20);
+		b.u8(1);
+		return addHelper("str_latin1", "p_p", b, [-1 - tString, Enc.I32]);
 	}
 
 	// the reached selectors in the order of their table columns
@@ -884,7 +1142,7 @@ class GcModule {
 					var m = c.findMethod(prog.selectors[s].name);
 					if (m != null && funcIndex.exists(m)) {
 						seg.u8(0xD2);
-						Enc.uleb(seg, funcIndex.get(m));
+						Enc.uleb(seg, tableFunc(m));
 					} else {
 						seg.u8(0xD0);
 						seg.u8(0x70);
@@ -905,6 +1163,11 @@ class GcModule {
 		Enc.uleb(el, segs);
 		el.buf(seg);
 		section(9, el);
+		if (dataSegs.length > 0) {
+			var dc = new Buf();
+			Enc.uleb(dc, dataSegs.length);
+			section(12, dc);
+		}
 		// code
 		var cs = new Buf();
 		Enc.uleb(cs, codes.length + helpers.length);
@@ -915,13 +1178,27 @@ class GcModule {
 			Enc.uleb(body, h.locals.length);
 			for (l in h.locals) {
 				body.u8(1);
-				body.u8(l);
+				if (l >= 0) body.u8(l) else {
+					body.u8(0x63);
+					Enc.sleb(body, -l - 1);
+				}
 			}
 			body.buf(h.body);
 			body.u8(0x0B);
 			Enc.sized(cs, body);
 		}
 		section(10, cs);
+		// the long literals' characters (passive segments)
+		if (dataSegs.length > 0) {
+			var ds = new Buf();
+			Enc.uleb(ds, dataSegs.length);
+			for (d in dataSegs) {
+				ds.u8(1);
+				Enc.uleb(ds, d.length);
+				ds.bytes(d);
+			}
+			section(11, ds);
+		}
 		// the functions' names (stack traces, profiles)
 		var names = new Buf();
 		Enc.name(names, "name");

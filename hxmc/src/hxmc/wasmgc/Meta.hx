@@ -101,13 +101,14 @@ class Meta {
 	}
 
 	function box(b:Buf, t:Ty)
-		switch t {
-			case TI32: m.gc(b, 0x00, m.dynType(TI32));
-			case TBool: m.gc(b, 0x00, m.dynType(TBool));
-			case TF64: m.gc(b, 0x00, m.dynType(TF64));
-			case TI64: m.gc(b, 0x00, m.dynType(TI64));
-			case _:
-		}
+		m.box(b, t);
+
+	// a Dynamic on the stack as a t: unboxed, or cast to its type (keyOf)
+	function unboxAs(b:Buf, t:Ty) {
+		unbox(b, t);
+		var k = m.keyOf(t);
+		if (k.charAt(0) == "t") m.castTo(b, Std.parseInt(k.substr(1)));
+	}
 
 	function unbox(b:Buf, t:Ty)
 		if (GcModule.repr(t) != "p") {
@@ -119,7 +120,7 @@ class Meta {
 	function clsOf(b:Buf) {
 		get(b, 0);
 		m.castTo(b, m.objType);
-		m.gc(b, 0x02, m.objType, 0);
+		m.indexOf(b);
 	}
 
 	static function storable(t:Ty):Bool
@@ -168,7 +169,7 @@ class Meta {
 			b.u8(0x40);
 			get(b, 0);
 			m.castTo(b, m.anonBaseType);
-			m.gc(b, 0x02, m.anonBaseType, 1);
+			m.indexOf(b, true);
 			b.u8(0x0F);
 			b.u8(0x0B);
 			i32(b, -1);
@@ -403,7 +404,7 @@ class Meta {
 		if (h != null) return h;
 		need();
 		var b = new Buf();
-		var idx = m.addHelper("meta_enum_eq", "pp_i", b, [Enc.I32, Enc.I32]);
+		var idx = m.addHelper("meta_enum_eq", "pp_i", b, [Enc.I32, Enc.I32, -1 - m.enumType, -1 - m.enumType]);
 		var dynEq = m.exportOf("gc_dyn_eq");
 		get(b, 0);
 		get(b, 1);
@@ -413,25 +414,27 @@ class Meta {
 		i32(b, 1);
 		b.u8(0x0F);
 		b.u8(0x0B);
+		// (both enums, as such in locals 4 and 5; else not equal)
+		b.u8(0x02);
+		b.u8(0x6D);
 		for (x in 0...2) {
 			get(b, x);
-			test(b, m.enumType);
-			b.u8(0x45);
-			b.u8(0x04);
-			b.u8(0x40);
-			i32(b, 0);
-			b.u8(0x0F);
-			b.u8(0x0B);
+			b.u8(0xFB);
+			b.u8(0x19);
+			b.u8(1);
+			b.u8(0);
+			b.u8(0x6D);
+			Enc.sleb(b, m.enumType);
+			b.u8(0x21);
+			b.u8(4 + x);
 		}
 		// (the same enum, local 2; the same constructor, local 3)
 		for (f in 0...2) {
-			get(b, 0);
-			m.castTo(b, m.enumType);
+			get(b, 4);
 			m.gc(b, 0x02, m.enumType, f);
 			b.u8(0x22);
 			b.u8(3 - f);
-			get(b, 1);
-			m.castTo(b, m.enumType);
+			get(b, 5);
 			m.gc(b, 0x02, m.enumType, f);
 			b.u8(0x47);
 			b.u8(0x04);
@@ -480,6 +483,10 @@ class Meta {
 			});
 		});
 		i32(b, 1);
+		b.u8(0x0F);
+		b.u8(0x0B);
+		b.u8(0x1A);
+		i32(b, 0);
 		return idx;
 	}
 
@@ -550,7 +557,7 @@ class Meta {
 							i32(b, k);
 							b.u8(0x10);
 							Enc.uleb(b, arrGet);
-							unbox(b, c.params[k]);
+							unboxAs(b, c.params[k]);
 						}
 						m.gc(b, 0x00, m.ctorType(c));
 					}

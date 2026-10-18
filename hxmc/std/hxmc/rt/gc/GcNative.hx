@@ -83,8 +83,11 @@ class GcNative {
 
 	// ---- fields (a class instance's or an anonymous structure's, then those added: GcFields)
 
-	// the index of the name among the names (strings compared directly), -1
+	// the index of the name among the names, -1: by reference first (the
+	// program's names are its literals, one string each), then by content
 	public static function find(names:Array<String>, name:String):Int {
+		for (i in 0...names.length)
+			if (W.same(names[i], name)) return i;
 		for (i in 0...names.length)
 			if (names[i] == name) return i;
 		return -1;
@@ -165,10 +168,10 @@ class GcNative {
 	public static function compare(a:Dynamic, b:Dynamic):Int
 		return @:privateAccess GcDyn.cmp(a, b);
 
-	// (WasmGC objects have no address to hash: one bucket, ObjectMap then compares
-	// by reference; correct, linear in the map's size)
+	// (WasmGC objects have no address: class instances and anonymous structures
+	// get a hash, stored in them, the first time; other values 0)
 	public static function objHash(o:Dynamic):Int
-		return 0;
+		return W.objHash(o);
 
 	// ---- Dynamic access (o.name on a Dynamic)
 

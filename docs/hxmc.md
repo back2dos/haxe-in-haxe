@@ -563,20 +563,35 @@ its index in the exported `__indirect_function_table` (corpus case
 With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the IR after Lower
 becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): objects live in the
 engine's collector, with no linear memory, shadow stack or barriers. What main and the
-initializers reach is emitted (`GcGen.Reach`); every reference is an `eqref`,
-cast to its concrete type where it is used; all types are in one recursion
+initializers reach is emitted (`GcGen.Reach`), each function's body first
+through `IrOpt`: inlining where it lets scalar replacement turn objects
+that never escape into locals (the IR's counterpart of Mir's `Inline` and
+`Sroa`, which this path never reaches; V8 inlines small functions of a
+WasmGC module itself). A reference has the wasm type its IR type proves
+(classes, strings, arrays, enums, closures, Bytes: `GcModule.keyOf`), else
+`eqref` cast where it is used; a local that is only ever cast to one type
+gets it (`FuncGen.refine`, a second emission). All types are in one recursion
 group, so the class hierarchy is wasm's subtyping (`instanceof` is
-`ref.test`); virtual and interface calls go through a funcref table indexed by
-class and selector; closures are structs whose first field is a typed
-function reference (`call_ref`); exceptions are the legacy try/catch
-instructions. The runtime is `hxmc/std/hxmc/rt/gc`: Haxe over intrinsics
-(`hxmc.rt.gc.W`, expanded by `FuncGen.host`), its `@:hxmc.wasmgc` classes the
-only ones whose `@:hxmc.host` functions are bound; Math's transcendental
-functions, float formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
-runs a module under node). A runtime function not covered yet fails the
-build with its name. `make wasmgc-check` compares `hxmc/test/wasmgc`'s programs
-with their native output; `make wasmgc-bench` adds the linear-memory build:
-times, peak RSS, sizes.
+`ref.test`; leaf classes are final types); methods have their own typed
+signatures, virtual and interface calls go through a funcref table indexed
+by class and selector holding wrappers of the table's signature; closures
+are structs whose first field is a typed function reference (`call_ref`);
+array accesses and structural field accesses test the expected kind or
+layouts inline before falling back to the runtime; Ints of -128...1023 are
+boxed once; literals of 24 characters and more come from passive data
+segments; exceptions are the legacy try/catch instructions. The runtime is
+`hxmc/std/hxmc/rt/gc`: Haxe over intrinsics (`hxmc.rt.gc.W`, expanded by
+`FuncGen.host`), its `@:hxmc.wasmgc` classes the only ones whose
+`@:hxmc.host` functions are bound; Math's transcendental functions, float
+formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
+runs a module under node). `@:hxmc.lib` externs taking and returning
+numbers are the module's imports (`HXMC_WASM_IMPORTS`, as `wasi.mjs` takes
+them); pointers are not, there being no linear memory. A runtime function
+not covered yet fails the build with its name; `HXMC_GC_SURVEY=1` lists
+every such construct of a program instead (`=2` also writes the module,
+those functions trapping). `make wasmgc-check` compares `hxmc/test/wasmgc`'s
+programs with their native output; `make wasmgc-bench` adds the
+linear-memory build: times, peak RSS, sizes.
 
 ## Origin
 
