@@ -164,10 +164,14 @@ The same host and handover as Linux's, with what each system keeps:
   reads the Mac's files, so the dev server can name the dylib's path
   directly. Checked in CI (ios-simulator: `ios-dev.sh`,
   `DevHostTest.app` and two later builds as dylibs: the count kept, the
-  same process and view). `hxmc dev` does not drive the simulator yet (an
-  `.app` output is built as before); `HXMC_DEV_NEXT` (libraries handed
-  over to in turn, a second after the first frame) is how the test drives
-  it without a dev server.
+  same process and view; `HXMC_DEV_NEXT`, libraries handed over to in
+  turn a second after the first frame, is how the test drives it without a
+  dev server). `hxmc dev` with an `.app` output for `ios-sim-arm64`
+  installs and launches the app on the booted simulator (`xcrun simctl`,
+  its output in `<out>.dev/stdout.txt`), then builds each change as a
+  dylib (`-D hxmc.shared -D hxmc.output=<out>.dev/next.dylib`, renamed
+  `<n>.dylib`) and names it in the reload message (not yet run in CI: the
+  simulator job has no compiler).
 - **iOS, a device: not possible with a dylib.** What was found (no device
   was tried here): Apple's DTS answer to exactly this question (a dylib
   signed with the developer's identity, sent to a development-signed app
@@ -467,10 +471,8 @@ a fresh build of the same sources, byte for byte
 ## Not yet
 
 - Seamless swaps on Windows (step 3): the process restarts (the window
-  closes and opens again); it needs DLLs from hxmc. `hxmc dev` does not
-  drive the iOS simulator yet (its host is built and tested), and an iOS
-  device cannot load a new build's code (above): the wasm fallback is not
-  built.
+  closes and opens again); it needs DLLs from hxmc. An iOS device cannot
+  load a new build's code (above): the wasm fallback is not built.
 - Styles and assets without a rebuild (step 4).
 - The UI engine's own state (focus, scroll and selection by node key) is
   the UI session's part of step 2; ui's widgets' own signals are keyed
