@@ -682,7 +682,7 @@ theme-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run CssTest
 
 # (the theme's CSS on Eval, the DOM's widgets compiled to JavaScript by the port, in Chromium)
-DOM_CP := -cp packages/view/src -cp packages/web/src -cp packages/ui/src -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
+DOM_CP := -cp packages/view/src -cp packages/web/src -cp packages/text/src -cp packages/ui/src -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
 theme-dom-check: $(TOOL) $(PORT_BIN)
 	@mkdir -p bin/theme/dom
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/theme/dom/shadcn.css
