@@ -156,7 +156,10 @@ collections and promote less of what they are working on (the tool's
 parallel code generation: 256 MB). Threads take at most 64 KB of it at a time
 (their TLAB, zeroed while it fits in the cache; `RT_TLAB_KB`), in fresh
 pages up to a 2 MB boundary, so that no two threads fault in the same
-transparent huge page. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
+transparent huge page. On Linux, once the old space passes 64 MB, a helper
+thread faults in its pages ahead of the minor collections, which would
+otherwise wait for the kernel to zero each fresh page they copy into
+(`RT_PREFAULT=0`: no helper). `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 
@@ -379,7 +382,7 @@ no threads, sockets or processes). mbedtls 2.28 and libuv 1.48
 use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 `HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
 `HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `HXMC_FRAME_POINTERS=0`,
-`RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_STATS`, `RT_VERIFY`,
+`RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_PREFAULT`, `RT_STATS`, `RT_VERIFY`,
 `RT_STACK_MB` (wasm32: the shadow stack; WebAssembly, Memory).
 
 ## Android

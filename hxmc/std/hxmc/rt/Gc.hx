@@ -787,6 +787,7 @@ class Gc {
 
 	@:hxmc.noGc static function majorCollect(need:I64) {
 		majors++;
+		if (pfState > 0) prefaultCancel();
 		fromStart = oldStart;
 		fromEnd = oldPtr;
 		curRegion ^= 1;
@@ -938,6 +939,95 @@ class Gc {
 		m.value.hw = m.value.sp;
 	}
 
+	// ---- the old space's pages, faulted in ahead of the minor collections
+	// by a helper thread (Linux; RT_PREFAULT=0: none). A page a collection
+	// copies into for the first time costs it a fault and the kernel's
+	// zeroing of the page (the port's self-build: a tenth of the time of
+	// its main thread's minor collections). After each minor collection the
+	// helper is asked for the pages up to as much past the end of the old
+	// space as the collection promoted (PF_MIN to PF_MAX); it touches each
+	// page with an atomic addition of zero, which leaves a word the
+	// collector or an allocation of a large object writes meanwhile as it
+	// is. It starts once the old space passes PF_START (small programs never
+	// start it), and a major collection drops what is left of its requests
+	// (pfGen). It never runs Haxe code: it is no mutator, collections do
+	// not wait for it.
+	static inline var PF_START = 64 << 20;
+	static inline var PF_MIN = 4 << 20;
+	static inline var PF_MAX = 16 << 20;
+	static inline var PF_STEP = 256 << 10;
+	static var pfState:Int; // 0: not started, 1: started, -1: none
+	static var pfLock:Ptr;
+	static var pfCond:Ptr;
+	static var pfFrom:Ptr; // the pages to touch: [pfFrom, pfTo) (under pfLock)
+	static var pfTo:Ptr;
+	@:hxmc.export("hxmc_pf_gen") static var pfGen:Int; // major collections (Atomic)
+
+	// after a minor collection that promoted `promoted` bytes
+	@:hxmc.noGc static function prefaultAhead(promoted:I64) {
+		if (pfState == 0) {
+			if (oldPtr.diff(oldStart) < (PF_START : I64)) return;
+			if (Mem.os() != 0) {
+				pfState = -1;
+				return;
+			}
+			pfLock = LibC.malloc(Os.MUTEX_BYTES);
+			Os.mutexInit(pfLock);
+			pfCond = LibC.malloc(Os.COND_BYTES);
+			Os.condInit(pfCond, false);
+			pfFrom = oldPtr;
+			pfTo = oldPtr;
+			if (!Os.spawn(Callback.addr(prefaulter), Ptr.nil(), 256 << 10)) {
+				pfState = -1;
+				return;
+			}
+			pfState = 1;
+		}
+		var ahead = promoted < (PF_MIN : I64) ? (PF_MIN : I64) : promoted > (PF_MAX : I64) ? (PF_MAX : I64) : promoted;
+		var to = oldPtr.addL(ahead);
+		if (oldEnd.ult(to)) to = oldEnd;
+		Os.lock(pfLock);
+		if (pfFrom.ult(oldPtr)) pfFrom = oldPtr; // (the collector is past them)
+		if (pfTo.ult(to)) {
+			pfTo = to;
+			Os.signal(pfCond);
+		}
+		Os.unlock(pfLock);
+	}
+
+	// (a major collection moves the old space)
+	@:hxmc.noGc static function prefaultCancel() {
+		Os.lock(pfLock);
+		Atomic.add32(Mem.sym("hxmc_pf_gen"), 1);
+		pfFrom = Ptr.nil();
+		pfTo = Ptr.nil();
+		Os.unlock(pfLock);
+	}
+
+	// the helper thread: PF_STEP of the requested pages at a time
+	@:hxmc.callback @:hxmc.noGc static function prefaulter(arg:Ptr):Ptr {
+		var page:I64 = Os.pageSize();
+		Os.lock(pfLock);
+		while (true) {
+			while (!pfFrom.ult(pfTo))
+				Os.condWait(pfCond, pfLock);
+			var a = pfFrom;
+			var b = a.add(PF_STEP);
+			if (pfTo.ult(b)) b = pfTo;
+			pfFrom = b;
+			var gen = Atomic.load32(Mem.sym("hxmc_pf_gen"));
+			Os.unlock(pfLock);
+			var x = a.toI64() + (page - 1);
+			var p = Ptr.ofI64(x - (x & (page - 1)));
+			while (p.ult(b) && Atomic.load32(Mem.sym("hxmc_pf_gen")) == gen) {
+				Atomic.add64(p, 0);
+				p = p.addL(page);
+			}
+			Os.lock(pfLock);
+		}
+		return Ptr.nil();
+	}
+
 	// a collection, with every other thread stopped (unless another thread
 	// collected meanwhile: the caller then retries its allocation)
 	@:hxmc.noGc static function collectFor(full:Bool, need:I64) {
@@ -952,6 +1042,7 @@ class Gc {
 				youngBytes += used;
 				promotedBytes += oldPtr.diff(before);
 				if (!minorFixed) adaptNursery(oldPtr.diff(before), used, allocating);
+				if (pfState >= 0) prefaultAhead(oldPtr.diff(before));
 			}
 		}
 		allocating = 0;
@@ -1211,6 +1302,7 @@ class Gc {
 		#end
 		releasePages = Os.envInt("RT_RELEASE", 1) != 0;
 		gcBfs = Os.has("RT_BFS");
+		if (Os.envInt("RT_PREFAULT", 1) == 0) pfState = -1;
 		// transparent huge pages for the heap: the old space grows by hundreds of
 		// MB and is copied into fresh pages, so 4 KB page faults add up
 		hugePages = L.MADV_HUGEPAGE != 0 && Os.envInt("RT_HUGE", 0) != 0; // opt-in: it costs more kernel time than it saves here
