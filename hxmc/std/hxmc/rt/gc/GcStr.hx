@@ -128,7 +128,7 @@ class GcStr {
 
 	@:hxmc.host("String_indexOf") @:hxmc.noGc static function indexOf(s:String, needle:String, start:Null<Int>):Int {
 		var n = W.strLen(s), m = W.strLen(needle);
-		var i = start == null ? 0 : start;
+		var i:Int = start == null ? 0 : start;
 		if (i < 0) {
 			i += n;
 			if (i < 0) i = 0;
@@ -145,7 +145,7 @@ class GcStr {
 
 	@:hxmc.host("String_lastIndexOf") @:hxmc.noGc static function lastIndexOf(s:String, needle:String, start:Null<Int>):Int {
 		var n = W.strLen(s), m = W.strLen(needle);
-		var i = start == null ? n - m : start;
+		var i:Int = start == null ? n - m : start;
 		if (i > n - m) i = n - m;
 		while (i >= 0) {
 			var k = 0;
@@ -159,7 +159,7 @@ class GcStr {
 
 	@:hxmc.host("String_substr") static function substr(s:String, pos:Int, lenp:Null<Int>):String {
 		var n = W.strLen(s);
-		var len = lenp == null ? n : lenp;
+		var len:Int = lenp == null ? n : lenp;
 		if (pos < 0) {
 			pos += n;
 			if (pos < 0) pos = 0;
@@ -174,7 +174,7 @@ class GcStr {
 
 	@:hxmc.host("String_substring") static function substring(s:String, start:Int, endp:Null<Int>):String {
 		var n = W.strLen(s);
-		var end = endp == null ? n : endp;
+		var end:Int = endp == null ? n : endp;
 		if (start < 0) start = 0;
 		if (end < 0) end = 0;
 		if (start > n) start = n;

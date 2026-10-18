@@ -16,6 +16,7 @@ extern class W {
 	// 0 null, 1 Int, 2 Float, 3 Bool, 4 String, 5 class instance, 6 enum,
 	// 7 array, 8 function, 9 Int64, 10 anonymous structure, 11 other
 	static function kind(v:Dynamic):Int;
+	static function objHash(o:Dynamic):Int;
 	static function unboxInt(v:Dynamic):Int;
 	static function unboxFloat(v:Dynamic):Float;
 	static function unboxBool(v:Dynamic):Bool;
