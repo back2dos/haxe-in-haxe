@@ -1213,5 +1213,42 @@
 		[0, 0, 16, 32],
 		[0, 32, 16, 16],
 		[0, 32, 16, 16]
+	],
+	"grid absolute static position in the padding box": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 4],
+		[0, 0, 10, 10]
+	],
+	"grid tracks overflowing, centred": [
+		[0, 0, 300, 200],
+		[0, 0, 73, 32],
+		[7, 9, 14, 14],
+		[21, 10, 40, 8]
+	],
+	"grid tracks overflowing, evenly": [
+		[0, 0, 300, 200],
+		[0, 0, 39, 10],
+		[0, 0, 50, 10]
+	],
+	"grid item of its content height, percentages": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 24],
+		[2, 4, 290, 20],
+		[2, 4, 20, 20],
+		[2, 24, 20, 0]
+	],
+	"grid absolute children in their areas": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 80],
+		[295, 0, 10, 10],
+		[58, 35, 233, 45],
+		[235, 0, 0, 5],
+		[0, 72, 8, 8]
+	],
+	"rtl grid absolute children in their areas": [
+		[0, 0, 300, 200],
+		[0, 0, 300, 0],
+		[69, 0, 176, 5],
+		[285, 0, 10, 10]
 	]
 }

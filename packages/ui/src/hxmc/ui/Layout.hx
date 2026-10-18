@@ -691,6 +691,8 @@ class Layout {
 			if (cs.position == Sticky) dx = dy = Math.NaN;
 			c.lx = padL + x + (known(dx) ? dx : 0);
 			c.ly = padT + y + (known(dy) ? dy : 0);
+			// (its height definite for its children when stretched or its own, not its content's)
+			looseH = !(jy == Stretch || known(cs.height.resolve(ah)));
 			size(c, iw, ih, aw, ah, iw, ih, true);
 			c.lw = iw;
 			c.lh = ih;
@@ -700,7 +702,12 @@ class Layout {
 		}
 		// (right to left: what overflows on the left, the columns' too)
 		if (rtl) cw = width - Math.min(left, width - gridW);
-		absolutes(n, absolute, bw, bh, padL, padT);
+		// (its lines from the padding box's start, for its absolute children's areas)
+		if (absolute != null) {
+			var colLines = cols.length == 0 ? [] : [for (k in 0...cols.length + 1) (rtl ? s.padding.right : s.padding.left) + (k < cols.length ? colPos[k] : colPos[k - 1] + cols[k - 1])];
+			var rowLines = rows.length == 0 ? [] : [for (k in 0...rows.length + 1) s.padding.top + (k < rows.length ? rowPos[k] : rowPos[k - 1] + rows[k - 1])];
+			absolutes(n, absolute, bw, bh, padL, padT, {cols: colLines, rows: rowLines, nCols: gridColumnCount(s), nRows: gridRowCount(s)});
+		}
 		n.lw = bw;
 		n.lh = bh;
 		@:privateAccess n.contentWidth = Math.max(cw, gridW);
@@ -733,7 +740,12 @@ class Layout {
 	// each track's start: packed from the start, or placed as justify puts items
 	static function positions(sizes:Array<Float>, gap:Float, room:Float, j:Justify):Array<Float> {
 		var n = sizes.length, free = room - sum(sizes, gap), pos = 0.0, g = gap;
-		if (n > 0 && free > 0) switch j {
+		// (too little room: overflowing at the start too when centred or at the end, as Chromium; distributed: at the start)
+		if (n > 0 && free < 0) switch j {
+			case End: pos = free;
+			case Center: pos = free / 2;
+			case _:
+		} else if (n > 0 && free > 0) switch j {
 			case End: pos = free;
 			case Center: pos = free / 2;
 			case SpaceBetween if (n > 1): g += free / (n - 1);
@@ -1098,12 +1110,27 @@ class Layout {
 	}
 
 	// absolute children, in the padding box of a container bw x bh
-	function absolutes(n:Node, absolute:Array<Node>, bw:Float, bh:Float, padL:Float, padT:Float) {
+	function absolutes(n:Node, absolute:Array<Node>, bw:Float, bh:Float, padL:Float, padT:Float, ?lines:{cols:Array<Float>, rows:Array<Float>, nCols:Int, nRows:Int}) {
 		var s = n.style;
-		var be = s.borderEdges, pbW = bw - be.left - be.right, pbH = bh - be.top - be.bottom;
+		var be = s.borderEdges, fullW = bw - be.left - be.right, fullH = bh - be.top - be.bottom;
 		var rtl = n.rtl();
 		for (c in absolute) {
 			var cs = c.style, m = cs.margin;
+			// (its containing block: the padding box, or in a grid the area its lines give, an auto
+			// line or one the grid has not its padding edge, as CSS's)
+			var ox = 0.0, oy = 0.0, pbW = fullW, pbH = fullH;
+			if (lines != null) {
+				if (cs.gridColumn != Grid.GridPlacement.AUTO) {
+					var a = area(cs.gridColumn, lines.cols, lines.nCols, fullW);
+					ox = rtl ? fullW - a.to : a.from;
+					pbW = a.to - a.from;
+				}
+				if (cs.gridRow != Grid.GridPlacement.AUTO) {
+					var a = area(cs.gridRow, lines.rows, lines.nRows, fullH);
+					oy = a.from;
+					pbH = a.to - a.from;
+				}
+			}
 			var l = cs.left.resolve(pbW), r = cs.right.resolve(pbW), t = cs.top.resolve(pbH), b = cs.bottom.resolve(pbH);
 			// (what an auto or fit-content width fits in: the room its offsets and margins leave)
 			var room = Math.max(0, pbW - (known(l) ? l : 0) - (known(r) ? r : 0) - mz(m.left) - mz(m.right));
@@ -1139,8 +1166,10 @@ class Layout {
 			}
 			// (neither offset: its static position, as if it were the container's only
 			// item: justify along the main axis, its alignment across, in the content box)
-			var cx = padL - be.left, cy = padT - be.top;
-			var cw = pbW - s.padding.left - s.padding.right, ch = pbH - s.padding.top - s.padding.bottom;
+			// (a grid's: in its padding box, as if the only item of an area that is all of it)
+			var grid = s.display == Grid;
+			var cx = grid ? 0 : padL - be.left, cy = grid ? 0 : padT - be.top;
+			var cw = grid ? pbW : pbW - s.padding.left - s.padding.right, ch = grid ? pbH : pbH - s.padding.top - s.padding.bottom;
 			var ax = known(l) ? l + mz(m.left) : known(r) ? pbW - r - aw - mz(m.right) : cx + mz(m.left)
 				+ staticOffset(n, c, true, cw - aw - mz(m.left) - mz(m.right));
 			var ay = known(t) ? t + mz(m.top) : known(b) ? pbH - b - ah - mz(m.bottom) : cy + mz(m.top) + staticOffset(n, c, false, ch - ah - mz(m.top) - mz(m.bottom));
@@ -1159,14 +1188,31 @@ class Layout {
 				var free = pbH - t - b - mz(m.top) - mz(m.bottom) - ah;
 				ay = Math.isNaN(m.top) && Math.isNaN(m.bottom) ? t + Math.max(0, free) / 2 : Math.isNaN(m.top) ? t + free : t + mz(m.top);
 			}
-			c.lx = be.left + ax;
-			c.ly = be.top + ay;
+			c.lx = be.left + ox + ax;
+			c.ly = be.top + oy + ay;
 			// (a height of its content's: not definite for its children's percentages)
 			looseH = !heightGiven;
 			size(c, aw, ah, pbW, pbH, aw, ah, true);
 			c.lw = aw;
 			c.lh = ah;
 		}
+	}
+
+	// (an absolute grid child's area on an axis, from the start: its lines, lines counted from
+	// the explicit grid's, a span from the other line, else the padding edges)
+	static function area(p:Grid.GridPlacement, lines:Array<Float>, explicit:Int, full:Float):{from:Float, to:Float} {
+		inline function index(k:Int):Int
+			return k > 0 ? k - 1 : k < 0 ? explicit + 1 + k : -1;
+		var a = p.startName == null ? index(p.start) : -1, b = p.endName == null ? index(p.end) : -1;
+		if (a >= 0 && b < 0 && p.end == 0 && p.span > 1) b = a + p.span;
+		if (b >= 0 && a < 0 && p.start == 0 && p.span > 1) a = b - p.span;
+		if (a >= 0 && b >= 0 && b < a) {
+			var t = a;
+			a = b;
+			b = t;
+		}
+		var from = a >= 0 && a < lines.length ? lines[a] : 0.0, to = b >= 0 && b < lines.length ? lines[b] : full;
+		return {from: from, to: Math.max(from, to)};
 	}
 
 	// a box size wide placed between from and to by its self-alignment (flip: start at the far end),

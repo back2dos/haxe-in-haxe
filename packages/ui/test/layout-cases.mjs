@@ -262,4 +262,16 @@ export const cases = [
 	{ name: 'aspect ratio height from a fit-content width', width: 300, height: 200, tree: { children: [{ style: { alignSelf: 'Start', aspectRatio: 0.5 }, children: [box(69, 0)] }] } },
 	{ name: 'aspect ratio automatic minimum its height', width: 300, height: 200, tree: { children: [{ style: { alignSelf: 'Start' }, children: [{ style: { basis: 96, height: 111, aspectRatio: 1 } }] }] } },
 	{ name: 'absolute box height at its shrunk width', width: 300, height: 200, tree: { children: [{ style: { position: 'Absolute' }, children: [{ style: { aspectRatio: 0.5 } }, { children: [{ style: { padding: 8 } }] }] }] } },
+	// (a grid's absolute child in its padding box; its tracks overflowing a centred grid on both sides, a distributed one at the end;
+	// an item of its content's height not definite for its children's percentages)
+	{ name: 'grid absolute static position in the padding box', width: 300, height: 200, tree: { children: [{ style: { display: 'Grid', padding: 2 }, children: [box(10, 10, { position: 'Absolute' })] }] } },
+	{ name: 'grid tracks overflowing, centred', width: 300, height: 200, tree: { children: [{ style: { display: 'Grid', justify: 'Center', width: 73, padding: 9, gridTemplateColumns: 'repeat(3, 1fr)' }, children: [{ style: { padding: 7 } }, box(40, 8, { margin: [1, 5, 5, 'auto'] })] }] } },
+	{ name: 'grid tracks overflowing, evenly', width: 300, height: 200, tree: { children: [{ style: { display: 'Grid', justify: 'SpaceEvenly', width: 39 }, children: [box('auto', 10, { minWidth: 50 })] }] } },
+	{ name: 'grid item of its content height, percentages', width: 300, height: 200, tree: { children: [{ style: { display: 'Grid' }, children: [{ style: { wrap: true, margin: [4, 8, 'auto', 2] }, children: [{ style: { padding: 10 } }, box(20, '50%')] }] }] } },
+	// (a grid's absolute children in the areas their lines give: an auto line or one the grid has not its padding edge)
+	{ name: 'grid absolute children in their areas', width: 300, height: 200, tree: { children: [{ style: { display: 'Grid', gridTemplateColumns: '50px 1fr 60px', gridTemplateRows: '30px 40px', padding: 5 }, children: [
+		box(10, 10, { position: 'Absolute', gridColumn: '-1' }), { style: { position: 'Absolute', gridColumn: '2 / 4', gridRow: '2', left: 3, right: 4, top: 0, bottom: 0 } },
+		{ style: { position: 'Absolute', gridColumn: '1 / span 2', right: 0, height: 5 } }, box(8, 8, { position: 'Absolute', gridColumn: '7', gridRow: '1', bottom: 0 })] }] } },
+	{ name: 'rtl grid absolute children in their areas', width: 300, height: 200, tree: { children: [{ style: { display: 'Grid', dir: 'Rtl', gridTemplateColumns: '50px 1fr 60px', padding: [0, 5, 0, 9] }, children: [
+		{ style: { position: 'Absolute', gridColumn: '2 / 3', left: 0, right: 0, height: 5 } }, box(10, 10, { position: 'Absolute', gridColumn: '1' })] }] } },
 ];
