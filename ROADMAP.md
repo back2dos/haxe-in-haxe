@@ -35,10 +35,11 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - Android, step 2: native controls through JNI (a DEX writer for the glue, `hxmc.ui.native` on `android.widget`): landed ([hxmc.md](docs/hxmc.md#android))
 - Android, step 3: a GPU view among views (`GpuView`), the input method for a drawn window: landed (what is left: [targets.md](docs/plans/targets.md#android))
 - iOS, step 1: GPU only, UIKit through the Objective-C runtime, the app bundle and its ad hoc signature: landed (`ios-arm64`, `ios-sim-arm64`; [hxmc.md](docs/hxmc.md#ios), what is left: [targets.md](docs/plans/targets.md#ios))
+- The dev loop, steps 1 and 2: `hxmc dev` live reload, fast refresh with state carried by key on public primitives (`hxmc.dev.Hot`): landed ([docs/dev.md](docs/dev.md))
 
 ## Next
 
-- The dev loop: `hxmc dev` live reload, then fast refresh with state carried by key ([dev-loop.md](docs/plans/dev-loop.md))
+- The dev loop: faster reloads (the compilation server's HXB reads, lowered bodies kept across it), seamless swaps, styles without a rebuild ([dev-loop.md](docs/plans/dev-loop.md))
 - A Canvas ready for documents: paths, gradients, glyph runs, images with their source, host apart from canvas ([document.md](docs/plans/document.md))
 - Native or drawn per widget: native text fields by default, platform views in drawn trees, a DOM renderer for the widgets in the browser ([native-or-drawn.md](docs/plans/native-or-drawn.md))
 - Unstyled widgets and one theme, `@hxmc/theme`, based on shadcn/ui: its tokens, slots, variants and class lists ([theme.md](docs/plans/theme.md))

@@ -49,10 +49,10 @@ class Tw {
 		var rules = [];
 		for (slot in sheet.slots) {
 			at = slot.file.path;
-			var out = tw.slot(slot.name, slot.lists);
+			var out = tw.slot(slot.name, slot.lists, true);
 			if (global.classes != "" && Lambda.exists(out, r -> r.props.exists("borderWidth") || r.props.exists("borders"))) {
 				at = sheet.path;
-				out = tw.slot(slot.name, [global].concat(slot.lists));
+				out = tw.slot(slot.name, [global].concat(slot.lists), true);
 			}
 			rules = rules.concat(out);
 		}
@@ -71,6 +71,20 @@ class Tw {
 			}
 		}
 		e.str(Std.string(css(sheet.radius)));
+		// (the slots' group and peer markers, group/item: what their class lists carry, as a page's CSS reads them)
+		var marked = [];
+		for (slot in sheet.slots) {
+			var m = [];
+			for (l in slot.lists)
+				for (w in ~/\s+/g.split(l.classes))
+					if (~/^(group|peer)(\/[A-Za-z0-9_-]+)?$/.match(w) && !m.contains(w)) m.push(w);
+			if (m.length > 0) marked.push({slot: slot.name, markers: m.join(" ")});
+		}
+		e.int(marked.length);
+		for (m in marked) {
+			e.str(m.slot);
+			e.str(m.markers);
+		}
 		// (-D hxmc.theme.dump: each rule as Tailwind.describe writes it, and the data's size)
 		if (Context.defined("hxmc.theme.dump")) {
 			for (r in rules)

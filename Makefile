@@ -117,7 +117,7 @@ endef
 	lix lix-release lix-dist reference bench bench-arrays test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check portcheck measure site-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench wasmgc-port test-wasmgc-port
 
 help:
@@ -227,6 +227,12 @@ help:
 ##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans);
 ##             the native form (native-web.mjs); native text editors in a drawn window (web-field.mjs);
 ##             each also built with -D hxmc.wasm-gc
+## dev-check   the dev loop (docs/dev.md): hxmc.dev.Hot and a store written as a third-party library
+##             across a reload (packages/os/test/HotTest.hx: natively and on Eval, a changed type reset),
+##             view's signals keyed by component instance (packages/view/test/RefreshTest.hx), then
+##             `hxmc dev` on ui's Counter: in headless Chromium, also as WasmGC (packages/os/test/dev/dev-web.mjs: an edit
+##             keeps the count, a changed type resets it, a compile error shows in the overlay while the last
+##             good build runs) and natively in a window (dev-native.mjs; Linux: under Xvfb)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -755,6 +761,27 @@ ui-web-check: $(TOOL) $(STD)
 	$(NODE) packages/ui/test/native-web.mjs bin/ui/gc/NativeForm.wasm bin/ui/gc
 	$(call hxmc,bin/ui/gc/WebField.wasm,$(UI_CP) -main WebField $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
 	$(NODE) packages/ui/test/web-field.mjs bin/ui/gc/WebField.wasm
+# (the dev loop: each program run twice, the second from the first's snapshot)
+DEV_OS_CP := -cp packages/os/src -cp packages/os/test
+DEV_VIEW_CP := -cp packages/os/src -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer
+dev-check: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/dev/HotTest,$(DEV_OS_CP) -main HotTest $(HXMC_ARGS) -D hxmc.dev)
+	$(call hxmc,bin/dev/HotTestChanged,$(DEV_OS_CP) -main HotTest $(HXMC_ARGS) -D hxmc.dev -D hot_changed)
+	bin/dev/HotTest save bin/dev/hot.snapshot
+	HXMC_DEV_SNAPSHOT=bin/dev/hot.snapshot bin/dev/HotTest restore -
+	HXMC_DEV_SNAPSHOT=bin/dev/hot.snapshot bin/dev/HotTestChanged restore - > bin/dev/changed.log 2>&1 || { cat bin/dev/changed.log; exit 1; }
+	cat bin/dev/changed.log; grep -q "changed reset: its type changed" bin/dev/changed.log
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(DEV_OS_CP) -D hxmc.dev --run HotTest save bin/dev/hot-eval.snapshot
+	ulimit -s unlimited 2>/dev/null || true; HXMC_DEV_SNAPSHOT=bin/dev/hot-eval.snapshot $(TOOL) $(DEV_OS_CP) -D hxmc.dev --run HotTest restore -
+	$(call hxmc,bin/dev/RefreshTest,$(DEV_VIEW_CP) -main RefreshTest $(HXMC_ARGS) -D hxmc.dev)
+	bin/dev/RefreshTest save bin/dev/refresh.snapshot
+	HXMC_DEV_SNAPSHOT=bin/dev/refresh.snapshot bin/dev/RefreshTest restore -
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(DEV_VIEW_CP) -D hxmc.dev --run RefreshTest save bin/dev/refresh-eval.snapshot
+	ulimit -s unlimited 2>/dev/null || true; HXMC_DEV_SNAPSHOT=bin/dev/refresh-eval.snapshot $(TOOL) $(DEV_VIEW_CP) -D hxmc.dev --run RefreshTest restore -
+	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web
+	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web-gc --wasm-gc
+	ulimit -s unlimited 2>/dev/null || true; $(if $(filter linux-%,$(HOST)),xvfb-run -a -s "-screen 0 640x480x24") $(NODE) packages/os/test/dev/dev-native.mjs $(TOOL) bin/dev/native
+
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
 MACROS ?= verify

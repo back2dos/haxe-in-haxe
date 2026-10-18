@@ -1559,6 +1559,28 @@ class FuncGen {
 				// (a type known at run time only: GcNative.isOfType)
 				all();
 				call(m.exportOf("gc_is"));
+			case "hx_is_typeobj" if (args[1].match(EInt(_))):
+				// Std.isOfType(v, Class), (v, Enum): a type object (GcModule.typeValue:
+				// its kind 0 a class, 1 an enum, 2 a builtin), of an enum for Enum
+				var wantEnum = args[1].match(EInt(1));
+				var tt = m.typeType();
+				var t = temp("p");
+				expr(args[0]);
+				localTee(t);
+				op(0xFB);
+				op(0x14);
+				Enc.sleb(b, tt);
+				op(0x04);
+				op(0x7F);
+				localGet(t);
+				castTo(tt);
+				gc(0x02, tt, 0);
+				i32(1);
+				op(wantEnum ? 0x46 : 0x47);
+				op(0x05);
+				i32(0);
+				op(0x0B);
+				release("p", t);
 			case "hx_clos_of_sig" if (args[1].match(EStr(_))):
 				// (the closure when it has this signature, else null)
 				var key = switch args[1] {

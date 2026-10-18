@@ -730,6 +730,13 @@ class Dyn {
 	@:hxmc.host("Std_isOfType") @:hxmc.noGc static function isOfType(v:Dynamic, t:Dynamic):Bool
 		return is(v, t);
 
+	// Std.isOfType(v, Class) (kind 0: a type object, not an enum's), (v, Enum) (1)
+	@:hxmc.host("hx_is_typeobj") @:hxmc.noGc static function isTypeObject(v:Dynamic, kind:Int):Bool {
+		if (Str.isNull(v) || tindex(v) != T_TYPEOBJ) return false;
+		var enum_ = described(v) >= T_FIRST && tk(ty(described(v))) == TK_ENUM;
+		return kind == 1 ? enum_ : !enum_;
+	}
+
 	@:hxmc.host("Std_downcast") @:hxmc.noGc static function downcast(v:Dynamic, t:Dynamic):Dynamic
 		return is(v, t) ? v : null;
 

@@ -1996,7 +1996,21 @@ class FnLower {
 				var mm = intMinMax(cargs[0]);
 				if (mm != null) return coerce(mm, TI32, tyOf(e));
 				coerce(EConv(F2I, coerce(value(cargs[0]), tyOf(cargs[0]), TF64)), TI32, tyOf(e));
+			case "Std_isOfType" if (cargs.length == 2 && typeObjectKind(cargs[1]) >= 0):
+				// Std.isOfType(v, Class), (v, Enum): whether v is a type object of a
+				// class or of an enum (hx_is_typeobj; hx_is knows no such type)
+				var k = typeObjectKind(cargs[1]);
+				coerce(ECallHost(l.native("hx_is_typeobj"), [coerce(value(cargs[0]), tyOf(cargs[0]), TRef(RAny)), EInt(k)], TBool), TBool, tyOf(e));
 			case _: null;
+		}
+	}
+
+	// 0 for the type expression Class, 1 for Enum, else -1
+	function typeObjectKind(x:TExpr):Int {
+		return switch strip(x).eexpr {
+			case TTypeExpr(TAbstractDecl(a)) if (a.aPath.pack.length == 0 && a.aPath.name == "Class"): 0;
+			case TTypeExpr(TAbstractDecl(a)) if (a.aPath.pack.length == 0 && a.aPath.name == "Enum"): 1;
+			case _: -1;
 		}
 	}
 

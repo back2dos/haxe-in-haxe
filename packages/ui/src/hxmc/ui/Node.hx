@@ -48,12 +48,14 @@ class Node implements Part {
 	public var onPointerLeave(get, set):Null<Event->Void>;
 	public var onClick(get, set):Null<Event->Void>;
 	// a press: a click, or Enter or Space while it has the focus (after onKeyDown, unless it
-	// prevented the default), as a DOM button's click
+	// prevented the default), as a DOM button's click (a link's: Enter, not Space, as a DOM link's)
 	public var onActivate(get, set):Null<Event->Void>;
 	public var onWheel(get, set):Null<Event->Void>;
 	public var onKeyDown(get, set):Null<Event->Void>;
 	public var onKeyUp(get, set):Null<Event->Void>;
 	public var onTextInput(get, set):Null<Event->Void>;
+	// a text field's text changed by its user (Event.text: its text; the DOM's input)
+	public var onInput(get, set):Null<Event->Void>;
 	// Overflow Scroll: its scrollX or scrollY changed (the wheel, a thumb, clamping)
 	public var onScroll(get, set):Null<Void->Void>;
 	public var onComposition(get, set):Null<Event->Void>;
@@ -81,6 +83,9 @@ class Node implements Part {
 	public var hovered(default, null) = false;
 	public var pressed(default, null) = false;
 	public var focused(default, null) = false;
+	// a legend (a page's legend element): its parent's first, as a fieldset's
+	// rendered legend, no flex item (Layout: no gap after it in a column)
+	public var legend = false;
 	// what a theme styles it as (Rule, StyleSheet): the part of a widget
 	// (shadcn's data-slot names: "button", "switch-thumb"), its variant and
 	// size ("destructive", "sm"); its attributes, the states rules match
@@ -166,7 +171,7 @@ class Node implements Part {
 		// (under another parent: what it inherits may differ, and the states of nodes around it)
 		if (moved) child.inheritedChanged();
 		if (moved && ui != null && @:privateAccess Rules.relational != 0) Rules.restyleTree(child);
-		Rules.placed(this, child, first, last);
+		Rules.placed(this, child, first, last, index + 1 < children.length ? children[index + 1] : null);
 		markDirty();
 		return child;
 	}
@@ -202,11 +207,11 @@ class Node implements Part {
 
 	public function remove(child:Node) {
 		if (child.parent != this) return;
-		var first = children[0], last = children[children.length - 1];
-		children.remove(child);
+		var first = children[0], last = children[children.length - 1], i = indexOf(child);
+		children.splice(i, 1);
 		child.parent = null;
 		child.attach(null);
-		Rules.placed(this, child, first == child ? null : first, last == child ? null : last);
+		Rules.placed(this, child, first == child ? null : first, last == child ? null : last, i < children.length ? children[i] : null);
 		markDirty();
 	}
 
@@ -380,6 +385,17 @@ class Node implements Part {
 		return handlers.onTextInput = v;
 	}
 
+	inline function get_onInput():Null<Event->Void>
+		return handlers == null ? null : handlers.onInput;
+
+	function set_onInput(v:Null<Event->Void>):Null<Event->Void> {
+		if (handlers == null) {
+			if (v == null) return v;
+			handlers = new Handlers();
+		}
+		return handlers.onInput = v;
+	}
+
 	inline function get_onScroll():Null<Void->Void>
 		return handlers == null ? null : handlers.onScroll;
 
@@ -522,6 +538,7 @@ class Node implements Part {
 	public function markDirty() {
 		Ui.accessEpoch++;
 		fontCache = null;
+		textBits = -1;
 		var n = this;
 		while (n != null && !(n.dirty && (n.cache == null || n.cache[0] == 0) && Math.isNaN(n.minContent))) {
 			n.dirty = true;
@@ -553,6 +570,7 @@ class Node implements Part {
 
 	function inheritedChanged() {
 		fontCache = null;
+		textBits = -1;
 		if (hasContent()) markDirty();
 		for (c in children)
 			c.inheritedChanged();
@@ -672,25 +690,33 @@ class Node implements Part {
 	}
 
 	// whether its text wraps: its textWrap, else its nearest ancestor's (Style.textWrap)
-	public function wraps():Bool {
-		var n = this;
-		while (n != null) {
-			var w = n.style.textWrap;
-			if (w != null) return w == Wrap;
-			n = n.inheritsFrom();
-		}
-		return true;
-	}
+	public inline function wraps():Bool
+		return textWrap() != NoWrap;
+
+	// how its text wraps: its textWrap, else its nearest ancestor's
+	public function textWrap():TextWrap
+		return cast (textInherited() >> 4) & 3;
 
 	// how its text's letters are shown: its textTransform, else its nearest ancestor's
-	public function textTransform():TextTransform {
-		var n = this;
-		while (n != null) {
-			var t = n.style.textTransform;
-			if (t != null) return t;
+	public function textTransform():TextTransform
+		return cast (textInherited() >> 2) & 3;
+
+	// (its direction (0 none set, else Dir + 1), text transform and wrapping,
+	// inherited, found in one walk up and kept as bits: -1 not yet; cleared
+	// with fontCache, as their setters lay the subtree out again)
+	var textBits = -1;
+
+	function textInherited():Int {
+		if (textBits >= 0) return textBits;
+		var d = -1, t = -1, w = -1, n = this;
+		while (n != null && (d < 0 || t < 0 || w < 0)) {
+			var s = n.style;
+			if (d < 0 && s.dir != null) d = (cast s.dir : Int) + 1;
+			if (t < 0 && s.textTransform != null) t = (cast s.textTransform : Int);
+			if (w < 0 && s.textWrap != null) w = (cast s.textWrap : Int);
 			n = n.inheritsFrom();
 		}
-		return None;
+		return textBits = (d < 0 ? 0 : d) | (t < 0 ? 0 : t) << 2 | (w < 0 ? 0 : w) << 4;
 	}
 
 	public function textAlign():TextAlign {
@@ -719,13 +745,8 @@ class Node implements Part {
 
 	// its direction as set on it or an ancestor (null: none set)
 	public function dir():Null<Dir> {
-		var n = this;
-		while (n != null) {
-			var d = n.style.dir;
-			if (d != null) return d;
-			n = n.inheritsFrom();
-		}
-		return null;
+		var d = textInherited() & 3;
+		return d == 0 ? null : cast d - 1;
 	}
 
 	// a window position in this node's coordinates (from its border box's
@@ -775,6 +796,13 @@ class Node implements Part {
 
 	public function scrollIntoView()
 		if (ui != null) ui.scrollIntoView(this);
+
+	// (a press's pointer: the pressed node's until released (Ui.capture), this one's now)
+	public function capture()
+		if (ui != null && ui.capture != null) @:privateAccess ui.capture = this;
+
+	// (a text field's: EditableText's)
+	public function select(start:Int, end:Int) {}
 
 	public function contains(p:Part):Bool {
 		var n:Null<Node> = Std.downcast(p, Node);
@@ -1188,6 +1216,7 @@ private class Handlers {
 	public var onKeyDown:Null<Event->Void> = null;
 	public var onKeyUp:Null<Event->Void> = null;
 	public var onTextInput:Null<Event->Void> = null;
+	public var onInput:Null<Event->Void> = null;
 	public var onScroll:Null<Void->Void> = null;
 	public var onComposition:Null<Event->Void> = null;
 	public var onFocus:Null<Event->Void> = null;
