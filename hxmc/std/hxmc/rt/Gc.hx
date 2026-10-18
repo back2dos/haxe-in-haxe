@@ -185,9 +185,13 @@ class Gc {
 	static var deadCap:Int;
 
 	// ---- the copy: depth-first, an object's descendants are copied right
-	// after it (preorder), the order in which the compiler then walks its
-	// trees; Cheney's breadth-first scan scatters them. RT_BFS=1 selects the
-	// breadth-first scan. The stack holds (object, next slot) pairs.
+	// after it, close to the order in which the compiler then walks its
+	// trees; Cheney's breadth-first scan scatters them. A major collection
+	// copies in preorder; a minor one copies an object's young children
+	// together right after it, then the first one's, and so on (drainMinor:
+	// each object is scanned once, and the cache misses of the children's
+	// headers overlap). RT_BFS=1 selects the breadth-first scan. The stack
+	// holds (object, next slot) pairs.
 	static var gcStack:Ptr;
 	static var gcTop:Int;
 	static var gcCap:Int;
@@ -297,8 +301,185 @@ class Gc {
 	@:hxmc.noGc static function drain()
 		if (major) drainMajor() else drainMinor();
 
-	@:hxmc.noGc static function drainMinor()
-		drainWith(false);
+	// a minor collection's: each object is scanned once, when popped, its
+	// young children copied together right after it (their headers' cache
+	// misses overlap) and pushed, the first one on top. No call in the loop
+	// but the stack's growth, before the scan, and few values live across
+	// the scan (the nursery's bounds and the stack are read where used): the
+	// scan's values stay in registers. Objects of more than SMALL_SLOTS
+	// slots are scanned out of the loop, LARGE_SLICE slots at a time
+	// (scanLarge), so that the stack stays small.
+	@:hxmc.noGc static function drainMinor() {
+		while (gcTop > 0) {
+			if (gcTop + SMALL_SLOTS + 1 > gcCap) reserve(gcTop + SMALL_SLOTS + 1);
+			var top = gcTop - 1;
+			var o = Mem.getPtr(gcStack, top << 4);
+			var lo = hdrLo(o);
+			if (lo & 0x0FFFFFFF > SMALL_SLOTS)
+				scanLarge(o);
+			else {
+				// (gcTop: where its children go, until they are reversed)
+				gcTop = top;
+				pushed(scanYoung(o, lo, top));
+			}
+		}
+	}
+
+	static inline var SMALL_SLOTS = 64;
+
+	// a large object on top of the stack: its next LARGE_SLICE slots (from
+	// the entry's slot index), the entry left below the children they push
+	// while slots remain
+	@:hxmc.noGc static function scanLarge(o:Ptr) {
+		if (gcTop + LARGE_SLICE > gcCap) reserve(gcTop + LARGE_SLICE);
+		var at = gcTop - 1;
+		var e = gcStack.add(at << 4);
+		var lo = hdrLo(o);
+		var n = lo & 0x0FFFFFFF;
+		var pm = Ptr.nil();
+		if (lo >>> 28 == K_OBJ) {
+			pm = ptrmapOf(o);
+			if (pm.isNull()) {
+				gcTop = at;
+				return;
+			}
+		} else if (lo >>> 28 != K_PARR) { // (raw: a root fwdRoot pushed)
+			gcTop = at;
+			return;
+		}
+		var from = Mem.getI32(e, 8);
+		var to = from + LARGE_SLICE;
+		if (to < n) {
+			Mem.setI32(e, 8, to);
+		} else {
+			to = n;
+			gcTop = at;
+		}
+		var top = gcTop;
+		var i = from;
+		if (pm.isNull()) {
+			if (i == 0 && Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY) i = 1;
+			while (i < to) {
+				top = minorSlot(o, i, top);
+				i++;
+			}
+		} else
+			while (i < to) {
+				if ((Mem.getI32At(pm, 0, i >> 5) >>> (i & 31)) & 1 != 0) top = minorSlot(o, i, top);
+				i++;
+			}
+		pushed(top);
+	}
+
+	static inline var LARGE_SLICE = 256;
+
+	// o's young children copied, pushed from gcStack[top] (which has room
+	// for all of them): the new top
+	static inline function scanYoung(o:Ptr, lo:Int, top:Int):Int {
+		var t = top;
+		var n = lo & 0x0FFFFFFF;
+		var k = lo >>> 28;
+		if (k == K_OBJ) {
+			var pm = ptrmapOf(o);
+			if (!pm.isNull()) {
+				var w = 0;
+				while (w << 5 < n) {
+					var m = Mem.getI32(pm, w << 2);
+					var i = w << 5;
+					while (m != 0) {
+						if (m & 1 != 0) t = minorSlot(o, i, t);
+						m = m >>> 1;
+						i++;
+					}
+					w++;
+				}
+			}
+		} else if (k == K_PARR) {
+			var i = Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY ? 1 : 0;
+			while (i < n) {
+				t = minorSlot(o, i, t);
+				i++;
+			}
+		}
+		return t;
+	}
+
+	// the children pushed from gcTop to top, reversed (pushed in slot order:
+	// the first one goes on top)
+	static inline function pushed(top:Int) {
+		var a = gcTop, b = top - 1;
+		gcTop = top;
+		var stack = gcStack;
+		while (a < b) {
+			var x = Mem.getPtr(stack, a << 4);
+			Mem.setPtr(stack, a << 4, Mem.getPtr(stack, b << 4));
+			Mem.setPtr(stack, b << 4, x);
+			a++;
+			b--;
+		}
+	}
+
+	// slot i of o (copied, or old) forwarded; a young object copied now is
+	// pushed when it has references (at gcStack[top], which has room): the
+	// new top
+	static inline function minorSlot(o:Ptr, i:Int, top:Int):Int {
+		var t = top;
+		var v = Ptr.ofI64(Mem.getI64At(o, 0, i));
+		if (!v.ult(youngStart) && v.ult(youngEnd)) {
+			var vlo = hdrLo(v);
+			var vk = vlo >>> 28;
+			if (vk == K_FWD)
+				Mem.setI64At(o, 0, i, Mem.getI64(v, 0));
+			else {
+				// (copyTo, without the call of memcpy)
+				var words = (vlo & 0x0FFFFFFF) + 1;
+				var dst = oldPtr, s = v.add(-8);
+				if (words <= 8) {
+					do {
+						Mem.setI64(dst, 0, Mem.getI64(s, 0));
+						if (words == 1) break;
+						Mem.setI64(dst, 8, Mem.getI64(s, 8));
+						if (words == 2) break;
+						Mem.setI64(dst, 16, Mem.getI64(s, 16));
+						if (words == 3) break;
+						Mem.setI64(dst, 24, Mem.getI64(s, 24));
+						if (words == 4) break;
+						Mem.setI64(dst, 32, Mem.getI64(s, 32));
+						if (words == 5) break;
+						Mem.setI64(dst, 40, Mem.getI64(s, 40));
+						if (words == 6) break;
+						Mem.setI64(dst, 48, Mem.getI64(s, 48));
+						if (words == 7) break;
+						Mem.setI64(dst, 56, Mem.getI64(s, 56));
+					} while (false);
+				} else {
+					var j = 0;
+					while (j < words) {
+						Mem.setI64At(dst, 0, j, Mem.getI64At(s, 0, j));
+						j++;
+					}
+				}
+				oldPtr = dst.add(words << 3);
+				var nv = dst.add(8);
+				Mem.setI32(v, -8, (vlo & 0x0FFFFFFF) | (K_FWD << 28));
+				Mem.setPtr(v, 0, nv);
+				Mem.setI64At(o, 0, i, nv.toI64());
+				if (vk == K_OBJ || vk == K_PARR) {
+					Mem.setPtr(gcStack, t << 4, nv);
+					Mem.setI32(gcStack, (t << 4) + 8, 0);
+					t++;
+				}
+			}
+		}
+		return t;
+	}
+
+	// room for this many entries on the collector's stack
+	@:hxmc.noGc static function reserve(entries:Int) {
+		while (gcCap < entries)
+			gcCap *= 2;
+		gcStack = LibC.realloc(gcStack, (gcCap : I64) * 16);
+	}
 
 	@:hxmc.noGc static function drainMajor()
 		drainWith(true);
