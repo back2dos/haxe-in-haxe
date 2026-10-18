@@ -38,6 +38,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 
 ## Next
 
+- The dev loop: `hxmc dev` live reload, then fast refresh with state carried by key ([dev-loop.md](docs/plans/dev-loop.md))
 - A Canvas ready for documents: paths, gradients, glyph runs, images with their source, host apart from canvas ([document.md](docs/plans/document.md))
 - Native or drawn per widget: native text fields by default, platform views in drawn trees, a DOM renderer for the widgets in the browser ([native-or-drawn.md](docs/plans/native-or-drawn.md))
 - Unstyled widgets and one theme, `@hxmc/theme`, based on shadcn/ui: its tokens, slots, variants and class lists ([theme.md](docs/plans/theme.md))

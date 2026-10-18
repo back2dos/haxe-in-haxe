@@ -27,6 +27,7 @@ class Docs implements Markup {
 		for (p in Pages.PACKAGES)
 			add('packages/${p[0]}/README.md', 'docs/packages/${p[0]}.html', "Packages");
 		add("packages/ui/GUIDE.md", "docs/packages/ui-guide.html", "Packages");
+		out.push({src: Components.SOURCE, page: Components.PAGE, group: "Packages", title: Components.TITLE});
 		add("docs/plans/README.md", "docs/plans/index.html", "Plans");
 		var plans = FileSystem.readDirectory("docs/plans").filter(n -> n.endsWith(".md") && n != "README.md");
 		plans.sort(Reflect.compare);
@@ -40,6 +41,11 @@ class Docs implements Markup {
 		Site.renderPage("docs/index.html", () -> Static.document(<Index/>));
 		for (d in docs) {
 			Site.renderPage(d.page, () -> {
+				// (ui's components: their reference, read from the sources, not Markdown)
+				if (d.page == Components.PAGE) {
+					var c = Components.render();
+					return Static.document(<DocPage doc={d} html={c.html} headings={c.headings}/>);
+				}
 				var md = new Markdown(href -> resolve(href, d.src));
 				var html = md.render(Site.read(d.src));
 				return Static.document(<DocPage doc={d} html={html} headings={md.headings}/>);
@@ -118,34 +124,37 @@ class Docs implements Markup {
 		</Page>;
 	}
 
-	// the first paragraph of a doc, as text
+	// the first sentence of a doc, as text
 	static function summary(src:String):String {
+		if (src == Components.SOURCE) return Components.SUMMARY;
 		for (block in ~/\n\s*\n/g.split(Site.read(src))) {
 			var t = block.trim();
 			if (t == "" || t.startsWith("#") || t.startsWith("|") || t.startsWith("```") || t.startsWith("-") || t.startsWith(">")) continue;
 			var s = Markdown.plain(t.replace("\n", " "));
-			return s.length > 180 ? s.substr(0, s.lastIndexOf(" ", 177)) + "…" : s;
+			var dot = ~/\.(\s|$)/;
+			if (dot.match(s)) s = s.substr(0, dot.matchedPos().pos) + ".";
+			return s.length > 120 ? s.substr(0, s.lastIndexOf(" ", 117)) + "…" : s;
 		}
 		return "";
 	}
 
 	static function Index(props:{}):View {
 		return <Page title="Docs" section="Docs" description="hxmc's documentation: guides, the packages' READMEs and API reference, the roadmap and design plans, generated from the repository.">
-			<div class="wrap docs">
+			<div class="wrap docs index">
 				<Sidebar current="docs/index.html"/>
 				<article class="doc">
 					<h1>Docs</h1>
-					<p class="lead">Generated from the repository at each build: the guides in <code>docs/</code>, each package's README, an API reference read from the packages' types by the compiler, the roadmap and the design plans.</p>
+					<p class="lead">Guides, package READMEs, an API reference and the design plans, generated from the repository on every build.</p>
 					{[
 						for (g in GROUPS)
 							<section class="doc-group">
 								<h2>{g == "API" ? "API reference" : g}</h2>
-								<ul class="doc-list">{
+								<ul class={g == "Plans" ? "doc-list plans" : "doc-list"}>{
 									g == "API" ? [
 										for (p in Pages.PACKAGES)
-											<li><a href={Site.link('docs/api/${p[0]}.html')}>{p[1]}</a><span>{p[2]}</span></li>
+											<li><a href={Site.link('docs/api/${p[0]}.html')}>{p[1]}</a><span>{p[3]}</span></li>
 									] : [
-										for (d in docs) if (d.group == g) <li><a href={Site.link(d.page)}>{d.title}</a><span>{summary(d.src)}</span></li>
+										for (d in docs) if (d.group == g) <li><a href={Site.link(d.page)}>{d.title}</a>{g == "Plans" ? null : <span>{summary(d.src)}</span>}</li>
 									]
 								}</ul>
 							</section>
