@@ -115,7 +115,7 @@ endef
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check portcheck measure site-check \
-	quick check full clean distclean wasmgc-check wasmgc-bench
+	quick check full clean distclean wasmgc-check wasmgc-bench wasmgc-port test-wasmgc-port
 
 help:
 	@sed -n '/^# --- Targets/,$$p' $(MAKEFILE_LIST) | sed -n 's/^## \{0,1\}//p'
@@ -244,6 +244,9 @@ help:
 ## wasmgc-check  -D hxmc.wasm-gc (WasmGC, an experiment): hxmc/test/wasmgc's programs and a few corpus
 ##             cases as WasmGC modules under node, their output against the native build's (hxmc/test/GcCheck.hx);
 ##             wasmgc-bench adds linear-memory wasm: times, peak RSS, sizes
+## wasmgc-port  bin/wasmgc-port/haxe: the port as a WasmGC module (-D hxmc.wasm-gc) run by node
+## test-wasmgc-port  the lanes with it as the port: HXB (the three lists), --interp, display, -L, the
+##             upstream target suites (docs/testing.md)
 ## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
 ##             RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)
 ## check       before a local commit (a few minutes): quick + arm64 (qemu), wine, a 16 KB
@@ -782,6 +785,32 @@ wasmgc-check: $(TOOL) $(STD) $(HOST_RT)
 wasmgc-bench: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) GcCheck --bench
 
+# the port as a WasmGC module (-D hxmc.wasm-gc), and the script that runs it
+# under node (hxmc/bootstrap/wasmgc.mjs; a large stack for the compiler's
+# recursion): the port of test-wasmgc-port
+WASMGC_PORT := bin/wasmgc-port/haxe
+wasmgc-port: $(WASMGC_PORT)
+$(WASMGC_PORT).wasm: $(TOOL) $(PORT_SRC) $(STD)
+	$(call hxmc,$@,$(PORT_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
+$(WASMGC_PORT): $(WASMGC_PORT).wasm
+	printf '#!/bin/sh\n# the port as a WasmGC module under node (make wasmgc-port)\nulimit -s unlimited 2>/dev/null\nexec %s --stack-size=65500 %s %s "$$@"\n' \
+		"$(NODE)" $(abspath hxmc/bootstrap/wasmgc.mjs) $(abspath $<) > $@
+	chmod +x $@
+
+# the lanes with it as the port (docs/testing.md): HXB (the three lists),
+# --interp (but a case whose Eval threads interleave: the module has one
+# thread), display, -L (batch), upstream's target suites; not the server's
+# (sockets)
+WASMGC_ENV = export HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT=$(abspath $(WASMGC_PORT));
+test-wasmgc-port: $(WASMGC_PORT) $(REFERENCE) bin/lix/lix
+	$(WASMGC_ENV) $(SCRIPT) Conformance -j $(JOBS) --cases haxe/test/conformance-cases.txt
+	$(WASMGC_ENV) $(SCRIPT) Conformance -j $(JOBS) --cases haxe/test/conformance-macro-cases.txt
+	$(WASMGC_ENV) $(SCRIPT) Conformance -j $(JOBS) --cases haxe/test/conformance-hxblib-cases.txt --hxb-lib
+	$(WASMGC_ENV) $(SCRIPT) Interp -j $(JOBS) --skip eval-eventLoop-compile
+	$(WASMGC_ENV) $(SCRIPT) Display -j $(JOBS)
+	$(WASMGC_ENV) $(SCRIPT) Haxelib
+	$(WASMGC_ENV) $(SCRIPT) UpstreamTargets -j $(JOBS)
+
 check: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers check $(if $(PORT),--port) $(CASES)
 
@@ -789,7 +818,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/lix-dist bin/site bin/site-build bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/site-build bin/wasm bin/wasmgc-port bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean

@@ -29,6 +29,23 @@ misc, sys on Eval, threads, third-party projects) runs with the release
 binaries as `haxe` (`.github/workflows/upstream-tests.yml`); no target runtime
 is installed anywhere: target suites are compared, not run.
 
+## The port as a WasmGC module
+
+`make test-wasmgc-port` runs the lanes with the port built as a WasmGC
+module (`make wasmgc-port`: `bin/wasmgc-port/haxe.wasm`, `-D hxmc.wasm-gc`,
+and `bin/wasmgc-port/haxe`, a script running it under node with
+`hxmc/bootstrap/wasmgc.mjs`; docs/hxmc.md, "WasmGC") as the port:
+`Conformance` on the three lists (279 + 7 expected failures, 66/66, 7/7),
+`Interp` (275/275: `eval-eventLoop-compile` is skipped, `--skip`: its Eval
+threads interleave, and the module's threads only run when another waits
+for them), `Display` (679/679), `Haxelib` without `--server` (7/7) and
+`UpstreamTargets` (every target's files identical; jvm needs a JDK), the
+same results as natively. The server lanes (`Server`, `ServerJsonRpc`,
+`Haxelib --server`, `EvalDebugger`) need sockets, which its runtime does not
+have. The lanes take several times as long as with the native
+port (a run starts in about 0.4 s; the self-compile to HXB takes 9 s
+against 3.7 s: docs/plans/targets.md, "WasmGC").
+
 ## hl/c digest names
 
 hl/c's digest names (`HlcNames.hx`): hl2c names function, virtual and context

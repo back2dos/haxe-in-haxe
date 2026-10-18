@@ -731,7 +731,33 @@ generated code does inline), whose `@:hxmc.wasmgc` classes and the
 bound; Math's transcendental functions, float
 formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
 runs a module under node; `packages/os/browser.mjs` gives the same host in
-a browser).
+a browser). So is the system (`GcSys`): files whole and by descriptor
+(positions kept by the host, node's fs having no seek), directories in the
+order the system lists them, the shell, processes (`sys.io.Process`: a
+worker thread of the host runs them, the module waiting for each answer,
+so their streams behave as natively; a command that cannot be run exits
+127), and the collector's API (`GcCollector`: collections are the
+engine's to start, finalisers never run); there are no sockets and no
+`Sys.getChar`. There is one thread (the module sees
+`NUMBER_OF_PROCESSORS=1`, and the port runs its parallel passes
+sequentially): a thread created (`GcThreads`) runs, to its end, when a
+running one waits for what nothing else would end (a lock, a queue, a
+condition or a park, without a timeout), then the wait is tried again, so
+fork-join works (the port reads a process's two streams so, calling
+haxelib for `-lib`), threads that interleave with others do not. The
+atomics are a NativeArray of one element; `hxmc.NativeZip` is the same
+decoder, over copies of the Bytes in the linear memory (below). Reflection
+reaches the statics of a class used as a value (`Lower.reflectStatics`:
+their names by class index, read and written by
+`Meta.staticGet`/`staticSet`, a method as a closure; `hxmc.ir.Reach`
+takes `GcNative.find`'s names as it takes `Dyn`'s), copies objects
+(`Reflect.copy`), tests a type known at run time only
+(`GcNative.isOfType`: a switch on the class's id; an interface, which has
+none, gets -1 minus its index in its type value), and calls the methods of
+Arrays and Strings through Dynamic as through structural types
+(`gc_anon_call`); calling what is not a function throws. The port builds
+so (`make wasmgc-port`) and passes the conformance lanes as the port
+(`make test-wasmgc-port`, docs/testing.md).
 
 A program that uses `hxmc.unsafe` or C functions gets a small linear
 memory besides (a hybrid module, `GcModule.memory`): `Mem`'s loads and

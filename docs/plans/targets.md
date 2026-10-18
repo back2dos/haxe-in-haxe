@@ -401,7 +401,53 @@ What stays WasmGC's own, and why:
 
 Not duplicated either: everything above the natives (Std, Type, Reflect,
 the maps, haxe.Json, haxe.crypto...) is the same Haxe source.
-`sys.io.File` streams and processes are not supported.
+
+#### The compiler itself (2026-10-18)
+
+The port (`haxe.Main`, every generator) builds with `-D hxmc.wasm-gc` (`make
+wasmgc-port`) and, run by node as the port, passes the lanes the native
+port passes (`make test-wasmgc-port`, docs/testing.md): HXB 279 + 7
+expected failures, macros 66/66, `--hxb-lib` 7/7, `--interp` 275/275 (but
+a case whose Eval threads interleave), display 679/679, `-L` 7/7 (batch),
+upstream's target suites compiled for every target, identical; its
+self-compile's HXB archive is the native port's, module by module.
+Nothing in `haxe/src` changed. What it lacked, all in hxmc:
+
+- runtime functions over raw memory: the atomics (a NativeArray of one
+  element), `NativeZip` (the same decoder, over copies of the Bytes in the
+  hybrid module's linear memory), the collector's API (`GcCollector`);
+  `rt_throw` (a throw); `FPHelper` came with the one runtime;
+- the system: files by descriptor, processes (a worker thread of the host,
+  the module waiting on `Atomics.wait` for each answer), the shell, threads
+  (one: a thread created runs when another waits for it, `GcThreads`, which
+  is what calling haxelib for `-lib` needs: a thread reads stderr),
+  directories in the system's order (node's `readdirSync` sorts them, and
+  toplevel completion lists types in the order the class path is read);
+- reflection: statics through a class value (the macro API's readers are
+  classes passed as Dynamic; `hxmc.ir.Reach` takes `GcNative.find`'s names
+  as `Dyn`'s), `Reflect.copy` (each macro call copies the compiler API),
+  `Std.isOfType` with a type known at run time only, Array and String
+  methods through Dynamic (`gc_anon_call`, as through structural types:
+  `Lambda` over an Array), calling a non-function as an error rather than
+  a trap.
+
+Measured with node 24, the self-compile to HXB (`-cp haxe/src -main
+haxe.Main --interp --no-output --hxb`):
+
+| | native | linear | WasmGC |
+| --- | --- | --- | --- |
+| self-compile s | 3.7 | 7.1 | 9.1 |
+| peak RSS MB | 650 | 1160 | 1220 |
+| a small compile s | 0.04 | 0.37 | 0.68 |
+| module MB (gzip -9) | | 15.3 (3.6) | 11.0 (2.8) |
+
+(The small compile: `unit.moduleload.TryCatch` to `--interp`; `--version`
+alone takes 0.37 s, linear memory's 0.09 s, most of it V8's optimizing
+compiler: 0.12 s with `--liftoff-only`, which makes the self-compile 17 s.)
+What it does not have: sockets (the compilation server, the server lanes,
+the Eval debugger), threads that interleave, `Sys.getChar`; Math's
+transcendental functions are V8's, not musl's as on every other target (no
+lane shows a difference).
 
 ## Android
 
