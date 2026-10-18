@@ -18,6 +18,43 @@ its own; the first two give most of it.
 - **Zero cost in release**: the dev client is linked only with `-D hxmc.dev`.
 - **Measured**: edit-to-pixels latency is tracked like build time.
 
+## The primitives: state libraries plug in
+
+Fast refresh is built on a small, public layer, `hxmc.dev.Hot` (in
+packages/os, so it has no view or ui dependency), and hxmc's own signals and
+UI engine are only its first clients. Any state library (a store, another
+signal library, an ECS, a game's world) uses the same calls, so it gets fast
+refresh without hxmc knowing about it.
+
+- **Lifecycle.** `Hot.onSnapshot(f)`: contribute values before a swap.
+  `Hot.onDispose(f)`: release what this build owns (effects, timers,
+  sockets, GPU buffers) before the new build starts. `Hot.reloading`: true
+  while the new build starts from a snapshot (false on a cold start).
+- **Storage.** `Hot.save(key, value, type)` and `Hot.load(key, type)`:
+  values kept across one reload by key; `load` returns null when the key is
+  missing or its type changed. Values go through `haxe.Serializer` by
+  default; a library can pass its own encode and decode for values that do
+  not serialize as they are.
+- **Types.** `Hot.typeOf<T>()` is the compiler's hash of a type's shape
+  (fields and their types, recursively), computed at compile time, so a
+  changed type is never restored into the new one.
+- **Keys.** `Hot.here()` is a macro giving the static identity of the place it
+  is written (the enclosing type and function, and the variable it is
+  assigned to); `Hot.scope(name, f)` nests a dynamic part (a component
+  instance, a list item's key) for everything keyed inside `f`. A library's
+  primitive calls these once, so its users write nothing.
+- **Everything else is built on these**: `signal(...)` in packages/view keys
+  itself with `Hot.here()` inside the renderer's `Hot.scope` per component
+  instance; `Hot.keep(key, init)` is a one-line helper over `load` and
+  `onSnapshot`; the UI engine saves focus, scroll and selection by node key.
+- **Documented with an example**: a small store written as a third-party
+  library would be, made reload-safe in a few lines, and tested in CI like
+  the signals.
+
+The dev server's protocol (`reload`, `assets`, `error`, `ok`, and the
+snapshot it hands to the new build) is documented too, so editors and other
+tools can drive the loop.
+
 ## 1. Live reload
 
 `hxmc dev [build.hxml]` (and `npx haxe --dev ...`):
@@ -50,7 +87,8 @@ relaunches on the simulator (iOS forbids loading new code on devices).
   keep its key. The markup and reactive macros (packages/view) assign the
   static part at compile time.
 - **State outside components** (models, stores, app-level values) opts in
-  with a key of its own: `Hot.keep("cart", () -> new Cart())`.
+  with a key of its own: `Hot.keep("cart", () -> new Cart())`, or uses the
+  primitives above directly.
 - **Snapshot and restore.** Before a swap the running program serializes its
   keyed values (`haxe.Serializer`) with each value's type hash from the
   compiler; the new build's signals read their value back by key when
@@ -90,7 +128,7 @@ For each target: native, wasm, WasmGC once it is a browser path, JavaScript.
 ## Who builds what
 
 - Here: `hxmc dev`, the compilation-server work, the protocol and dev
-  server, the keys in packages/view's macros, snapshot and restore, the host
+  server, the `Hot` primitives and their example, the keys in packages/view's macros, snapshot and restore, the host
   and shared libraries (step 3), the tests.
 - The UI session: the UI engine's part (focus, scroll and selection by node
   key; disposal of what ui owns; the theme's live update).
