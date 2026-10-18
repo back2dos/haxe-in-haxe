@@ -198,7 +198,8 @@ help:
 ##             golden images (packages/3d/test/check.sh: RenderTest, Scenes.hx; Linux: Mesa)
 ## 3d-sizes    what each feature of packages/3d adds to a program, natively and as wasm32-wasi
 ##             (packages/3d/test/size)
-## 3d-web-check  packages/3d's frames on WebGPU and WebGL2 in headless Chromium (packages/3d/test/web.mjs)
+## 3d-web-check  packages/3d's frames on WebGPU and WebGL2 in headless Chromium (packages/3d/test/web.mjs),
+##             Model.of's files fetched before main; then built with -D hxmc.wasm-gc
 ## view-check  packages/view on Eval, natively and in JavaScript (the port, node): signals, markup
 ##             (elements, attributes, whitespace, components, text runs, reactive values), the control
 ##             flow components, on two test renderers with boundaries between them, and the programs
@@ -725,6 +726,9 @@ SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp 
 	rm -rf bin/3d/assets
 	$(call hxmc,bin/3d/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.scene.embed=0 -D hxmc.scene.out=bin/3d/SceneWebTest.wasm)
 	$(NODE) packages/3d/test/web.mjs bin/3d/SceneWebTest.wasm bin/3d
+	@# (and as WasmGC, the files built in)
+	$(call hxmc,bin/3d/gc/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
+	$(NODE) packages/3d/test/web.mjs bin/3d/gc/SceneWebTest.wasm bin/3d/gc
 
 # (two renderers: TestRenderer, OtherRenderer; JavaScript compiled by the port)
 VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer -D hxmc.view.renderer.other=OtherRenderer
