@@ -139,7 +139,9 @@ cube the same way (`make site-check`, `site/tools/browser-test.mjs`, the
 Xvfb, and in WebKit), and in Chromium on an emulated phone (touch, a 390x844 viewport, Chromium's
 own touch input through DevTools): a horizontal touch drag turns the still
 cube (its frame read back differs), a vertical swipe starting on the canvas
-scrolls the page (`touchAction: 'pan-y'`).
+scrolls the page (`touchAction: 'pan-y'`); and the spinning cube held: while
+a finger, or the mouse, holds it after a drag (the mouse's leaving the
+canvas), its frames do not change, and once let go it spins again.
 `make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
 emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`),
 and the tests' PNG files (`Png.hx`: written as `--bless` writes them, in
@@ -274,8 +276,10 @@ in Firefox and WebKit at a desktop's and a phone's width, rendered with
 its islands hydrated, no errors and no horizontal scrolling; the menu, the
 theme, the examples running, the triangle and the cube against their
 golden images, web's Counter and Lab islands, the tone; the playground's
-compiler with both modules and its fallback to the legacy one in a
-Chromium without exnref), `npm` (the nine packages in fresh projects on each of the six
+compiler with both modules, its fallback to the legacy one in a
+Chromium without exnref, and its worker running a request again after a
+fault of the engine, faked (the WebKit of Safari 26.0 at times faults in
+correct code: `site/client/Worker.hx`)), `npm` (the nine packages in fresh projects on each of the six
 machines: native at once through the platform package, `-lib` from
 node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on linux-x64,
 or on all six on main, tags and the nightly run, lix with `dist/`, the
