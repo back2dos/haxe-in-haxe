@@ -181,6 +181,11 @@ required checks yet).
 `gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
 writes, R8 and RGBA8 textures, blending, scissor) against
 `packages/gfx/test/features.png`.
+`make 3d-check` (CI's `gfx` job): `@hxmc/3d` ([plans/3d.md](plans/3d.md)): its
+math (quaternions against gfx's rotation matrices, inverses, decomposition,
+bounds), the scene graph's matrices and their cache, the camera and the
+fixed-step clock, on Eval, natively and as wasm32-wasi
+(`packages/3d/test/SceneTest.hx`).
 
 ## UI
 

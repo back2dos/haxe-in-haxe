@@ -111,7 +111,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check \
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check 3d-check \
 	android-programs android-check android-device-check touch-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
@@ -191,6 +191,8 @@ help:
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
+## 3d-check    packages/3d (docs/plans/3d.md): the math, the scene graph, the camera and the fixed-step
+##             clock on Eval, natively and as wasm32-wasi (packages/3d/test/SceneTest.hx)
 ## view-check  packages/view on Eval, natively and in JavaScript (the port, node): signals, markup
 ##             (elements, attributes, whitespace, components, text runs, reactive values), the control
 ##             flow components, on two test renderers with boundaries between them, and the programs
@@ -669,6 +671,15 @@ audio-web-check: $(TOOL) $(STD)
 gfx-shader-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/gfx/src -cp packages/gfx/examples -cp packages/gfx/test --run ShaderTest $(TOOL) $(if $(BLESS),--bless)
 
+# packages/3d (docs/plans/3d.md) on gfx: the unit tests on Eval, natively and as wasm32-wasi
+SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test
+3d-check: $(TOOL) $(STD) $(HOST_RT)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run SceneTest
+	$(call hxmc,bin/3d/SceneTest,$(SCENE_CP) -main SceneTest $(HXMC_ARGS))
+	bin/3d/SceneTest
+	$(call hxmc,bin/3d/SceneTest.wasm,$(SCENE_CP) -main SceneTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(WASI) bin/3d/SceneTest.wasm
+
 # (two renderers: TestRenderer, OtherRenderer; JavaScript compiled by the port)
 VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer -D hxmc.view.renderer.other=OtherRenderer
 view-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
@@ -845,7 +856,7 @@ full: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) Tiers full $(CASES)
 
 clean:
-	rm -rf bin/port bin/release bin/lix-dist bin/site bin/site-build bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/audio bin/corpus \
+	rm -rf bin/port bin/release bin/lix-dist bin/site bin/site-build bin/wasm bin/fuzz bin/lix bin/npm bin/stage0 bin/test bin/gfx bin/3d bin/audio bin/corpus \
 		bin/hxmc/boot bin/hxmc/fix bin/hxmc-t bin/hxmc-fuzz $(CLI_BOOT)/hxmc-std $(CLI_BOOT)/rt
 
 distclean: clean

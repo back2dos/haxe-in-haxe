@@ -623,6 +623,8 @@ jobs:
           make rt && touch bin/hxmc/rt/*/*.o
           make gfx-shader-check
           make gfx-check GFX_TARGET=linux-x86_64
+      - name: 3d (Eval, natively, wasm32-wasi)
+        run: make 3d-check
       - name: audio (ALSA's null and file devices)
         run: make audio-check AUDIO_TARGET=linux-x86_64
       - name: touch (TouchDrag, the gesture of Android and iOS)
