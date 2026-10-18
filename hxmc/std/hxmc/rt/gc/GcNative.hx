@@ -168,10 +168,10 @@ class GcNative {
 	public static function compare(a:Dynamic, b:Dynamic):Int
 		return @:privateAccess GcDyn.cmp(a, b);
 
-	// (WasmGC objects have no address to hash: one bucket, ObjectMap then compares
-	// by reference; correct, linear in the map's size)
+	// (WasmGC objects have no address: class instances and anonymous structures
+	// get a hash, stored in them, the first time; other values 0)
 	public static function objHash(o:Dynamic):Int
-		return 0;
+		return W.objHash(o);
 
 	// ---- Dynamic access (o.name on a Dynamic)
 

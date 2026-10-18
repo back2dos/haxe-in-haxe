@@ -327,7 +327,7 @@ class Helpers {
 		b.u8(0x40);
 		get(b, 0);
 		m.castTo(b, m.objType);
-		m.gc(b, 0x02, m.objType, 0);
+		m.indexOf(b);
 		set(b, 1);
 		for (c in m.classList())
 			if (c.ifaces.indexOf(iface) >= 0) {
@@ -356,7 +356,7 @@ class Helpers {
 		var idx = m.addHelper(key, params + "_" + GcModule.repr(s.ret), b, [Enc.I32]);
 		get(b, 0);
 		m.castTo(b, m.objType);
-		m.gc(b, 0x02, m.objType, 0);
+		m.indexOf(b);
 		set(b, s.args.length + 1);
 		for (c in m.classList()) {
 			var f = c.findMethod(name);
@@ -516,6 +516,77 @@ class Helpers {
 			case "b": m.box(b, TBool);
 			case _:
 		}
+
+	// an object's identity hash (GcModule.indexOf), made the first time from a
+	// linear congruential sequence (as hxmc.rt.Dyn.objHash's); 0 for other values
+	public static function objHash(m:GcModule):Int {
+		var h = m.hasHelper("obj_hash");
+		if (h != null) return h;
+		var tb = new Buf();
+		tb.u8(Enc.I32);
+		var ib = new Buf();
+		i32(ib, 0x9E37);
+		ib.u8(0x0B);
+		var seed = m.newGlobal(tb, ib, true);
+		var b = new Buf();
+		// (local 1: the first i32, local 2: the hash)
+		for (anon in [false, true]) {
+			var t = anon ? m.anonBaseType : m.objType, f = anon ? 1 : 0;
+			get(b, 0);
+			b.u8(0xFB);
+			b.u8(0x14);
+			Enc.sleb(b, t);
+			b.u8(0x04);
+			b.u8(0x40);
+			get(b, 0);
+			m.castTo(b, t);
+			m.gc(b, 0x02, t, f);
+			b.u8(0x22);
+			b.u8(1);
+			i32(b, 16);
+			b.u8(0x76);
+			b.u8(0x22);
+			b.u8(2);
+			b.u8(0x45);
+			b.u8(0x04);
+			b.u8(0x40);
+			// seed = seed * 1103515245 + 12345; hash = seed >>> 16 & 0xFFFF, not 0
+			b.u8(0x23);
+			Enc.uleb(b, seed);
+			i32(b, 1103515245);
+			b.u8(0x6C);
+			i32(b, 12345);
+			b.u8(0x6A);
+			b.u8(0x24);
+			Enc.uleb(b, seed);
+			b.u8(0x23);
+			Enc.uleb(b, seed);
+			i32(b, 16);
+			b.u8(0x76);
+			b.u8(0x22);
+			b.u8(2);
+			b.u8(0x45);
+			b.u8(0x04);
+			b.u8(0x40);
+			i32(b, 1);
+			set(b, 2);
+			b.u8(0x0B);
+			get(b, 0);
+			m.castTo(b, t);
+			get(b, 1);
+			get(b, 2);
+			i32(b, 16);
+			b.u8(0x74);
+			b.u8(0x72);
+			m.gc(b, 0x05, t, f);
+			b.u8(0x0B);
+			get(b, 2);
+			b.u8(0x0F);
+			b.u8(0x0B);
+		}
+		i32(b, 0);
+		return m.addHelper("obj_hash", "p_i", b, [Enc.I32, Enc.I32]);
+	}
 
 	// an Int boxed: those of SMALL_MIN...SMALL_MAX made once each (in a table
 	// filled as they are asked for, as hxmc.rt.Boxes has them), the others new

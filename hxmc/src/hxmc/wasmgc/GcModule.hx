@@ -280,7 +280,7 @@ class GcModule {
 		tEnum = structType([{r: "i", mut: false}, {r: "i", mut: false}], -1, true);
 		tFunBase = structType([], -1, true);
 		// {added fields (GcFields), layout index}
-		tAnonBase = structType([{r: "p", mut: true}, {r: "i", mut: false}], -1, true);
+		tAnonBase = structType([{r: "p", mut: true}, {r: "i", mut: true}], -1, true);
 		for (k in ["i", "f", "l", "b"])
 			tDyn.set(k, structType([{r: k == "b" ? "i" : k, mut: false}], -1, false));
 		for (k in ["i", "f", "l", "p"])
@@ -300,7 +300,7 @@ class GcModule {
 			lambdaType(l);
 		for (s in prog.shapes)
 			// (by representation: a layout is shared by the literals of its names and representations)
-			tShape.set(s, structType([{r: "p", mut: true}, {r: "i", mut: false}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
+			tShape.set(s, structType([{r: "p", mut: true}, {r: "i", mut: true}].concat([for (f in s.fields) {r: repr(f.ty), mut: true}]), tAnonBase, false));
 	}
 
 	// an enum's type and its constructors' (made when first asked for: their
@@ -645,7 +645,7 @@ class GcModule {
 		b.u8(0x5F);
 		Enc.uleb(b, c.fields.length + 1);
 		valType(b, "i");
-		b.u8(0);
+		b.u8(1);
 		for (f in c.fields) {
 			var k = keyOf(f.ty);
 			if (k.charAt(0) == "t") refType(b, Std.parseInt(k.substr(1))) else valType(b, repr(f.ty));
@@ -812,6 +812,18 @@ class GcModule {
 	// an array's element kind in the IR: b for Bool, else its representation
 	public static function elemKind(t:Ty):String
 		return t == TBool ? "b" : repr(t);
+
+	// An object's first i32 (a class instance's class index, an anonymous
+	// structure's layout index) holds its identity hash in its top 16 bits,
+	// set when first asked for (Helpers.objHash), as the native header's.
+	// The index of the object on the stack (a class instance, or with anon an
+	// anonymous structure, cast):
+	public function indexOf(b:Buf, anon = false) {
+		gc(b, 0x02, anon ? tAnonBase : tObj, anon ? 1 : 0);
+		b.u8(0x41);
+		Enc.sleb(b, 0xFFFF);
+		b.u8(0x71);
+	}
 
 	// the scalar of type t on the stack boxed as Dynamic (Ints: Helpers.boxInt)
 	public function box(b:Buf, t:Ty)

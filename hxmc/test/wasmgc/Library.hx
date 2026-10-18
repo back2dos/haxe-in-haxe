@@ -1,5 +1,10 @@
 // the std over the runtime: Array's methods, Bytes, maps, Int64, dates, string switches (GcCheck)
 class Library {
+	final n:Int;
+
+	function new(n)
+		this.n = n;
+
 	static function main() {
 		// Array's methods
 		var a = [5, 3, 9, 1, 7];
@@ -54,6 +59,15 @@ class Library {
 		for (i in 0...50)
 			im.set(i * 7, "v" + i);
 		Sys.println(im.get(49) + " " + im.get(343) + " " + Lambda.count(im));
+		// ObjectMap: class instances and anonymous structures as keys (their identity hashes)
+		var om = new Map<Library, Int>(), objs = [for (i in 0...300) new Library(i)];
+		for (o in objs)
+			om.set(o, o.n * 2);
+		om.remove(objs[7]);
+		var am = new haxe.ds.ObjectMap<{a:Int}, String>(), ka = {a: 1}, kb = {a: 1};
+		am.set(ka, "a");
+		am.set(kb, "b");
+		Sys.println(om.get(objs[150]) + " " + om.exists(objs[7]) + " " + Lambda.count(om) + " " + [for (k in om.keys()) k.n].slice(0, 9) + " " + am.get(ka) + am.get(kb));
 		// (Vector<T>'s blit, generic, on a Vector<Float>)
 		var v = new haxe.ds.Vector<Float>(4, 0.5), w = new haxe.ds.Vector<Float>(6, 0.0);
 		v[3] = 2.5;

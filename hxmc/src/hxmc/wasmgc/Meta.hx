@@ -120,7 +120,7 @@ class Meta {
 	function clsOf(b:Buf) {
 		get(b, 0);
 		m.castTo(b, m.objType);
-		m.gc(b, 0x02, m.objType, 0);
+		m.indexOf(b);
 	}
 
 	static function storable(t:Ty):Bool
@@ -169,7 +169,7 @@ class Meta {
 			b.u8(0x40);
 			get(b, 0);
 			m.castTo(b, m.anonBaseType);
-			m.gc(b, 0x02, m.anonBaseType, 1);
+			m.indexOf(b, true);
 			b.u8(0x0F);
 			b.u8(0x0B);
 			i32(b, -1);

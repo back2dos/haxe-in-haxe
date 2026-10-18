@@ -806,7 +806,7 @@ class FuncGen {
 				for (k in 1...args.length)
 					expr(args[k]);
 				localGet(t);
-				gc(0x02, m.objType, 0);
+				m.indexOf(b);
 				i32(m.selCount);
 				op(0x6C);
 				i32(m.selOf(sel));
@@ -1090,6 +1090,9 @@ class FuncGen {
 				case "kind":
 					all();
 					call(Helpers.kind(m));
+				case "objHash":
+					all();
+					call(Helpers.objHash(m));
 				case "isNull":
 					all();
 					op(0xD1);
