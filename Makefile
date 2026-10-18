@@ -650,6 +650,7 @@ web-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
 # (the DOM's widgets: the theme's CSS on Eval, the examples compiled to JavaScript by the port, driven in Chromium)
 web-widgets: $(TOOL) $(PORT_BIN)
 	@mkdir -p bin/web/widgets
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/tools -cp packages/web/test --run WidgetParity packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/web/src/hxmc/web/widgets/Widgets.hx
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/web/widgets/shadcn.css
 	for m in counter:WidgetCounter form:WidgetForm gallery:WidgetGallery; do \
 		ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(DOM_CP) -cp packages/web/examples -main $${m#*:} -dce full -D js-es=6 -D analyzer-optimize -js bin/web/widgets/$${m%%:*}.js || exit 1; \
