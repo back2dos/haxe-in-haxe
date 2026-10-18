@@ -10,6 +10,7 @@ class Options {
 	public var strip = true; // no symbol table unless -debug, -D hxmc.symbols or HXMC_SYMBOLS=1
 	public var pic = false; // -D hxmc.pic: position-independent executable
 	public var shared = false; // -D hxmc.shared: a shared library (Linux in the glibc mode; Android always)
+	public var dllBase:Null<String> = null; // -D hxmc.dll-base=0x<hex>: a Windows DLL's preferred base
 	public var output:Null<String> = null; // -D hxmc.output=<path>: the output, instead of --custom-target's (hxmc dev: the iOS simulator's dylibs, where the build names an app)
 	// -D hxmc.exports=<name>[,<name>...]: what a shared library exports (Android: ANativeActivity_onCreate too)
 	public var exports:Array<String> = [];
@@ -101,6 +102,7 @@ class Options {
 		o.strip = !(def("debug") != null || def("hxmc.symbols") != null || env("HXMC_SYMBOLS") == "1");
 		o.shared = def("hxmc.shared") != null;
 		o.output = def("hxmc.output");
+		o.dllBase = def("hxmc.dll_base"); // (-D turns the dash into an underscore)
 		var ex = def("hxmc.exports");
 		if (ex != null)
 			for (n in ex.split(","))

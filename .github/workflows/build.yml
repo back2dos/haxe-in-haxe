@@ -665,8 +665,9 @@ jobs:
           for t in windows-x86_64 windows-arm64; do
             make gfx-programs ui-programs GFX_TARGET=$t
             make audio-programs AUDIO_TARGET=$t
+            make devhost-programs GFX_TARGET=$t
             cp bin/audio/$t/AudioTest.exe bin/ui/$t/UiDrawTest.exe bin/ui/$t/ClipboardTest.exe bin/ui/$t/NativeTest.exe bin/ui/$t/WinAccessTest.exe bin/ui/$t/EmojiTest.exe bin/ui/$t/WindowTest.exe bin/gfx/$t/
-            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe WindowTest.exe
+            tar czf bin/gfx-$t.tar.gz -C bin/gfx/$t GfxTest.exe Triangle.exe Cube.exe AudioTest.exe UiDrawTest.exe ClipboardTest.exe NativeTest.exe WinAccessTest.exe EmojiTest.exe WindowTest.exe dev
           done
       - uses: actions/upload-artifact@v7
         with: {name: gfx-windows, path: "bin/gfx-windows-*.tar.gz", retention-days: 3}
@@ -882,6 +883,9 @@ jobs:
           HXMC_GFX_SOFTWARE=1 gfx/EmojiTest.exe none gfx/emoji.png
           # (a window's title, size and minimum size, read back)
           gfx/WindowTest.exe
+      - name: hxmc dev's host (two builds swapped into the running process, docs/dev.md)
+        if: ${{ !cancelled() }}
+        run: HXMC_GFX_SOFTWARE=1 sh packages/gfx/test/host-dev.sh gfx/dev dll host.exe
       - name: audio (WASAPI)
         run: sh packages/os/test/audio.sh gfx
       - uses: actions/upload-artifact@v7
@@ -958,7 +962,7 @@ jobs:
           g="$GITHUB_WORKSPACE/repo/packages/gfx"
           npx haxe -lib hxmc.os -main hxmc.dev.DevHost --custom-target hxmc=dev/host
           for v in 1 2 3; do npx haxe -lib hxmc.gfx -cp "$g/examples" -cp "$g/test" -main DevHostTest -D hxmc.dev -D hxmc.dev-host -D hxmc.shared -D hxmc.exports=hxmc_dev_run,hxmc_dev_state -D devhost_version=$v --custom-target hxmc=dev/DevHost$v.dylib; done
-          sh "$g/test/mac-dev.sh" dev
+          sh "$g/test/host-dev.sh" dev dylib host
       - name: audio (CoreAudio)
         run: |
           set -ex

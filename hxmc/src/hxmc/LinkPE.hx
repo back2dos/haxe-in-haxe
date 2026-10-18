@@ -13,7 +13,11 @@ import hxmc.Obj;
 // as RtlLookupFunctionEntry searches it). With `symbols` (-debug, -D
 // hxmc.symbols), a COFF symbol table of the code and, with -debug's lines,
 // DWARF sections (Dwarf), as MinGW's toolchain writes them for gdb and lldb
-// (no PDB: docs/plans/codegen.md).
+// (no PDB: docs/plans/codegen.md). With `dll` (-D hxmc.shared: hxmc dev's
+// builds on Windows) a DLL instead: no entry point, its exports (Abi.exports)
+// in an export directory, relocatable (base relocations, x86-64 too) from
+// its preferred base (dllBase), which it keeps unless taken: no
+// DYNAMIC_BASE, so 32-bit absolute addresses stay below 4 GB.
 class LinkPE {
 	// the image base: x86-64 a fixed 0x400000 (addresses are kept absolute);
 	// arm64 0x140000000, relocatable (addresses are kept as RVAs, BASE 0, and
@@ -31,6 +35,12 @@ class LinkPE {
 	var imports = new Map<String, {dll:String, name:String, code:Bool}>();
 	var addr = new Map<Section, Int>();
 	var outOf = new Map<Section, Int>(); // section -> output section index
+
+	// a DLL: its exports, its file name, its preferred base
+	public var dll = false;
+	public var exports:Array<String> = [];
+	public var dllName = "";
+	public var dllBase = 0x10000000;
 
 	public function new(objs:Array<Obj>, arm:Bool) {
 		this.objs = objs;
@@ -85,6 +95,11 @@ class LinkPE {
 	}
 
 	public function link(entry:String):Bytes {
+		if (dll) {
+			BASE = dllBase;
+			imgLo = 0;
+			imgHi = 0;
+		}
 		readImports();
 		resolve();
 		// the imports the objects use: IAT slots (and thunks for code)
@@ -134,6 +149,43 @@ class LinkPE {
 		// winpthreads' initialization), 0; kept together by their names in .data
 		var extra = new Obj();
 		extra.sections.push(thunks);
+		// (a DLL) its export directory: the directory, the function and name
+		// tables (names sorted, as the loader searches them), the ordinals, the strings
+		var edata:Null<Section> = null;
+		if (dll) {
+			var names = [for (n in exports) if (globals.exists(n)) n];
+			names.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+			edata = new Section(".rdata$hxmc_edata", RoData, 4);
+			var self = new Symbol(".Ledata");
+			self.global = false;
+			self.section = edata;
+			var n = names.length, b = edata.buf;
+			var eat = 40, npt = eat + 4 * n, ord = npt + 4 * n, str = ord + 2 * n;
+			var strings = [Bytes.ofString(dllName)].concat([for (x in names) Bytes.ofString(x)]);
+			var at = str, strAt = [];
+			for (x in strings) {
+				strAt.push(at);
+				at += x.length + 1;
+			}
+			b.zeros(at);
+			function rva(off:Int, to:Int)
+				edata.relocs.push(new Reloc(off, RImgRel32, self, to));
+			rva(12, strAt[0]); // Name
+			b.set32(16, 1); // Base
+			b.set32(20, n); // NumberOfFunctions
+			b.set32(24, n); // NumberOfNames
+			rva(28, eat);
+			rva(32, npt);
+			rva(36, ord);
+			for (i in 0...n) {
+				edata.relocs.push(new Reloc(eat + 4 * i, RImgRel32, globals.get(names[i]), 0));
+				rva(npt + 4 * i, strAt[i + 1]);
+				b.set16(ord + 2 * i, i);
+			}
+			for (k in 0...strings.length)
+				b.b.blit(strAt[k], strings[k], 0, strings[k].length);
+			extra.sections.push(edata);
+		}
 		// (diagnostics: an entry point that returns 42 at once)
 		var retEntry = new Section(".text$hxmc_ret42", Text, 16);
 		if (arm) {
@@ -222,7 +274,7 @@ class LinkPE {
 			rva = align(pos, SECT);
 		}
 		var imageSize = rva;
-		var relocatable = arm && !diag("fixed");
+		var relocatable = (arm || dll) && !diag("fixed");
 		var baseRelocs:Array<{rva:Int, type:Int}> = [];
 		var defined = new Map<String, Int>();
 		defined.set("__CTOR_LIST__", addr.get(listHead.get("ctor")));
@@ -414,16 +466,16 @@ class LinkPE {
 		h.u32(symOff); // PointerToSymbolTable (the string table follows the symbols)
 		h.u32(nsyms);
 		h.u16(240);
-		h.u16(relocatable ? 0x0022 : 0x0023); // (RELOCS_STRIPPED |) EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
+		h.u16((relocatable ? 0x0022 : 0x0023) | (dll ? 0x2000 : 0)); // (RELOCS_STRIPPED |) EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE (| DLL)
 		h.u16(0x20b); // PE32+
 		h.u8(14);
 		h.u8(0);
 		h.u32(rawSize[0]); // SizeOfCode
 		h.u32(rawSize[1] + rawSize[2] + rawSize[3] + rawSize[4] + rawSize[5]); // SizeOfInitializedData
 		h.u32(sizes[6]); // SizeOfUninitializedData
-		var e = globals.get(entry);
-		if (e == null) throw "hxmc: link: no entry point " + entry;
-		h.u32(diag("ret42") ? addr.get(retEntry) - BASE : symAddr(e) - BASE);
+		var e = dll ? null : globals.get(entry);
+		if (e == null && !dll) throw "hxmc: link: no entry point " + entry;
+		h.u32(dll ? 0 : diag("ret42") ? addr.get(retEntry) - BASE : symAddr(e) - BASE); // (a DLL: none)
 		h.u32(starts[0]); // BaseOfCode
 		h.u64(BASE + imgLo, imgHi); // ImageBase
 		h.u32(SECT);
@@ -441,7 +493,7 @@ class LinkPE {
 		h.u16(3); // console
 		// NX_COMPAT | TERMINAL_SERVER_AWARE (x86-64: no DYNAMIC_BASE, a fixed
 		// image; arm64: DYNAMIC_BASE, with base relocations)
-		h.u16(relocatable ? (imgHi != 0 ? 0x8160 : 0x8140) : 0x8100); // (| HIGH_ENTROPY_VA above 4 GB)
+		h.u16(dll ? 0x8100 : relocatable ? (imgHi != 0 ? 0x8160 : 0x8140) : 0x8100); // (| HIGH_ENTROPY_VA above 4 GB; a DLL: at its preferred base when free)
 		h.u64(0x1000000, 0); // stack reserve
 		h.u64(0x1000, 0);
 		h.u64(0x100000, 0); // heap
@@ -450,6 +502,7 @@ class LinkPE {
 		h.u32(16);
 		// data directories
 		var dirs = [for (_ in 0...16) [0, 0]];
+		if (edata != null) dirs[0] = [addr.get(edata) - BASE, edata.buf.len];
 		if (dlls.length > 0) {
 			dirs[1] = [starts[5] + idataLayout.dir, 20 * (dlls.length + 1)];
 			dirs[12] = [starts[5] + idataLayout.iatStart, idataLayout.iatSize];

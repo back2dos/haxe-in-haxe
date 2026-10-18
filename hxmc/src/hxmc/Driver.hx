@@ -29,8 +29,8 @@ class Driver {
 		if (o.segAlign > 0) abi.segAlign = o.segAlign;
 		if (o.pic) abi.reloc = Pic;
 		abi.framePointers = !abi.wasm && (abi.arm || o.framePointers);
-		if (o.shared && abi.os == "macos") {
-			// (macOS and iOS: a Mach-O dylib, LinkMachO; the code is position-independent already)
+		if (o.shared && (abi.os == "macos" || abi.os == "windows")) {
+			// (macOS and iOS: a Mach-O dylib, LinkMachO; Windows: a DLL, LinkPE; the code is position-independent already)
 			abi.output = SharedLibrary;
 		} else if (o.shared && !abi.android) {
 			// (Linux in the dynamic glibc mode: the C library's imports; Android always is one)
@@ -469,6 +469,13 @@ class Driver {
 		var bundle = abi.ios() && hxmc.ios.Bundle.isBundle(out) ? new hxmc.ios.Bundle(out, abi, o.ios) : null;
 		var exe = abi.os == "windows" ? {
 			var l = new LinkPE(all, abi.arm);
+			if (abi.output == SharedLibrary) {
+				l.dll = true;
+				l.exports = abi.exports;
+				l.dllName = haxe.io.Path.withoutDirectory(out);
+				// (-D hxmc.dll-base=<hex>: where it prefers to load; hxmc dev alternates two)
+				if (o.dllBase != null) l.dllBase = Std.parseInt(o.dllBase);
+			}
 			l.symbols = !o.strip;
 			l.link("mainCRTStartup");
 		} : abi.os == "macos" ? {
@@ -501,7 +508,7 @@ class Driver {
 			if (o.jit) sys.io.File.saveContent(out + ".syms", l.hostSyms.toString());
 			exe;
 		};
-		if (abi.os == "windows" && !StringTools.endsWith(out, ".exe")) out += ".exe";
+		if (abi.os == "windows" && abi.output != SharedLibrary && !StringTools.endsWith(out, ".exe")) out += ".exe";
 		// iOS: the app bundle (or its .ipa) around the executable
 		if (bundle != null) {
 			bundle.write(out, exe);

@@ -570,6 +570,14 @@ gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Targets$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Targets $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Mips$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Mips $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Formats$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Formats $(HXMC_ARGS) $(GFX_ARGS))
+# hxmc dev's host and three builds of DevHostTest as libraries it loads in turn (packages/gfx/test/host-dev.sh)
+DEVHOST_ARGS := -D hxmc.dev -D hxmc.dev-host -D hxmc.shared -D hxmc.exports=hxmc_dev_run,hxmc_dev_state
+DEVHOST_EXT = $(if $(filter windows-%,$(GFX_TARGET)),dll,$(if $(filter macos-%,$(GFX_TARGET)),dylib,so))
+devhost-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/host$(call EXE,$(GFX_TARGET)),-cp packages/os/src -main hxmc.dev.DevHost $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/DevHost1.$(DEVHOST_EXT),$(GFX_CP) -main DevHostTest $(HXMC_ARGS) $(GFX_ARGS) $(DEVHOST_ARGS) -D devhost_version=1 -D hxmc.dll-base=0x10000000)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/DevHost2.$(DEVHOST_EXT),$(GFX_CP) -main DevHostTest $(HXMC_ARGS) $(GFX_ARGS) $(DEVHOST_ARGS) -D devhost_version=2 -D hxmc.dll-base=0x30000000)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/DevHost3.$(DEVHOST_EXT),$(GFX_CP) -main DevHostTest $(HXMC_ARGS) $(GFX_ARGS) $(DEVHOST_ARGS) -D devhost_version=3 -D hxmc.dll-base=0x10000000)
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 

@@ -5,11 +5,11 @@ program, runs it, and on every save builds it again and swaps it in; the
 new build starts fresh, with the old build's state carried over by key
 (fast refresh). Nothing reloads or restarts (step 3, "No reloads"): in the
 browser the new module runs in the same page, on the same canvas and GPU
-device; natively on Linux each build is a shared library loaded into the
-same process, the dev host, on the same window and GL context (macOS and
-Windows: a new process per build, for now). The design and what comes next:
+device; natively each build is a shared library loaded into the same
+process, the dev host, on the same window and GPU context (Linux, macOS,
+Windows); on Android and the iOS simulator the app is the host. The design and what comes next:
 [plans/dev-loop.md](plans/dev-loop.md) (steps 1 and 2 are built, step 3 in
-the browser and on Linux).
+the browser, natively, on Android and on the iOS simulator).
 
 ```sh
 npx haxe --dev build.hxml          # the npm package
@@ -133,8 +133,20 @@ The same host and handover as Linux's, with what each system keeps:
   window's callbacks reach the running build. The Metal back end leaves
   the layer its device. Checked in CI (gfx-macos: `mac-dev.sh`, the host
   and three builds of `DevHostTest` as dylibs: the count kept, the same
-  process and window). Windows' DLLs are not written yet: a process per
-  build there.
+  process and window).
+- **Windows.** hxmc writes DLLs (`-D hxmc.shared`: no entry point, the
+  exports in an export directory, base relocations, x86-64's included,
+  from a preferred base, `-D hxmc.dll-base`, which `hxmc dev` alternates
+  between two so that the old build's and the new one's never collide),
+  so `hxmc dev` runs a native program in the dev host as elsewhere (each
+  build `<out>.dev/<n>.dll`, loaded with `LoadLibrary` on the host's main
+  thread, the thread that made the window). The first build makes the
+  window and the D3D11 device, its context and the window's swap chain;
+  each next build takes them, sets the window's procedure and its class's
+  to its own (`SetWindowLongPtr`, `SetClassLongPtr`) and makes its own
+  render target views on the swap chain's buffer. Checked in CI
+  (gfx-windows, x86-64 and arm64, on WARP: `host-dev.sh` with the host
+  and three builds as DLLs, cross-built on Linux) and here under Wine.
 - **Android.** The APK is the dev host: `hxmc dev` builds it for its own
   socket (`-D hxmc.dev-server=127.0.0.1:<port>`, the port beside the
   page's, `HXMC_DEV_ANDROID_PORT`; it asks for the `INTERNET` permission,
@@ -470,9 +482,11 @@ a fresh build of the same sources, byte for byte
 (`packages/os/test/dev/dev-verify.mjs <compiler> [example] [native|web|web-gc]`).
 ## Not yet
 
-- Seamless swaps on Windows (step 3): the process restarts (the window
-  closes and opens again); it needs DLLs from hxmc. An iOS device cannot
-  load a new build's code (above): the wasm fallback is not built.
+- An iOS device cannot load a new build's code (above): the wasm fallback
+  is not built. The dev host is tested on macOS, Windows and the iOS
+  simulator with `DevHostTest` handing over by itself (`HXMC_DEV_NEXT`),
+  and on Linux and Android with `hxmc dev`'s own edits; `hxmc dev` itself
+  is not run in CI on macOS, Windows or the simulator.
 - Styles and assets without a rebuild (step 4).
 - The UI engine's own state (focus, scroll and selection by node key) is
   the UI session's part of step 2; ui's widgets' own signals are keyed

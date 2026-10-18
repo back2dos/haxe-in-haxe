@@ -303,8 +303,9 @@ const hxbCache = process.env.HXMC_DEV_HXB_CACHE === '1' ? [] : ['-D', 'disable-h
 // builds; HXMC_DEV_HOST=0: a new process per build instead
 // (macOS: each build a dylib)
 const hosted = !browser && !android && !out.endsWith('.app') && osPackage && process.env.HXMC_DEV_HOST !== '0'
-	&& (process.platform === 'darwin' || process.platform === 'linux' && all.some((a, i) => (a === '-D' || a === '--define') && all[i + 1] === 'hxmc.libc=glibc'));
-const libExt = process.platform === 'darwin' ? '.dylib' : '.so';
+	&& (process.platform === 'darwin' || process.platform === 'win32'
+		|| process.platform === 'linux' && all.some((a, i) => (a === '-D' || a === '--define') && all[i + 1] === 'hxmc.libc=glibc'));
+const libExt = process.platform === 'darwin' ? '.dylib' : process.platform === 'win32' ? '.dll' : '.so';
 // Android: the APK is the dev host, installed once: its library's activity
 // glue keeps the window, the EGL context and the input queue, and each
 // later build's library (taken from its APK) is fetched by the running
@@ -324,7 +325,9 @@ async function build() {
 	for (const file of files)
 		if (file.endsWith('.hx')) await request(['--display', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/invalidate', params: { file } })]);
 	// (the iOS simulator: the app first, then dylibs)
-	const extra = !iosSim ? hostArgs : iosInstalled ? [...IOS_APP, '-D', 'hxmc.shared', '-D', 'hxmc.output=' + path.join(hostDir, 'next.dylib')] : IOS_APP;
+	// (Windows: a DLL prefers one of two bases, the other build's while it is loaded)
+	const extra = hosted && process.platform === 'win32' ? [...hostArgs, '-D', 'hxmc.dll-base=' + (libCount % 2 === 0 ? '0x10000000' : '0x30000000')]
+		: !iosSim ? hostArgs : iosInstalled ? [...IOS_APP, '-D', 'hxmc.shared', '-D', 'hxmc.output=' + path.join(hostDir, 'next.dylib')] : IOS_APP;
 	return request([...args, '-D', 'hxmc.dev', ...extra, ...hxbCache, ...(hxmcStd ? ['-cp', hxmcStd] : [])]);
 }
 
@@ -344,10 +347,10 @@ if (hosted) {
 	for (const f of ['DevHost.hx']) h.update(fs.readFileSync(path.join(src, 'hxmc', 'dev', f)));
 	h.update(String(fs.statSync(compiler).mtimeMs));
 	const cacheDir = path.join(process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), '.cache'), 'hxmc', 'dev-host');
-	hostExe = path.join(cacheDir, 'host-' + h.digest('hex').slice(0, 16));
+	hostExe = path.join(cacheDir, 'host-' + h.digest('hex').slice(0, 16)) + (process.platform === 'win32' ? '.exe' : '');
 	if (!fs.existsSync(hostExe)) hostBuilt = new Promise((resolve, reject) => {
 		fs.mkdirSync(cacheDir, { recursive: true });
-		const tmp = hostExe + '.' + process.pid;
+		const tmp = hostExe.replace(/\.exe$/, '') + '.' + process.pid + (process.platform === 'win32' ? '.exe' : '');
 		const p = spawn(compiler, ['-cp', src, '-main', 'hxmc.dev.DevHost', ...(process.platform === 'linux' ? ['-D', 'hxmc.libc=glibc'] : []), '--custom-target', 'hxmc=' + tmp,
 			...(hxmcStd ? ['-cp', hxmcStd] : [])],
 			{ stdio: ['ignore', 'pipe', 'pipe'] });
