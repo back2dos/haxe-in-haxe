@@ -68,7 +68,8 @@ CROSSHOST_ARGS ?= --tool
 
 PORT_SRC := $(shell find haxe/src -name '*.hx')
 HXMC_SRC := $(shell find hxmc/src -name '*.hx')
-STD_SRC := $(shell find hxmc/std -type f)
+# (the directories too: a file deleted changes only its directory's time)
+STD_SRC := $(shell find hxmc/std)
 RT_SRC := $(wildcard hxmc/deps/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
 FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx) haxe/test/HlcNames.hx
