@@ -159,6 +159,10 @@ cube (its frame read back differs), a vertical swipe starting on the canvas
 scrolls the page (`touchAction: 'pan-y'`); and the spinning cube held: while
 a finger, or the mouse, holds it after a drag (the mouse's leaving the
 canvas), its frames do not change, and once let go it spins again.
+`make gfx-cache-check` (CI's `gfx` job): the module cache across builds with
+other defines on one store, WebTest with `-D hxmc.wasm-gc`, GfxTest
+natively, then each again: each restored whole, the same bytes, linked and
+run (`web.mjs`'s triangle, GfxTest's headless triangle).
 `make gfx-shader-check`: the shader macro on Eval (shaders run on the CPU, the
 emitted sources, the programs it rejects: `packages/gfx/test/ShaderTest.hx`),
 and the tests' PNG files (`Png.hx`: written as `--bless` writes them, in

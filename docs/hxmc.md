@@ -302,11 +302,20 @@ found missing is typed or compiled again) (`CacheDir.hx`, checked by
 with the defines it read (its file's conditions, its macros'
 `Context.defined`, and those the compiler read in the build that typed
 it): a build restores the variant whose reads have its values, so a define
-only some modules read leaves the others (the std) good. The server's
+only some modules read leaves the others (the std) good. Several
+variants can match, for a module whose typing depends on defines only
+through its dependencies (GLBackend inlines `BytesPtr`, whose file reads
+`-D hxmc.wasm-gc`, and calls the functions `GL`'s build macro makes for the
+target; Std depends on the runtime): of those, the one typed with the
+build's defines (its context's signature) is restored, and a variant typed
+with other defines is kept beside one with the same reads (at most four
+per module), so builds that alternate (WasmGC, linear, native) each
+restore their own (`make gfx-cache-check`). The server's
 checks decide which modules are good, lazily, for the modules the build
-loads; beyond them, a module's file is compared by content hash where its
-date or size changed, its path must still resolve to it (shadowing), and
-each dependency must have the hash it had when the module was typed: the
+loads, also those a restored module's HXB names (decoded from the store
+only once checked, else typed from source); beyond them, a module's file
+is compared by content hash where its date or size changed, its path
+must still resolve to it (shadowing), and each dependency must have the hash it had when the module was typed: the
 hash of its interface (`ModuleInterface.hx`: its declarations without the
 bodies of functions whose type is written out; positions only for the
 expressions kept, which inlining copies), or of its whole content across

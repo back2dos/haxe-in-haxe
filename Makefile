@@ -70,7 +70,8 @@ CROSSHOST_ARGS ?= --tool
 
 PORT_SRC := $(shell find haxe/src -name '*.hx')
 HXMC_SRC := $(shell find hxmc/src -name '*.hx')
-STD_SRC := $(shell find hxmc/std -type f)
+# (the directories too: a file deleted changes only its directory's time)
+STD_SRC := $(shell find hxmc/std)
 RT_SRC := $(wildcard hxmc/deps/*)
 LIX_SRC := $(shell find tools/lix/src -name '*.hx')
 FUZZ_SRC := $(wildcard haxe/test/fuzz/*.hx haxe/test/fuzz/fuzz/*.hx) haxe/test/HlcNames.hx
@@ -115,7 +116,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench bench-arrays test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check \
 	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench wasmgc-port test-wasmgc-port
@@ -189,6 +190,8 @@ help:
 ## gfx-web-check  packages/gfx on WebGPU and WebGL2 (wasm32-wasi): the same, headless and in a
 ##             canvas, in headless Chromium (packages/gfx/test/web.mjs; Playwright with Chromium);
 ##             then built with -D hxmc.wasm-gc (the hybrid module)
+## gfx-cache-check  the module cache across WasmGC and native builds on one store: WebTest with
+##             -D hxmc.wasm-gc, GfxTest natively, each again from the store, linked, the same, run
 ## gfx-shader-check  packages/gfx's shader macro on Eval: shaders run on the CPU, the emitted
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
@@ -623,6 +626,35 @@ gfx-web-check: $(TOOL) $(STD)
 	$(NODE) packages/gfx/test/web.mjs bin/gfx/WebTest.wasm bin/gfx
 	$(call hxmc,bin/gfx/gc/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc)
 	$(NODE) packages/gfx/test/web.mjs bin/gfx/gc/WebTest.wasm bin/gfx/gc
+
+# the module cache across a WasmGC and a native build on one store
+# (hxmc/src/hxmc/ModuleCache.hx: a module restored with the variant typed
+# for the build's defines also where only its dependencies read them, as
+# GLBackend, which inlines BytesPtr's -D hxmc.wasm-gc functions and calls
+# GL's functions made for the target; one a restored module's HXB names
+# checked before it is decoded): WebTest with -D hxmc.wasm-gc, GfxTest
+# natively, then each again from the store (restored whole), then each with
+# a define nothing reads (another signature: no variant typed with the
+# build's defines, the modules that depend on the target typed again); each
+# linked, the same as the first of its kind, then run (web.mjs's triangle,
+# check.sh's headless triangle)
+GFX_CACHE_DIR := bin/gfx/cache
+gfx-cache-check: $(TOOL) $(STD) $(HOST_RT)
+	rm -rf $(GFX_CACHE_DIR); mkdir -p $(GFX_CACHE_DIR)
+	@set -e; ulimit -s unlimited 2>/dev/null || true; export HXMC_CACHE=$(abspath $(GFX_CACHE_DIR))/store HXMC_STATS=1; \
+	for i in 1 2 3 4 5 6; do \
+		case $$i in 1|3|5) o=$(GFX_CACHE_DIR)/WebTest$$i.wasm; a="-main WebTest -D hxmc.target=wasm32-wasi -D hxmc.wasm-gc";; \
+		*) o=$(GFX_CACHE_DIR)/GfxTest$$i$(call EXE,$(GFX_TARGET)); a="-main GfxTest $(GFX_ARGS)";; esac; \
+		case $$i in 5|6) a="$$a -D gfx_cache_check";; esac; \
+		echo "$(TOOL) $$o $$a"; \
+		$(TOOL) $$o $(GFX_CP) $(HXMC_ARGS) $$a > $$o.log 2>&1 || { cat $$o.log; exit 1; }; \
+		grep "module cache: .* checked" $$o.log; \
+	done; \
+	for l in WebTest3.wasm GfxTest4$(call EXE,$(GFX_TARGET)); do grep -q " 0 typed from source," $(GFX_CACHE_DIR)/$$l.log || { echo "gfx-cache-check: $$l not restored whole"; exit 1; }; done
+	for i in 3 5; do cmp $(GFX_CACHE_DIR)/WebTest1.wasm $(GFX_CACHE_DIR)/WebTest$$i.wasm || exit 1; done
+	for i in 4 6; do cmp $(GFX_CACHE_DIR)/GfxTest2$(call EXE,$(GFX_TARGET)) $(GFX_CACHE_DIR)/GfxTest$$i$(call EXE,$(GFX_TARGET)) || exit 1; done
+	SCENES=triangle $(NODE) packages/gfx/test/web.mjs $(GFX_CACHE_DIR)/WebTest3.wasm $(GFX_CACHE_DIR)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY $(GFX_CACHE_DIR)/GfxTest4 headless triangle packages/gfx/test/triangle.png $(GFX_CACHE_DIR)/triangle-headless.png
 
 # packages/os's audio (Linux: the glibc mode, which loads libasound.so.2)
 OS_CP := -cp packages/os/src -cp packages/os/examples -cp packages/os/test
