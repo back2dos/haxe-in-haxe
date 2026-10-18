@@ -317,7 +317,51 @@ class Boxes {
 		storeConv(slot, i, vk, v);
 	}
 
+	// the push of a value of kind vk (AK_PTR: v is the address of a rooted
+	// slot) that the inline path left: a full array, one without data yet, or
+	// another kind. The usual case, a full one of the value's kind, grows here
+	// in one go (twice the capacity, at least 2, as arrGrow) and stores
+	// directly; the others, and an array changed at the allocation, take
+	// pushConv
 	@:hxmc.export("hx_apush_slow") static function apushSlow(slot:Ptr, vk:Int, v:I64):Int {
+		var a:Dynamic = Mem.getRef(slot, 0);
+		var k = arrKind(a);
+		if (k != vk) return pushConv(slot, vk, v);
+		var n = arrLen(a);
+		var d = arrData(a);
+		var cap = arrCap(a);
+		if (n < cap) {
+			setLen(a, n + 1);
+			storeKind(d, n, k, v);
+			return n;
+		}
+		var ncap = cap * 2;
+		if (ncap < 2) ncap = 2;
+		if (ncap < n + 1) ncap = n + 1;
+		var nd:Dynamic = k == AK_PTR ? Mem.alloc(ncap, T_ADATA_P, K_PARR) : Mem.alloc(ak4(k) ? (ncap + 1) >> 1 : ncap, T_ADATA_RAW, K_RAW);
+		a = Mem.getRef(slot, 0);
+		if (arrData(a) != d || arrKind(a) != k || arrLen(a) != n) return pushConv(slot, vk, v);
+		if (n > 0) {
+			var bytes = n << (ak4(k) ? 2 : 3);
+			LibC.memcpy(Mem.addr(nd), d, bytes);
+			if (k == AK_PTR && !inYoungObj(nd)) Gc_barrierRange(nd, n);
+		}
+		Mem.setRefBarrier(a, 8, nd);
+		setLen(a, n + 1);
+		storeKind(Mem.addr(nd), n, k, v);
+		return n;
+	}
+
+	static inline function setLen(a:Dynamic, n:Int)
+		Mem.setI32(Mem.addr(a), 0, n);
+
+	// v (of the array's kind k) stored at i in the data d
+	static inline function storeKind(d:Ptr, i:Int, k:Int, v:I64) {
+		if (k == AK_PTR) Mem.setRefBarrier(Mem.obj(d), 8 * i, Mem.getRef(new Ptr(v), 0)) else if (ak4(k)) Mem.setI32At(d, 0, i, v.toInt()) else
+			Mem.setI64At(d, 0, i, v);
+	}
+
+	static function pushConv(slot:Ptr, vk:Int, v:I64):Int {
 		var a:Dynamic = Mem.getRef(slot, 0);
 		var n = arrLen(a);
 		while (n >= arrCap(a)) {
