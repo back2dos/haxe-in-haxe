@@ -187,7 +187,11 @@ bounds), the scene graph's matrices and their cache, the camera and the
 fixed-step clock, and the glTF reader (the sample scene of
 `packages/3d/test/SampleModel.hx` as .glb and .gltf, its accessors, the
 hierarchy as scene nodes, files it must reject), on Eval, natively and as
-wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`).
+wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`), then the
+renderer's frames (`packages/3d/test/Scenes.hx`: the sample glTF scene)
+headless against `packages/3d/test/<scene>.png` by the rule above
+(`RenderTest`, `check.sh`); `make 3d-web-check`: the same on WebGPU and
+WebGL2 in headless Chromium (`packages/3d/test/web.mjs`).
 
 ## UI
 
