@@ -413,6 +413,10 @@ class Str {
 	@:hxmc.host("String_toString") @:hxmc.noGc static function toString(s:String):String
 		return s;
 
+	// new String(s): strings do not change, s itself
+	@:hxmc.host("String_new") @:hxmc.noGc static function ofString(s:String):String
+		return s;
+
 	@:hxmc.host("String_split") static function split(s:String, delim:String):Array<String> {
 		var arr:Array<String> = [];
 		var m = len(delim);

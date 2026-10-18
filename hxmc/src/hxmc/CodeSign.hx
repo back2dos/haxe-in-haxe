@@ -31,6 +31,8 @@ class CodeSign {
 	static inline var HEADER = 88; // CodeDirectory 0x20400 up to the identifier
 
 	public var identifier = "hxmc";
+	// an executable (CS_EXECSEG_MAIN_BINARY); false: a dylib
+	public var mainBinary = true;
 	public var linkerSigned = true;
 	// the bundle's Info.plist and _CodeSignature/CodeResources (slots 1, 3)
 	public var infoPlist:Null<Bytes> = null;
@@ -114,7 +116,7 @@ class CodeSign {
 		sig.u64(0); // codeLimit64
 		sig.u64(0); // execSegBase
 		sig.u64(execSegLimit);
-		sig.u64(1); // CS_EXECSEG_MAIN_BINARY
+		sig.u64(mainBinary ? 1 : 0); // CS_EXECSEG_MAIN_BINARY
 		sig.b.bytes(ident);
 		sig.u8(0);
 		// the special slots, from -nSpecial up to -1 (absent ones zero)

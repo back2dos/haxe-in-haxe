@@ -206,6 +206,19 @@ class Arr {
 	@:hxmc.host("Array_unshift") static function unshift(a:Dynamic, x:Dynamic):Void
 		insert(a, 0, x);
 
+	// iterator and keyValueIterator as values (their calls are inline)
+	@:hxmc.host("Array_iterator") static function iterator(a:Dynamic):Dynamic
+		return Dyn.arrayIterator(a);
+
+	@:hxmc.host("Array_keyValueIterator") static function keyValueIterator(a:Dynamic):Dynamic
+		return new haxe.iterators.ArrayKeyValueIterator<Dynamic>(a);
+
+	// push as a value (a call is lowered inline: SArrPush)
+	@:hxmc.host("Array_push") static function push(a:Dynamic, x:Dynamic):Int {
+		var arr:Array<Dynamic> = a;
+		return arr.push(x);
+	}
+
 	@:hxmc.host("Array_resize") @:access(hxmc.rt.Boxes) static function resize(a:Dynamic, n:Int):Void {
 		var m = len(a);
 		if (n < m) {

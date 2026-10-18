@@ -232,7 +232,8 @@ help:
 ##             `hxmc dev` on ui's Counter: in headless Chromium, also as WasmGC (packages/os/test/dev/dev-web.mjs: an edit
 ##             keeps the count, a changed type resets it, a compile error shows in the overlay while the last
 ##             good build runs) and natively in a window (dev-native.mjs; Linux: under Xvfb); the compilation
-##             server's builds through edits (one changing a module's API) against fresh ones (dev-verify.mjs)
+##             server's builds through edits (one changing a module's API, one of markup using code it did not use before)
+##             against fresh ones (dev-verify.mjs; small programs: server-verify.mjs)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -569,6 +570,14 @@ gfx-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Targets$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Targets $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Mips$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Mips $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/gfx/$(GFX_TARGET)/Formats$(call EXE,$(GFX_TARGET)),$(GFX_CP) -main Formats $(HXMC_ARGS) $(GFX_ARGS))
+# hxmc dev's host and three builds of DevHostTest as libraries it loads in turn (packages/gfx/test/host-dev.sh)
+DEVHOST_ARGS := -D hxmc.dev -D hxmc.dev-host -D hxmc.shared -D hxmc.exports=hxmc_dev_run,hxmc_dev_state
+DEVHOST_EXT = $(if $(filter windows-%,$(GFX_TARGET)),dll,$(if $(filter macos-%,$(GFX_TARGET)),dylib,so))
+devhost-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/host$(call EXE,$(GFX_TARGET)),-cp packages/os/src -main hxmc.dev.DevHost $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/DevHost1.$(DEVHOST_EXT),$(GFX_CP) -main DevHostTest $(HXMC_ARGS) $(GFX_ARGS) $(DEVHOST_ARGS) -D devhost_version=1 -D hxmc.dll-base=0x10000000)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/DevHost2.$(DEVHOST_EXT),$(GFX_CP) -main DevHostTest $(HXMC_ARGS) $(GFX_ARGS) $(DEVHOST_ARGS) -D devhost_version=2 -D hxmc.dll-base=0x30000000)
+	$(call hxmc,bin/gfx/$(GFX_TARGET)/dev/DevHost3.$(DEVHOST_EXT),$(GFX_CP) -main DevHostTest $(HXMC_ARGS) $(GFX_ARGS) $(DEVHOST_ARGS) -D devhost_version=3 -D hxmc.dll-base=0x10000000)
 gfx-check: gfx-programs
 	sh packages/gfx/test/check.sh bin/gfx/$(GFX_TARGET)
 
@@ -601,11 +610,16 @@ android-device-check: android-programs
 # (packages/gfx/test/IosTest.hx) and the cube example (also as an .ipa);
 # SimTap (packages/gfx/test/SimTap.hx), a macOS program that taps the
 # simulator for ios.sh
+# (hxmc dev's host: DevHostTest as the app and as dylibs of later versions, ios-dev.sh)
+IOS_DEV := -D hxmc.dev -D hxmc.dev-host -D hxmc.exports=hxmc_dev_run,hxmc_dev_state
 ios-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ios/$(IOS_TARGET)/IosTest.app,$(GFX_CP) -main IosTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.gfxtest)
 	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.app,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
 	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.ipa,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
 	$(call hxmc,bin/ios/SimTap,-cp packages/os/src -cp packages/gfx/test -main SimTap $(HXMC_ARGS) -D hxmc.target=macos-arm64)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/DevHostTest.app,$(GFX_CP) -main DevHostTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.devhosttest $(IOS_DEV) -D devhost_version=1)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/DevHost2.dylib,$(GFX_CP) -main DevHostTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) $(IOS_DEV) -D hxmc.shared -D devhost_version=2)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/DevHost3.dylib,$(GFX_CP) -main DevHostTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) $(IOS_DEV) -D hxmc.shared -D devhost_version=3)
 # their structure without a Mac (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature; llvm-objdump when there)
 ios-check: ios-programs
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run IosCheck $(foreach a,IosTest.app Cube.app Cube.ipa,bin/ios/$(IOS_TARGET)/$(a))
@@ -613,6 +627,7 @@ ios-check: ios-programs
 ios-sim-check:
 	$(MAKE) --no-print-directory ios-programs IOS_TARGET=ios-sim-arm64
 	sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
+	sh packages/gfx/test/ios-dev.sh bin/ios/ios-sim-arm64 bin/ios/ios-sim-arm64
 
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
@@ -807,11 +822,15 @@ dev-check: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/dev/RefreshTest,$(DEV_VIEW_CP) -main RefreshTest $(HXMC_ARGS) -D hxmc.dev)
 	bin/dev/RefreshTest save bin/dev/refresh.snapshot
 	HXMC_DEV_SNAPSHOT=bin/dev/refresh.snapshot bin/dev/RefreshTest restore -
+	$(call hxmc,bin/dev/RefreshTestChanged,$(DEV_VIEW_CP) -main RefreshTest $(HXMC_ARGS) -D hxmc.dev -D refresh_changed)
+	HXMC_DEV_SNAPSHOT=bin/dev/refresh.snapshot bin/dev/RefreshTestChanged restore - > bin/dev/refresh-changed.log 2>&1 || { cat bin/dev/refresh-changed.log; exit 1; }
+	cat bin/dev/refresh-changed.log; grep -q "main.tuned reset: its initial value changed" bin/dev/refresh-changed.log
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(DEV_VIEW_CP) -D hxmc.dev --run RefreshTest save bin/dev/refresh-eval.snapshot
 	ulimit -s unlimited 2>/dev/null || true; HXMC_DEV_SNAPSHOT=bin/dev/refresh-eval.snapshot $(TOOL) $(DEV_VIEW_CP) -D hxmc.dev --run RefreshTest restore -
 	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web
 	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web-gc --wasm-gc
 	ulimit -s unlimited 2>/dev/null || true; $(if $(filter linux-%,$(HOST)),xvfb-run -a -s "-screen 0 640x480x24") $(NODE) packages/os/test/dev/dev-native.mjs $(TOOL) bin/dev/native
+	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/server-verify.mjs $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-verify.mjs $(TOOL) Counter web
 
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each

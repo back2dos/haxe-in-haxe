@@ -1,9 +1,11 @@
 # The dev loop: live reload and fast refresh
 
 Save a file, see the change, keep where you were. Four steps, each useful on
-its own; the first two give most of it. Steps 1 and 2 are built:
-[docs/dev.md](../dev.md) (how to use them, the primitives as built, the
-protocol, the times measured).
+its own; the first two give most of it. Steps 1 and 2 are built, and step
+3 in the browser, natively (Linux, macOS, Windows), on Android and on the
+iOS simulator: [docs/dev.md](../dev.md) (how to use them, the primitives
+as built, the protocol, the times measured; on an iOS device a new
+build's dylib cannot be loaded, and the wasm fallback is not built).
 
 ## Principles
 
@@ -109,16 +111,53 @@ steps there.
 - **Focus, scroll and selection** are state of the UI engine, restored by
   node key the same way.
 
-## 3. Seamless swaps
+## 3. No reloads: the new build swapped in, on every target
 
-- **Native**: a host executable holds the runtime, the window, the GPU
-  context and native views; the program is a shared library. On reload:
-  snapshot, run disposal, drop the library's roots and collect (no object
-  may keep the old library's code or type data), unload, load the new one,
-  restore. The window never closes. Needs shared libraries beyond glibc
-  Linux (`-D hxmc.shared` today): Mach-O dylibs and Windows DLLs.
-- **Browser**: instantiate the new module against the same canvas and GPU
-  device; the page does not reload.
+A save never reloads the page or restarts the app, on desktop, in the
+browser or on a phone: the window, the canvas, the GPU device, native views
+and the page stay; only the program's code and heap are replaced. The
+snapshot protocol of step 2 is the only thing that crosses: the old build
+snapshots and disposes, the new one starts from the snapshot. Nothing of the
+old build's heap or code is reachable from the new one, so there are no
+stale closures or type data, and the runtime need not be shared.
+
+- **Host and program.** A small dev host owns what must survive: the window
+  (or canvas, or Android/iOS view), the GPU device and surface, native views,
+  fonts and the event pump. The program is a module the host loads: it
+  carries its own runtime and heap, and gets the host's handles at start (the
+  same entry points hxmc.os uses today, given handles instead of creating
+  them). Release builds are unchanged: the host exists only under
+  `-D hxmc.dev`.
+- **Swap.** Snapshot, dispose (the program releases its GPU buffers,
+  textures, pipelines, timers, listeners and native views; the host checks
+  nothing it handed out is left), unload, load the new module, start it from
+  the snapshot. The last frame stays on screen until the new build's first
+  frame, so nothing flashes.
+- **Browser.** The page instantiates the new wasm module (streamed) against
+  the same canvas, GPU device and DOM root; `imports.mjs` tracks what each
+  instance registered (listeners, callbacks, observers, audio nodes) and
+  drops it with the old instance.
+- **Desktop (Linux, macOS, Windows).** The host executable loads the program
+  as a shared library (`dlopen` / `LoadLibrary`) with a fresh name per build;
+  the old one is closed once it has disposed. Needs Mach-O dylibs and Windows
+  DLLs beyond today's glibc `-D hxmc.shared`.
+- **Android.** The dev APK is the host (NativeActivity, the window, EGL, the
+  JNI views); it is installed once. A new build's `libapp.so` is sent by the
+  dev server over the network (or `adb push`) into the app's private files
+  and `dlopen`ed there, which Android allows for an app's own files. No
+  reinstall, no activity restart.
+- **iOS.** The dev app is the host (UIKit, Metal layer, native views). In the
+  simulator it `dlopen`s each new dylib. On a device, code must be signed: the
+  dev server signs each dylib with the developer identity already used for
+  the app (CodeSign.hx) before sending it, as device hot-reload tools do;
+  whether iOS accepts that for a debug build on a device in developer mode
+  is the first thing to verify. If it does not, the fallback on a device is
+  the program as wasm run by an interpreter in the host (slower, for UI
+  work only), and a restart is the last resort.
+- **Done when** each target's dev-check edits a running program twice and
+  shows the window, surface and GPU device are the same objects, state is
+  kept, and no reload or restart happened; and the swap's time is measured
+  next to step 1's.
 
 ## 4. Styles and assets without a rebuild
 
