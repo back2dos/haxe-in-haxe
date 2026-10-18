@@ -715,7 +715,9 @@ jobs:
   # then AndroidTest.apk on an x86-64 emulator with KVM (android.sh: the cube
   # headless against cube.png, frames in the window, input (a drag held on
   # the cube, a fling), Home and back, Back; the screenshot and logcat as an
-  # artifact; android-touch.sh: a fling in a drawn scroll box). Not a required check yet
+  # artifact; android-touch.sh: a fling in a drawn scroll box; dev-android.mjs:
+  # hxmc dev on the Counter, two edits swapped into the same process, the count
+  # kept: docs/dev.md, "No reloads"). Not a required check yet
   # (continue-on-error): emulators on hosted runners are slow to boot and
   # sometimes flaky.
   android:
@@ -761,6 +763,7 @@ jobs:
             sh packages/ui/test/android-native.sh bin/android/android-x86_64/AndroidNativeTest.apk bin/android/android-x86_64
             sh packages/ui/test/android-mix.sh bin/android/android-x86_64/AndroidMixTest.apk bin/android/android-x86_64/AndroidTextTest.apk bin/android/android-x86_64
             sh packages/os/test/android-touch.sh bin/android/android-x86_64/AndroidTouchTest.apk bin/android/android-x86_64
+            ulimit -s unlimited 2>/dev/null || true; DEV_ANDROID_LOG=bin/android/android-x86_64/dev-logcat.txt node packages/os/test/dev/dev-android.mjs bin/hxmc/hxmc bin/dev/android android-x86_64
       - uses: actions/upload-artifact@v7
         if: always()
         with:

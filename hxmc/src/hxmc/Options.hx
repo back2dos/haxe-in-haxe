@@ -103,7 +103,7 @@ class Options {
 		if (ex != null)
 			for (n in ex.split(","))
 				if (StringTools.trim(n) != "") o.exports.push(StringTools.trim(n));
-		for (k in ["package", "label", "min_sdk", "target_sdk", "version", "version_name", "key"]) {
+		for (k in ["package", "label", "min_sdk", "target_sdk", "version", "version_name", "key", "permissions"]) {
 			var v = def("hxmc.android_" + k); // (-D turns the dashes into underscores)
 			if (v != null) o.android.set(k, v);
 		}

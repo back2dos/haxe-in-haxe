@@ -667,7 +667,7 @@ class Gc {
 		var reserve:I64 = bytes > (MINOR_MAX : I64) ? bytes : MINOR_MAX;
 		var p = Os.reserve(reserve + (2 << 20));
 		if (p.isNull()) die("cannot reserve the nursery\n");
-		#if hxmc.shared
+		#if (hxmc.shared || hxmc.dev_host)
 		nurseryBase = p;
 		nurseryBytes = reserve + (2 << 20);
 		#end
@@ -1044,7 +1044,7 @@ class Gc {
 		var sbytes:I64 = (1 : I64) << 30, page = Os.pageSize();
 		var sstack = Os.reserve(sbytes + page);
 		if (sstack.isNull()) die("cannot reserve the shadow stack\n");
-		#if hxmc.shared
+		#if (hxmc.shared || hxmc.dev_host)
 		sstackBase = sstack;
 		sstackBytes = sbytes + page;
 		#end
@@ -1061,7 +1061,7 @@ class Gc {
 		return sstack;
 	}
 
-	#if hxmc.shared
+	#if (hxmc.shared || hxmc.dev_host)
 	// a shared library's reservations (releaseHeap)
 	static var nurseryBase:Ptr;
 	static var nurseryBytes:I64;
