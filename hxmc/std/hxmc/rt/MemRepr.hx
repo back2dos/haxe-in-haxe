@@ -171,7 +171,14 @@ class MemRepr {
 
 	// the data of a fresh reference array was written without the barrier
 	static inline function barrierAll(a:Dynamic, n:Int) {
-		if (arrKind(a) == AK_PTR && n > 0) Leaf.rt_barrier_range(Mem.obj(arrData(a)), arrData(a), n);
+		if (arrKind(a) == AK_PTR && n > 0) barrier(arrData(a), arrData(a), n);
+	}
+
+	// rt_barrier_range for n slots from `from` in the data d, unless d is young
+	// (the usual case: fresh, or recently allocated, data)
+	static inline function barrier(d:Ptr, from:Ptr, n:Int) {
+		if (d.ult(Mem.getPtr(Mem.sym("rt_young_start"), 0)) || !d.ult(Mem.getPtr(Mem.sym("rt_young_end"), 0)))
+			Leaf.rt_barrier_range(Mem.obj(d), from, n);
 	}
 
 	// r[0, n) = a[0, n) (r new)
@@ -202,7 +209,7 @@ class MemRepr {
 		var d = arrData(a);
 		LibC.memmove(d.add(es * i), d.add(es * (i + 1)), (es * (n - i - 1) : I64));
 		LibC.memset(d.add(es * (n - 1)), 0, es);
-		if (arrKind(a) == AK_PTR && n - i - 1 > 0) Leaf.rt_barrier_range(Mem.obj(d), d.add(8 * i), n - i - 1);
+		if (arrKind(a) == AK_PTR && n - i - 1 > 0) barrier(d, d.add(8 * i), n - i - 1);
 		arrSetLen(a, n - 1);
 	}
 
@@ -247,7 +254,7 @@ class MemRepr {
 		var tmp = es == 4 ? (Mem.getI32(d, 4 * n) : I64) : Mem.getI64(d, 8 * n);
 		LibC.memmove(d.add(es * (pos + 1)), d.add(es * pos), (es * (n - pos) : I64));
 		if (es == 4) Mem.setI32(d, 4 * pos, tmp.toInt()) else Mem.setI64(d, 8 * pos, tmp);
-		if (arrKind(a) == AK_PTR) Leaf.rt_barrier_range(Mem.obj(d), d.add(8 * pos), n - pos + 1);
+		if (arrKind(a) == AK_PTR) barrier(d, d.add(8 * pos), n - pos + 1);
 	}
 
 	// the n >= 2 elements in reverse order
@@ -270,7 +277,7 @@ class MemRepr {
 				i++;
 				j--;
 			}
-		if (arrKind(a) == AK_PTR) Leaf.rt_barrier_range(Mem.obj(d), d, n);
+		if (arrKind(a) == AK_PTR) barrier(d, d, n);
 	}
 
 	// a[pos, pos + l) moved to r (new), the rest of a's n elements down
@@ -285,7 +292,7 @@ class MemRepr {
 		arrSetLen(a, n - l);
 		if (arrKind(a) == AK_PTR) {
 			barrierAll(r, l);
-			if (n - pos - l > 0) Leaf.rt_barrier_range(Mem.obj(d), d.add(8 * pos), n - pos - l);
+			if (n - pos - l > 0) barrier(d, d.add(8 * pos), n - pos - l);
 		}
 	}
 

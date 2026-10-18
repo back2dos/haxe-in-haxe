@@ -262,6 +262,8 @@ class Arr {
 
 	// a stable merge sort over boxed copies (the comparator may allocate);
 	// the result written back through the array's own stores (its kind kept)
+	static inline var RUN = 8;
+
 	@:hxmc.host("Array_sort") static function sort(a:Dynamic, f:Dynamic->Dynamic->Int):Void {
 		var arr:Array<Dynamic> = a;
 		var n = arr.length;
@@ -270,9 +272,30 @@ class Arr {
 		src.resize(n);
 		for (i in 0...n)
 			src[i] = arr[i];
+		// runs of RUN elements by insertion, then merged: stable both, so the
+		// same order as merging from single elements
+		var lo = 0;
+		while (lo < n) {
+			var hi = lo + RUN < n ? lo + RUN : n;
+			for (i in lo + 1...hi) {
+				var x = src[i];
+				var j = i;
+				while (j > lo && f(x, src[j - 1]) < 0) {
+					src[j] = src[j - 1];
+					j--;
+				}
+				if (j < i) src[j] = x;
+			}
+			lo = hi;
+		}
+		if (n <= RUN) {
+			for (i in 0...n)
+				arr[i] = src[i];
+			return;
+		}
 		var dst:Array<Dynamic> = [];
 		dst.resize(n);
-		var width = 1;
+		var width = RUN;
 		while (width < n) {
 			var lo = 0;
 			while (lo < n) {
