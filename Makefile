@@ -706,6 +706,7 @@ SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp 
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Falling$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Falling $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Walker$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Walker $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/$(GFX_TARGET)/Chains$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Chains $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main InputTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/InputTest.wasm,$(SCENE_CP) -main InputTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)) && $(WASI) bin/3d/InputTest.wasm
