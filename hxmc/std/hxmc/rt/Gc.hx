@@ -667,6 +667,10 @@ class Gc {
 		var reserve:I64 = bytes > (MINOR_MAX : I64) ? bytes : MINOR_MAX;
 		var p = Os.reserve(reserve + (2 << 20));
 		if (p.isNull()) die("cannot reserve the nursery\n");
+		#if (hxmc.shared || hxmc.dev_host)
+		nurseryBase = p;
+		nurseryBytes = reserve + (2 << 20);
+		#end
 		var a = p.toI64() + ((2 << 20) - 1);
 		p = Ptr.ofI64(a - (a & ((2 << 20) - 1))); // 2 MB aligned (huge pages)
 		if (hugePages) Os.hugePages(p, reserve);
@@ -1040,6 +1044,10 @@ class Gc {
 		var sbytes:I64 = (1 : I64) << 30, page = Os.pageSize();
 		var sstack = Os.reserve(sbytes + page);
 		if (sstack.isNull()) die("cannot reserve the shadow stack\n");
+		#if (hxmc.shared || hxmc.dev_host)
+		sstackBase = sstack;
+		sstackBytes = sbytes + page;
+		#end
 		Os.guard(sstack.addL(sbytes), page);
 		sp = sstack;
 		hw = sstack;
@@ -1052,6 +1060,29 @@ class Gc {
 		Os.mutexInit(nativesLock);
 		return sstack;
 	}
+
+	#if (hxmc.shared || hxmc.dev_host)
+	// a shared library's reservations (releaseHeap)
+	static var nurseryBase:Ptr;
+	static var nurseryBytes:I64;
+	static var sstackBase:Ptr;
+	static var sstackBytes:I64;
+
+	// A shared library's runtime whose program has ended, before the library
+	// is closed (hxmc dev's host: a build swapped out): the heap, the nursery
+	// and the main shadow stack given back to the system. Nothing of the
+	// heap is used after this (the program's threads have ended).
+	@:hxmc.noGc public static function releaseHeap() {
+		if (!region0.isNull()) Os.release(region0, regionBytes);
+		if (!region1.isNull()) Os.release(region1, regionBytes);
+		if (!nurseryBase.isNull()) Os.release(nurseryBase, nurseryBytes);
+		if (!sstackBase.isNull()) Os.release(sstackBase, sstackBytes);
+		region0 = region1 = nurseryBase = sstackBase = Ptr.nil();
+		LibC.free(gcStack);
+		LibC.free(globals);
+		gcStack = globals = Ptr.nil();
+	}
+	#end
 
 	static inline function die(msg:String)
 		dieC(Mem.cstr(msg));

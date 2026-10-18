@@ -24,7 +24,9 @@ import hxmc.android.Axml.el;
 // org.hxmc.<the output's name>), -D hxmc.android-label=<text> (the output's
 // name), -D hxmc.android-version=<code> (1), -D hxmc.android-version-name
 // (1.0), -D hxmc.android-min-sdk (29: Bionic's ELF TLS), -D
-// hxmc.android-target-sdk (35).
+// hxmc.android-target-sdk (35), -D hxmc.android-permissions=<names>
+// (uses-permission, android.permission.<name> unless it has a dot: none by
+// default; hxmc dev's APK asks for INTERNET, its dev server's socket).
 class Apk {
 	static inline var LIB = "main";
 	static inline var PAGE = 16384;
@@ -47,7 +49,8 @@ class Apk {
 		var pkg = opts.get("package") ?? "org.hxmc." + ~/[^a-z0-9_]/g.replace(name.toLowerCase(), "_");
 		if (!~/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.match(pkg)) throw "hxmc: APK: the package " + pkg + " is not an application id (a.b.c)";
 		var manifest = manifest(pkg, opts.get("label") ?? name, Std.parseInt(opts.get("version") ?? "1"), opts.get("version_name") ?? "1.0",
-			Std.parseInt(opts.get("min_sdk") ?? "29"), Std.parseInt(opts.get("target_sdk") ?? "35"), dex != null, views);
+			Std.parseInt(opts.get("min_sdk") ?? "29"), Std.parseInt(opts.get("target_sdk") ?? "35"), dex != null, views,
+			opts.get("permissions") == null ? [] : [for (p in opts.get("permissions").split(",")) if (StringTools.trim(p) != "") StringTools.trim(p)]);
 		var entries:Array<Zip.ZipEntry> = [{name: "AndroidManifest.xml", data: manifest, align: 4}];
 		if (dex != null) entries.push({name: "classes.dex", data: dex, align: 4});
 		entries.push({name: "lib/" + abiDir + "/lib" + LIB + ".so", data: so, align: PAGE});
@@ -58,7 +61,8 @@ class Apk {
 
 	// ---- the manifest
 
-	public static function manifest(pkg:String, label:String, versionCode:Int, versionName:String, minSdk:Int, targetSdk:Int, code = false, views = false):Bytes {
+	public static function manifest(pkg:String, label:String, versionCode:Int, versionName:String, minSdk:Int, targetSdk:Int, code = false, views = false,
+			?permissions:Array<String>):Bytes {
 		inline function s(n:String, v:String):Axml.Attr
 			return {android: true, name: n, type: Axml.STRING, string: v};
 		inline function i(n:String, v:Int, hex = false):Axml.Attr
@@ -69,12 +73,17 @@ class Apk {
 		// keyboardHidden, navigation, uiMode, density, layoutDirection: the
 		// activity stays (the program's thread keeps its window)
 		var configChanges = 0x80 | 0x400 | 0x100 | 0x800 | 0x10 | 0x20 | 0x40 | 0x200 | 0x1000 | 0x2000;
+		var uses = [];
+		if (permissions != null)
+			for (n in permissions)
+				uses.push(el("uses-permission", [s("name", n.indexOf(".") < 0 ? "android.permission." + n : n)]));
 		var root = el("manifest", [
 			{android: false, name: "package", type: Axml.STRING, string: pkg},
 			i("versionCode", versionCode),
 			s("versionName", versionName)
 		], [
 			el("uses-sdk", [i("minSdkVersion", minSdk), i("targetSdkVersion", targetSdk)]),
+		].concat(uses).concat([
 			el("uses-feature", [i("glEsVersion", 0x30000, true), b("required", true)]),
 			el("application", [s("label", label), b("hasCode", code), b("debuggable", true), b("extractNativeLibs", false)], [
 				el("activity", [
@@ -93,7 +102,7 @@ class Apk {
 					])
 				])
 			])
-		]);
+		]));
 		return Axml.encode(root);
 	}
 

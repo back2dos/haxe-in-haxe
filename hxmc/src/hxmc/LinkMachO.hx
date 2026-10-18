@@ -7,7 +7,9 @@ import hxmc.Abi;
 // hxmc's linker for macOS and iOS: objects (the program's, the runtime object of
 // MkRt.macho) -> a Mach-O executable (MH_EXECUTE, position-independent as
 // arm64 macOS requires) that loads /usr/lib/libSystem.B.dylib, written
-// without the SDK or ld64:
+// without the SDK or ld64, or (-D hxmc.shared) a dylib (MH_DYLIB: the image
+// at 0, no __PAGEZERO, dyld or LC_MAIN, its LC_ID_DYLIB and the exports,
+// Abi.exports, in the export trie; hxmc dev's builds on macOS and iOS):
 //   __PAGEZERO (4 GB), __TEXT (headers, code, import stubs, read-only data,
 //   the generated functions' unwind tables in __eh_frame: Unwind), __DATA
 //   (import slots, data with pointers, thread-local descriptors and
@@ -50,12 +52,22 @@ class LinkMachO {
 	// imports from other dylibs than libSystem (@:hxmc.lib): symbol -> install name
 	public var dylibs = new Map<String, String>();
 
+	// a dylib (-D hxmc.shared): its install name
+	public var installName = "";
+	var dylib = false;
+	// the high word of the image's addresses (an executable's at 4 GB, a dylib's at 0)
+	var baseHi = BASE_HI;
+
 	public function new(objs:Array<Obj>, abi:Abi) {
 		this.objs = objs;
 		this.abi = abi;
 		arm = abi.arm;
 		PAGE = abi.segAlign;
-		if (abi.output != Executable) throw "hxmc: " + abi.output + " output is not supported yet on macOS";
+		dylib = abi.output == SharedLibrary;
+		if (dylib) {
+			baseHi = 0;
+			sign.mainBinary = false;
+		} else if (abi.output != Executable) throw "hxmc: " + abi.output + " output is not supported yet on macOS";
 	}
 
 	function resolve() {
@@ -309,7 +321,7 @@ class LinkMachO {
 			if (t == null) binds.push({at: gotAddr + at, name: s.name, addend: 0});
 			else if (t.abs) got.buf.set64(at, t.offset, 0);
 			else {
-				got.buf.set64(at, symAddr(s), BASE_HI);
+				got.buf.set64(at, symAddr(s), baseHi);
 				rebases.push(gotAddr + at);
 			}
 		}
@@ -334,7 +346,7 @@ class LinkMachO {
 							var v = t.offset + A;
 							buf.set64(r.offset, v, v < 0 ? -1 : 0);
 						} else {
-							buf.set64(r.offset, symAddr(r.sym) + A, BASE_HI);
+							buf.set64(r.offset, symAddr(r.sym) + A, baseHi);
 							rebases.push(P);
 						}
 					case RAbs32 | RAbs32S:
@@ -371,7 +383,7 @@ class LinkMachO {
 				var n = 1;
 				while (k + n < rebases.length && rebases[k + n] == rebases[k] + 8 * n)
 					n++;
-				le.u8(0x20 | 2); // SET_SEGMENT_AND_OFFSET_ULEB __DATA
+				le.u8(0x20 | (dylib ? 1 : 2)); // SET_SEGMENT_AND_OFFSET_ULEB __DATA (a dylib has no __PAGEZERO)
 				uleb(le, rebases[k] - dataStart);
 				le.u8(0x60); // DO_REBASE_ULEB_TIMES
 				uleb(le, n);
@@ -427,7 +439,7 @@ class LinkMachO {
 					sleb(le, b.addend);
 					curAddend = b.addend;
 				}
-				le.u8(0x70 | 2); // SET_SEGMENT_AND_OFFSET_ULEB __DATA
+				le.u8(0x70 | (dylib ? 1 : 2)); // SET_SEGMENT_AND_OFFSET_ULEB __DATA
 				uleb(le, b.at - dataStart);
 				le.u8(0x90); // DO_BIND
 			}
@@ -435,17 +447,22 @@ class LinkMachO {
 		le.u8(0);
 		le.align(8);
 		var bindSize = le.len - bindOff;
-		// the export trie: __mh_execute_header at 0
+		// the export trie: __mh_execute_header at 0; a dylib's exports
 		var exportOff = le.len;
-		le.u8(0); // root: not terminal
-		le.u8(1); // one edge
-		le.str("__mh_execute_header");
-		le.u8(0);
-		le.u8(23); // the child's offset in the trie (just after this byte)
-		le.u8(2); // terminal: 2 bytes of information
-		le.u8(0); // flags: regular
-		le.u8(0); // address 0
-		le.u8(0); // no children
+		if (dylib) {
+			var names = [for (n in abi.exports) if (target(entrySymOrNull(n)) != null) n];
+			exportTrie(le, [for (n in names) {name: "_" + n, addr: symAddr(globals.get(n))}]);
+		} else {
+			le.u8(0); // root: not terminal
+			le.u8(1); // one edge
+			le.str("__mh_execute_header");
+			le.u8(0);
+			le.u8(23); // the child's offset in the trie (just after this byte)
+			le.u8(2); // terminal: 2 bytes of information
+			le.u8(0); // flags: regular
+			le.u8(0); // address 0
+			le.u8(0); // no children
+		}
 		le.align(8);
 		var exportSize = le.len - exportOff;
 		// the symbol table: (with `symbols`) the functions as locals, then the
@@ -466,7 +483,7 @@ class LinkMachO {
 					le.u8(0x0e); // N_SECT, local
 					le.u8(1); // __text
 					le.u16(0);
-					le.u64(addr.get(sec) + s.offset, BASE_HI);
+					le.u64(addr.get(sec) + s.offset, baseHi);
 					nlocals++;
 				}
 		var nimports = 0;
@@ -486,7 +503,7 @@ class LinkMachO {
 		le.align(16);
 		var sigOffInLe = le.len;
 		// (-debug) the DWARF sections, between __DATA and __LINKEDIT in the file
-		var dwarf = Dwarf.sections(objs, r -> r.sym.section != null && addr.exists(r.sym.section), r -> symAddr(r.sym), BASE_HI);
+		var dwarf = Dwarf.sections(objs, r -> r.sym.section != null && addr.exists(r.sym.section), r -> symAddr(r.sym), baseHi);
 		var dwarfOff = dataFileEnd > dataStart ? align(dataFileEnd, PAGE) : dataStart;
 		var dwarfSize = 0;
 		for (d in dwarf)
@@ -517,13 +534,14 @@ class LinkMachO {
 		h.u32(0xfeedfacf);
 		h.u32(arm ? 0x0100000c : 0x01000007);
 		h.u32(arm ? 0 : 3);
-		h.u32(2); // MH_EXECUTE
+		h.u32(dylib ? 6 : 2); // MH_DYLIB, MH_EXECUTE
 		var ncmdsAt = h.len;
 		h.u32(0);
 		h.u32(0); // sizeofcmds
-		// NOUNDEFS | DYLDLINK | TWOLEVEL | PIE (| HAS_TLV_DESCRIPTORS: dyld sets
-		// up the descriptors of __thread_vars only with it)
-		h.u32(0x00200085 | (tlv.length > 0 ? 0x00800000 : 0));
+		// NOUNDEFS | DYLDLINK | TWOLEVEL | PIE (a dylib: NO_REEXPORTED_DYLIBS
+		// instead) (| HAS_TLV_DESCRIPTORS: dyld sets up the descriptors of
+		// __thread_vars only with it)
+		h.u32((dylib ? 0x00100085 : 0x00200085) | (tlv.length > 0 ? 0x00800000 : 0));
 		h.u32(0);
 		var ncmds = 0;
 		function seg(name:String, vm:Int, vmsize:Int, fileoff:Int, filesize:Int, prot:Int, sects:Array<{name:String, start:Int, end:Int, flags:Int, zerofill:Bool, align:Int}>) {
@@ -532,7 +550,7 @@ class LinkMachO {
 			h.u32(0x19);
 			h.u32(72 + 80 * live.length);
 			fixed(h, name, 16);
-			h.u64(vm, name == "__PAGEZERO" ? 0 : BASE_HI);
+			h.u64(vm, name == "__PAGEZERO" ? 0 : baseHi);
 			h.u64(vmsize, name == "__PAGEZERO" ? 1 : 0);
 			var k = 0;
 			h.u64(fileoff, 0);
@@ -544,7 +562,7 @@ class LinkMachO {
 			for (x in live) {
 				fixed(h, x.name, 16);
 				fixed(h, name, 16);
-				h.u64(name == "__DWARF" ? dwarfAddr[k++] : x.start, BASE_HI);
+				h.u64(name == "__DWARF" ? dwarfAddr[k++] : x.start, baseHi);
 				h.u64(x.end - x.start, 0);
 				h.u32(x.zerofill ? 0 : x.start);
 				h.u32(log2(x.align));
@@ -558,7 +576,7 @@ class LinkMachO {
 		}
 		inline function sec(name, o:{start:Int, end:Int}, flags, zerofill = false, al = 16)
 			return {name: name, start: o.start, end: o.end, flags: flags, zerofill: zerofill, align: al};
-		seg("__PAGEZERO", 0, 0, 0, 0, 0, []);
+		if (!dylib) seg("__PAGEZERO", 0, 0, 0, 0, 0, []);
 		seg("__TEXT", 0, textEnd, 0, textEnd, 5, [
 			sec("__text", {start: oText.start, end: addr.get(stubs) + stubs.size()}, 0x80000400),
 			sec("__const", oConst, 0),
@@ -610,14 +628,27 @@ class LinkMachO {
 		h.u32(nimports);
 		for (_ in 0...12)
 			h.u32(0);
-		// the dynamic linker
-		ncmds++;
-		var dyld = "/usr/lib/dyld";
-		var dl = align(12 + dyld.length + 1, 8);
-		h.u32(0xe);
-		h.u32(dl);
-		h.u32(12);
-		fixed(h, dyld, dl - 12);
+		// the dynamic linker (a dylib: its identity instead)
+		if (dylib) {
+			ncmds++;
+			var id = installName;
+			var il = align(24 + id.length + 1, 8);
+			h.u32(0xd); // LC_ID_DYLIB
+			h.u32(il);
+			h.u32(24);
+			h.u32(2); // timestamp
+			h.u32(0x00010000); // current version 1.0.0
+			h.u32(0x00010000); // compatibility 1.0.0
+			fixed(h, id, il - 24);
+		} else {
+			ncmds++;
+			var dyld = "/usr/lib/dyld";
+			var dl = align(12 + dyld.length + 1, 8);
+			h.u32(0xe);
+			h.u32(dl);
+			h.u32(12);
+			fixed(h, dyld, dl - 12);
+		}
 		// UUID (filled below)
 		ncmds++;
 		h.u32(0x1b);
@@ -638,12 +669,14 @@ class LinkMachO {
 		h.u32(3); // TOOL_LD
 		h.u32(0x00010000);
 		// main
-		ncmds++;
-		var e = target(entrySym(entry));
-		h.u32(0x80000028);
-		h.u32(24);
-		h.u64(symAddr(e), 0);
-		h.u64(0, 0);
+		if (!dylib) {
+			ncmds++;
+			var e = target(entrySym(entry));
+			h.u32(0x80000028);
+			h.u32(24);
+			h.u64(symAddr(e), 0);
+			h.u64(0, 0);
+		}
 		// libSystem
 		ncmds++;
 		var lib = "/usr/lib/libSystem.B.dylib";
@@ -699,6 +732,53 @@ class LinkMachO {
 		var sig = sign.sign(out.b, codeLimit, textEnd);
 		out.b.blit(codeLimit, sig, 0, sig.length);
 		return out.toBytes();
+	}
+
+	function entrySymOrNull(name:String):Null<Symbol> {
+		var s = globals.get(name);
+		return s == null ? new Symbol(name) : s;
+	}
+
+	// an export trie of these names (with their `_`) at their addresses:
+	// the root's edges, one per name, each to a terminal node
+	static function exportTrie(le:Buf, items:Array<{name:String, addr:Int}>) {
+		inline function ulebLen(v:Int):Int {
+			var n = 1;
+			while (v >= 0x80) {
+				v >>>= 7;
+				n++;
+			}
+			return n;
+		}
+		// (the children's offsets, and so the root's size, until stable)
+		var rootSize = 2;
+		var offs:Array<Int> = [];
+		for (_ in 0...4) {
+			var at = rootSize;
+			offs = [];
+			for (it in items) {
+				offs.push(at);
+				at += 1 + 1 + ulebLen(it.addr) + 1; // terminal size, flags, address, no children
+			}
+			var size = 2;
+			for (k in 0...items.length)
+				size += haxe.io.Bytes.ofString(items[k].name).length + 1 + ulebLen(offs[k]);
+			if (size == rootSize) break;
+			rootSize = size;
+		}
+		le.u8(0); // root: not terminal
+		le.u8(items.length);
+		for (k in 0...items.length) {
+			le.str(items[k].name);
+			le.u8(0);
+			uleb(le, offs[k]);
+		}
+		for (it in items) {
+			le.u8(1 + ulebLen(it.addr));
+			le.u8(0); // flags: regular
+			uleb(le, it.addr);
+			le.u8(0);
+		}
 	}
 
 	function entrySym(name:String):Symbol {
