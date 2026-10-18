@@ -252,6 +252,23 @@ wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, an input method's composition through the DevTools
 protocol, against `todo.png`). CI runs all five in the `gfx` job.
 
+## The dev loop
+
+`make dev-check` ([dev.md](dev.md); CI: the `gfx` job): `HotTest`
+(`packages/os/test`: `hxmc.dev.Hot` and a store written as a third-party
+library, `test/store/Store.hx`, run twice, the second time from the first
+one's snapshot, natively and on Eval; built again with a changed type, that
+value reset and logged), `RefreshTest` (`packages/view/test`: signals keyed
+by their variables in each component instance, two instances apart, `For`
+rows by position, the `key` attribute, a `Show` turned on later), then
+`hxmc dev` itself on a copy of ui's Counter (`packages/os/test/dev`): in
+headless Chromium, as wasm and as WasmGC (`dev-web.mjs`: clicks through the
+canvas's ARIA mirror, an edit reloads the page with the count kept, a
+changed signal type resets it with a notice, a compile error shows in the
+overlay while the page and its program go on, the fix reloads with the count
+kept), and natively in a window under Xvfb (`dev-native.mjs`: the same
+through the process's restarts). Each prints its reloads' times.
+
 ## CI
 
 CI (`.github/workflows/build.yml`) runs as parallel jobs, each waiting only

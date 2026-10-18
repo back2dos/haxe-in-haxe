@@ -6,7 +6,8 @@ package hxmc;
 // code:
 //   hxmc <out> <haxe arguments...> -cp bin/hxmc/std --custom-target hxmc
 // With a first argument that starts with `-` it is the compiler's command
-// line (HaxeMain), e.g. for scripts: `hxmc -cp hxmc/src --run hxmc.MkStd`.
+// line (HaxeMain), e.g. for scripts: `hxmc -cp hxmc/src --run hxmc.MkStd`;
+// `hxmc dev <arguments>` is the dev loop (docs/dev.md).
 // Options (defines, or the environment for development):
 //   -D hxmc.target=linux-x86_64     the target (Target.hx, Abi.hx: six of them)
 //   -D hxmc.wasm-eh=legacy          wasm32-wasi: legacy exception handling (default: exnref)
@@ -61,6 +62,9 @@ class Main {
 		}
 		if (args.length == 0 || StringTools.startsWith(args[0], "-"))
 			Sys.exit(HaxeMain.run(args));
+		// the dev loop: `hxmc dev [build.hxml | arguments]` (docs/dev.md)
+		if (args[0] == "dev")
+			Sys.exit(HaxeMain.dev(args.slice(1)));
 		var out = args.shift();
 		var failed = null;
 		var key = UpToDate.key(args, out);
@@ -131,7 +135,7 @@ class Main {
 		if (opts.stats) {
 			Sys.println('hxmc: lowering ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms (since start ${Std.int((t0 - start) * 1000)} ms)');
 			if (useCache)
-				Sys.println('hxmc: bodies ${lowerCache.hits} reused, ${lowerCache.misses} lowered' + (lowerCache.why != null ? ' (lowered again: ${lowerCache.why})' : ''));
+				Sys.println('hxmc: bodies ${lowerCache.hits} reused (${lowerCache.keyed} by key), ${lowerCache.misses} lowered' + (lowerCache.why != null ? ' (lowered again: ${lowerCache.why})' : ''));
 		}
 		if (Sys.getEnv("HXMC_LOWER_ONLY") == "1") return; // (profiling the lowering)
 		if (opts.wasmGc) {
