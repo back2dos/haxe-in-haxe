@@ -38,6 +38,10 @@ class FuncGen {
 	var castUse = false;
 	// the frame areas (Mem.stack, struct slots) in the linear memory: their
 	// size, the frame's base and the stack pointer on entry (restored on return)
+	// the locals set from a Dynamic cast to their type (Haxe's unchecked
+	// casts, `t = any` for a String t): of no wasm type (a value of another
+	// type may be held, as in linear memory, cast only where used as one)
+	final loose = new Map<Int, Bool>();
 	var hasFrame = false;
 	var frameSize = 0;
 	var fp = -1;
@@ -53,7 +57,7 @@ class FuncGen {
 	public function refine():Null<Map<Int, Int>> {
 		var r = null;
 		for (id => ts in castUses) {
-			if (otherUses.exists(id)) continue;
+			if (otherUses.exists(id) || loose.exists(id)) continue;
 			var t = -1, n = 0;
 			for (k in ts.keys()) {
 				t = k;
@@ -94,6 +98,15 @@ class FuncGen {
 			localKey.set(s.id, s.key);
 		}
 		var code = m.uses.bodies.get(f);
+		function setSt(s:Stmt) {
+			switch s {
+				case SSet(l, ECast(TRef(_), x) | x) if (!l.ty.match(TRef(RAny)) && dynamicTyped(x)): loose.set(l.id, true);
+				case _:
+			}
+			hxmc.ir.Facts.iterStmt(setSt, _ -> {}, s);
+		}
+		for (s in code.body)
+			setSt(s);
 		function frameEx(e:Ex) {
 			switch e {
 				case ECallHost("hxmc_unsafe_Mem_stack" | "hxmc_unsafe_Mem_structSlot", _, _): hasFrame = true;
@@ -114,7 +127,7 @@ class FuncGen {
 		for (l in code.locals)
 			if (!local.exists(l.id) && repr(l.ty) != "v") {
 				local.set(l.id, nparams + extra.length);
-				var k = refined.exists(l.id) ? "t" + refined.get(l.id) : keyOf(l.ty);
+				var k = refined.exists(l.id) ? "t" + refined.get(l.id) : loose.exists(l.id) ? repr(l.ty) : keyOf(l.ty);
 				extra.push(k);
 				localKey.set(l.id, k);
 			}
@@ -162,6 +175,17 @@ class FuncGen {
 		op(0x24);
 		Enc.uleb(b, m.spGlobal);
 	}
+
+	// an expression of the IR's Dynamic (Any, type parameters)
+	static function dynamicTyped(e:Ex):Bool
+		return switch e {
+			case ELocal(l): l.ty.match(TRef(RAny));
+			case ECall(fn, _): fn.ret.match(TRef(RAny));
+			case ECallHost(_, _, t) | EAnonGet(_, t, _, _) | EArrGet(t, _, _) | EArrGetU(t, _, _) | EBoxGet(t, _): t.match(TRef(RAny));
+			case ECallClos(s, _, _) | ECallDispatch(_, s, _) | ECallAnon(_, s, _, _): s.ret.match(TRef(RAny));
+			case EField(c, idx, _): c.fields[idx].ty.match(TRef(RAny));
+			case _: false;
+		}
 
 	function unsupported(what:String):Dynamic
 		throw 'hxmc: -D hxmc.wasm-gc: ${f.display != null ? f.display : f.name}: $what is not supported yet';
