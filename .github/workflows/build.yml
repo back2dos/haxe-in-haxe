@@ -636,6 +636,7 @@ jobs:
           make view-check web-check text-check ui-check theme-check
           make ui-draw-check GFX_TARGET=linux-x86_64
           make theme-fidelity-check GFX_TARGET=linux-x86_64
+          make theme-dom-check web-widgets
           make ui-web-check
       - uses: actions/upload-artifact@v7
         if: always()
