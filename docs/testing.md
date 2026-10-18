@@ -187,7 +187,9 @@ bounds), the scene graph's matrices and their cache, the camera and the
 fixed-step clock, and the glTF reader (the sample scene of
 `packages/3d/test/SampleModel.hx` as .glb and .gltf, its accessors, the
 hierarchy as scene nodes, files it must reject), on Eval, natively and as
-wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`), input
+wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`;
+`@hxmc/physics`: `packages/physics/test/PhysicsTest.hx`, its checksum the
+same on all three), input
 actions from synthetic events natively and as wasm32-wasi (`InputTest.hx`),
 a `Model.of` reference to a name the file lacks rejected, then the
 renderer's frames (`packages/3d/test/Scenes.hx`: the sample glTF scene)

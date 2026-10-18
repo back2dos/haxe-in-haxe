@@ -193,7 +193,7 @@ help:
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
 ## 3d-check    packages/3d (docs/plans/3d.md): the math, the scene graph, the camera and the fixed-step
 ##             clock, the glTF reader on the sample scene, on Eval, natively and as wasm32-wasi
-##             (packages/3d/test/SceneTest.hx, GltfTest.hx); input actions natively and as wasm32-wasi
+##             (packages/3d/test/SceneTest.hx, GltfTest.hx) and packages/physics (PhysicsTest.hx); input actions natively and as wasm32-wasi
 ##             (InputTest.hx); then the renderer's frames headless against
 ##             golden images (packages/3d/test/check.sh: RenderTest, Scenes.hx; Linux: Mesa)
 ## 3d-sizes    what each feature of packages/3d adds to a program, natively and as wasm32-wasi
@@ -679,18 +679,21 @@ gfx-shader-check: $(TOOL)
 
 # packages/3d (docs/plans/3d.md) on gfx: the unit tests on Eval, natively and as wasm32-wasi, then
 # the renderer's frames against golden images, natively (GFX_TARGET) and in Chromium
-SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test
+SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test -cp packages/physics/src -cp packages/physics/examples -cp packages/physics/test
 3d-check: $(TOOL) $(STD) $(HOST_RT)
-	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest; do $(TOOL) $(SCENE_CP) --run $$t; done
+	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest PhysicsTest; do $(TOOL) $(SCENE_CP) --run $$t; done
 	$(call hxmc,bin/3d/SceneTest,$(SCENE_CP) -main SceneTest $(HXMC_ARGS))
 	$(call hxmc,bin/3d/GltfTest,$(SCENE_CP) -main GltfTest $(HXMC_ARGS))
-	bin/3d/SceneTest && bin/3d/GltfTest
+	$(call hxmc,bin/3d/PhysicsTest,$(SCENE_CP) -main PhysicsTest $(HXMC_ARGS))
+	bin/3d/SceneTest && bin/3d/GltfTest && bin/3d/PhysicsTest
 	$(call hxmc,bin/3d/SceneTest.wasm,$(SCENE_CP) -main SceneTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(call hxmc,bin/3d/GltfTest.wasm,$(SCENE_CP) -main GltfTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
-	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm
+	$(call hxmc,bin/3d/PhysicsTest.wasm,$(SCENE_CP) -main PhysicsTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm && $(WASI) bin/3d/PhysicsTest.wasm
 	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/$(GFX_TARGET)/Falling$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Falling $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main InputTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/InputTest.wasm,$(SCENE_CP) -main InputTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)) && $(WASI) bin/3d/InputTest.wasm
