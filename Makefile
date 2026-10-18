@@ -701,6 +701,10 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	$(call hxmc,bin/3d/InputTest.wasm,$(SCENE_CP) -main InputTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)) && $(WASI) bin/3d/InputTest.wasm
 	sh packages/3d/test/check.sh bin/3d/$(GFX_TARGET)
+	@# (Model.of's files beside the executable, -D hxmc.scene.embed=0)
+	$(call hxmc,bin/3d/files/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS) -D hxmc.scene.embed=0 -D hxmc.scene.out=bin/3d/files/RenderTest$(call EXE,$(GFX_TARGET)))
+	test -f bin/3d/files/assets/sample.glb && test -f bin/3d/files/RenderTest$(call EXE,$(GFX_TARGET)).assets.json
+	cd bin/3d && LIBGL_ALWAYS_SOFTWARE=1 HXMC_GFX_SOFTWARE=1 env -u DISPLAY files/RenderTest$(call EXE,$(GFX_TARGET)) skin ../../packages/3d/test/skin.png files/skin.png
 	@# (Model.of: a name the file does not have is a compile error)
 	ulimit -s unlimited 2>/dev/null || true; ! $(TOOL) bin/3d/ModelTypo $(SCENE_CP) -cp packages/3d/test/reject -main ModelTypo $(HXMC_ARGS) > bin/3d/ModelTypo.log 2>&1
 	grep -q "has no field bal" bin/3d/ModelTypo.log
@@ -712,7 +716,9 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 3d-web-check: $(TOOL) $(STD)
 	@mkdir -p bin/3d
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/sample.glb bin/3d/sample.hxm3d
-	$(call hxmc,bin/3d/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	@# (Model.of's files beside the module, -D hxmc.scene.embed=0: fetched by browser.mjs before main)
+	rm -rf bin/3d/assets
+	$(call hxmc,bin/3d/SceneWebTest.wasm,$(SCENE_CP) -main SceneWebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi -D hxmc.scene.embed=0 -D hxmc.scene.out=bin/3d/SceneWebTest.wasm)
 	$(NODE) packages/3d/test/web.mjs bin/3d/SceneWebTest.wasm bin/3d
 
 # (two renderers: TestRenderer, OtherRenderer; JavaScript compiled by the port)
