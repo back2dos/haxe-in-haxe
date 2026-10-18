@@ -196,6 +196,15 @@ class MemRepr {
 		barrierAll(r, l);
 	}
 
+	// d[di, di + n) = a[si, si + n) (n > 0, inside both, one element kind;
+	// they may overlap)
+	public static inline function arrMove(d:Dynamic, di:Int, a:Dynamic, si:Int, n:Int) {
+		var es = elemSize(a);
+		var dd = arrData(d);
+		LibC.memmove(dd.add(es * di), arrData(a).add(es * si), (es * n : I64));
+		if (arrKind(d) == AK_PTR) Leaf.rt_barrier_range(Mem.obj(dd), dd.add(8 * di), n);
+	}
+
 	// element i removed, the rest shifted down
 	public static inline function arrRemoveAt(a:Dynamic, i:Int) {
 		var n = arrLen(a), es = elemSize(a);
