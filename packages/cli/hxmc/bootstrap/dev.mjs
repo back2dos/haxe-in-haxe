@@ -280,13 +280,58 @@ async function request(words) {
 // in the next (0.3-0.4 s of an edit's build). The outputs are the same
 // (packages/os/test/dev/dev-verify.mjs); HXMC_DEV_HXB_CACHE=1 keeps the HXB cache.
 const hxbCache = process.env.HXMC_DEV_HXB_CACHE === '1' ? [] : ['-D', 'disable-hxb-cache'];
+// natively on Linux in the glibc mode, a dev host (hxmc.dev.DevHost): one
+// process for the session, which loads each build as a shared library
+// (-D hxmc.shared -D hxmc.dev-host; the output renamed to a fresh name per
+// build, <out>.dev/<n>.so) and keeps the window and the GPU context across
+// builds; HXMC_DEV_HOST=0: a new process per build instead
+const hosted = !browser && process.platform === 'linux' && osPackage && process.env.HXMC_DEV_HOST !== '0'
+	&& all.some((a, i) => (a === '-D' || a === '--define') && all[i + 1] === 'hxmc.libc=glibc');
+const hostArgs = hosted ? ['-D', 'hxmc.shared', '-D', 'hxmc.dev-host', '-D', 'hxmc.exports=hxmc_dev_run,hxmc_dev_state'] : [];
 const changedFiles = new Set();
 async function build() {
 	const files = [...changedFiles];
 	changedFiles.clear();
 	for (const file of files)
 		if (file.endsWith('.hx')) await request(['--display', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/invalidate', params: { file } })]);
-	return request([...args, '-D', 'hxmc.dev', ...hxbCache, ...(hxmcStd ? ['-cp', hxmcStd] : [])]);
+	return request([...args, '-D', 'hxmc.dev', ...hostArgs, ...hxbCache, ...(hxmcStd ? ['-cp', hxmcStd] : [])]);
+}
+
+// the dev host's executable: built once (beside the compiler's cache, by
+// its sources' and the compiler's hash), while the first build runs
+const hostDir = out + '.dev';
+let hostExe = null, hostBuilt = Promise.resolve(), libCount = 0;
+if (hosted) {
+	fs.rmSync(hostDir, { recursive: true, force: true });
+	fs.mkdirSync(hostDir, { recursive: true });
+	const src = path.join(osPackage.dir, osPackage.json.haxe.classPath ?? 'src');
+	const h = crypto.createHash('sha256');
+	for (const f of ['DevHost.hx']) h.update(fs.readFileSync(path.join(src, 'hxmc', 'dev', f)));
+	h.update(String(fs.statSync(compiler).mtimeMs));
+	const cacheDir = path.join(process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), '.cache'), 'hxmc', 'dev-host');
+	hostExe = path.join(cacheDir, 'host-' + h.digest('hex').slice(0, 16));
+	if (!fs.existsSync(hostExe)) hostBuilt = new Promise((resolve, reject) => {
+		fs.mkdirSync(cacheDir, { recursive: true });
+		const tmp = hostExe + '.' + process.pid;
+		const p = spawn(compiler, ['-cp', src, '-main', 'hxmc.dev.DevHost', '-D', 'hxmc.libc=glibc', '--custom-target', 'hxmc=' + tmp, ...(hxmcStd ? ['-cp', hxmcStd] : [])],
+			{ stdio: ['ignore', 'pipe', 'pipe'] });
+		let o = '';
+		p.stdout.on('data', (d) => (o += d));
+		p.stderr.on('data', (d) => (o += d));
+		p.on('exit', (code) => {
+			if (code !== 0) return reject(new Error('hxmc dev: the dev host does not build:\n' + o));
+			fs.renameSync(tmp, hostExe);
+			resolve();
+		});
+	});
+}
+// (the build's output, a shared library, under a name of its own: a library loaded is not written over, nor loaded twice under one name)
+function nextLibrary() {
+	const lib = path.join(hostDir, `${++libCount}.so`);
+	fs.renameSync(out, lib);
+	// (two builds back: closed by the host)
+	try { fs.unlinkSync(path.join(hostDir, `${libCount - 2}.so`)); } catch {}
+	return lib;
 }
 
 // --- the program ---
@@ -301,7 +346,7 @@ function measured() {
 	if (!timing) return;
 	const t = timing;
 	timing = null;
-	log(`hxmc dev: ${browser ? 'swapped' : 'reloaded'} in ${Math.round(performance.now() - t.seen)} ms (build ${t.build} ms)`);
+	log(`hxmc dev: ${browser || hosted ? 'swapped' : 'reloaded'} in ${Math.round(performance.now() - t.seen)} ms (build ${t.build} ms)`);
 }
 
 // natively: the program's connection
@@ -328,10 +373,11 @@ const appServer = net.createServer((sock) => {
 }).listen(0, '127.0.0.1');
 await new Promise((r) => appServer.on('listening', r));
 
-function startNative(withSnapshot) {
+function startNative(withSnapshot, lib) {
 	const env = { ...process.env, HXMC_DEV: '127.0.0.1:' + appServer.address().port };
-	if (withSnapshot) env.HXMC_DEV_SNAPSHOT = snapshotFile;
-	const p = spawn(out, [], { env, stdio: 'inherit' });
+	if (withSnapshot || hosted) env.HXMC_DEV_SNAPSHOT = snapshotFile;
+	if (hosted && !withSnapshot) try { fs.unlinkSync(snapshotFile); } catch {}
+	const p = hosted ? spawn(hostExe, [lib], { env, stdio: 'inherit' }) : spawn(out, [], { env, stdio: 'inherit' });
 	child = p;
 	p.on('exit', (code, signal) => {
 		if (child === p) {
@@ -341,8 +387,32 @@ function startNative(withSnapshot) {
 	});
 }
 
+// natively with the dev host: the running build snapshots, disposes and
+// hands over to the new library, in the same process
+async function swapHosted() {
+	await hostBuilt;
+	const lib = nextLibrary();
+	const sock = childSocket;
+	if (child && sock) {
+		try { fs.unlinkSync(snapshotFile); } catch {}
+		const saved = new Promise((r) => (sock.saved = r));
+		const exited = new Promise((r) => child.once('exit', r));
+		sock.write(JSON.stringify({ type: 'reload', snapshot: snapshotFile, library: lib }) + '\n');
+		await Promise.race([saved, exited]);
+		if (child) return;
+	} else if (child) {
+		// (a program that has not connected, or not hxmc.os's: stopped, a cold start)
+		const old = child;
+		child = null;
+		old.kill();
+		await new Promise((r) => old.once('exit', r));
+	}
+	startNative(fs.existsSync(snapshotFile), lib);
+}
+
 // natively: the running program snapshots and exits; the new build starts with its state
 async function reloadNative() {
+	if (hosted) return swapHosted();
 	const old = child, sock = childSocket;
 	let withSnapshot = false;
 	if (old) {
@@ -588,7 +658,7 @@ async function rebuild(seen) {
 	const t0 = performance.now();
 	// (natively: the running program's file moved aside, as a running executable cannot be written over)
 	const aside = out + '.running';
-	const moved = !browser && child !== null && fs.existsSync(out) && (() => {
+	const moved = !browser && !hosted && child !== null && fs.existsSync(out) && (() => {
 		try { fs.renameSync(out, aside); return true; } catch { return false; }
 	})();
 	const r = await build();

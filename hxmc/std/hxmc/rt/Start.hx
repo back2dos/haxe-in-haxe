@@ -58,8 +58,16 @@ class Start {
 			Mem.setI64(to, 16 * t, (((Types.T_TYPEOBJ : I64) << 32) | ((Types.K_RAW << 28) | 1)));
 			Mem.setI32(to, 16 * t + 8, t);
 		}
-		// (Android: Bionic's atexit is crtbegin_so.o's, __cxa_atexit with the library's handle)
+		// (Android: Bionic's atexit is crtbegin_so.o's, __cxa_atexit with the
+		// library's handle; a glibc shared library registers none: a library
+		// closed before the process exits (hxmc dev's host) would leave exit a
+		// function to call that is gone, and glibc's dlclose runs a library's
+		// __cxa_atexit functions only through its crtbegin's __cxa_finalize)
+		#if hxmc.shared
+		if (Mem.target() >= 9) U.__cxa_atexit(Callback.addr(Gc.report), Ptr.nil(), Mem.sym("__dso_handle"));
+		#else
 		if (Mem.target() >= 9) U.__cxa_atexit(Callback.addr(Gc.report), Ptr.nil(), Mem.sym("__dso_handle")) else U.atexit(Callback.addr(Gc.report));
+		#end
 	}
 
 	// The program's main runs on a reserved stack of RT_STACK_MB (default
@@ -96,6 +104,10 @@ class Start {
 		}
 		Os.guard(stack, Os.pageSize());
 		Mem.callOnStack(stack.addL(bytes), body);
+		#if hxmc.shared
+		// (a library's program ended: its stack given back, as the library may be closed: hxmc dev's host)
+		Os.release(stack, bytes);
+		#end
 	}
 
 	// the main fiber's entry (Windows): the body, then back to the thread's
