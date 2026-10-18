@@ -195,7 +195,10 @@ a `Model.of` reference to a name the file lacks rejected, `@hxmc/3d-ui`'s
 markup on the scene graph natively (`packages/3d-ui/test/SceneUiTest.hx`), then the
 renderer's frames (`packages/3d/test/Scenes.hx`: the sample glTF scene)
 headless against `packages/3d/test/<scene>.png` by the rule above
-(`RenderTest`, `check.sh`); `make 3d-web-check`: the same on WebGPU and
+(`RenderTest`, `check.sh`; `make 3d-programs GFX_TARGET=<target>` builds it
+for another target: CI runs the ARM64 one on llvmpipe (`gfx-arm64`) and the
+Windows ones on D3D11's WARP (`gfx-windows`), and `check.sh` runs a Windows
+build under Wine on Linux); `make 3d-web-check`: the same on WebGPU and
 WebGL2 in headless Chromium (`packages/3d/test/web.mjs`).
 
 ## UI

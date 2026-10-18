@@ -111,7 +111,7 @@ endef
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
-	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check 3d-check 3d-web-check 3d-sizes \
+	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check 3d-programs 3d-check 3d-web-check 3d-sizes \
 	android-programs android-check android-device-check touch-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
@@ -196,6 +196,7 @@ help:
 ##             (packages/3d/test/SceneTest.hx, GltfTest.hx) and packages/physics (PhysicsTest.hx); input actions natively and as wasm32-wasi
 ##             (InputTest.hx); then the renderer's frames headless against
 ##             golden images (packages/3d/test/check.sh: RenderTest, Scenes.hx; Linux: Mesa)
+## 3d-programs packages/3d's RenderTest for GFX_TARGET (any of the six: check.sh runs it, Windows's under Wine)
 ## 3d-sizes    what each feature of packages/3d adds to a program, natively and as wasm32-wasi
 ##             (packages/3d/test/size)
 ## 3d-web-check  packages/3d's frames on WebGPU and WebGL2 in headless Chromium (packages/3d/test/web.mjs),
@@ -684,6 +685,12 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	-cp packages/text/src -cp packages/ui/src
 SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp packages/view/src -cp packages/3d-ui/src -cp packages/3d-ui/test \
 	-D hxmc.view.renderer=hxmc.scene.view.SceneRenderer
+# RenderTest for GFX_TARGET (any of the six; CI runs the ARM64 and Windows ones on their machines)
+3d-programs: $(TOOL) $(STD) $(HOST_RT)
+	@mkdir -p bin/3d
+	@# (the asset step: the sample packed for the packed scene)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/sample.glb bin/3d/sample.hxm3d
+	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
 3d-check: $(TOOL) $(STD) $(HOST_RT)
 	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest PhysicsTest; do $(TOOL) $(SCENE_CP) --run $$t; done
 	$(call hxmc,bin/3d/SceneTest,$(SCENE_CP) -main SceneTest $(HXMC_ARGS))
@@ -694,9 +701,7 @@ SCENE_UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/3d/src -cp 
 	$(call hxmc,bin/3d/GltfTest.wasm,$(SCENE_CP) -main GltfTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(call hxmc,bin/3d/PhysicsTest.wasm,$(SCENE_CP) -main PhysicsTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm && $(WASI) bin/3d/PhysicsTest.wasm
-	@# (the asset step: the sample packed for the packed scene)
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run hxmc.scene.gltf.Pack packages/3d/examples/sample.glb bin/3d/sample.hxm3d
-	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(MAKE) --no-print-directory 3d-programs
 	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Falling$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Falling $(HXMC_ARGS) $(GFX_ARGS))
