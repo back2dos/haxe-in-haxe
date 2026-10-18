@@ -386,12 +386,10 @@ class Helpers {
 			b.u8(0x0F);
 			b.u8(0x0B);
 		}
-		// (no such method: the field, a closure)
+		// (no such method: the runtime's, an Array's, a String's, a closure field)
 		get(b, 0);
 		b.u8(0x23);
 		Enc.uleb(b, m.strLit(name));
-		b.u8(0x10);
-		Enc.uleb(b, m.exportOf("gc_anon_get"));
 		b.u8(0x41);
 		Enc.sleb(b, s.args.length);
 		for (i in 0...s.args.length) {
@@ -401,7 +399,7 @@ class Helpers {
 		m.gc(b, 0x08, m.dataType("p"), s.args.length);
 		m.gc(b, 0x00, m.arrType("p"));
 		b.u8(0x10);
-		Enc.uleb(b, m.dynCall());
+		Enc.uleb(b, m.exportOf("gc_anon_call"));
 		var r = GcModule.repr(s.ret);
 		if (r == "v") b.u8(0x1A) else if (r != "p") {
 			b.u8(0x10);

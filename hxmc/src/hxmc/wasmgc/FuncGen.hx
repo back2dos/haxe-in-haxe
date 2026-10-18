@@ -890,7 +890,7 @@ class FuncGen {
 				release("t" + ct, t);
 			case ECallAnon(name, s, o, args):
 				// a class instance's method of that name (Helpers.anonCall: by its
-				// class), else the field through the runtime, called with its arguments boxed
+				// class), else the runtime's (gc_anon_call), the arguments boxed
 				var tmp = temp("p");
 				var vals = [for (k in 0...args.length) temp(repr(s.args[k]))];
 				expr(o);
@@ -912,7 +912,6 @@ class FuncGen {
 				op(0x05);
 				localGet(tmp);
 				expr(EStr(name));
-				call(m.exportOf("gc_anon_get"));
 				i32(args.length);
 				for (k in 0...args.length) {
 					localGet(vals[k]);
@@ -920,7 +919,7 @@ class FuncGen {
 				}
 				gc(0x08, m.dataType("p"), args.length);
 				gc(0x00, m.arrType("p"));
-				call(m.dynCall());
+				call(m.exportOf("gc_anon_call"));
 				if (repr(s.ret) == "v") op(0x1A) else unboxTop(s.ret);
 				op(0x0B);
 				for (k in 0...args.length)

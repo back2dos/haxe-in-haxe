@@ -43,7 +43,8 @@ class GcGen {
 	// (FuncGen: structural access it does not know the layout of, enum comparisons)
 	static function runtimeCalls(e:Ex):Null<String>
 		return switch e {
-			case EAnonGet(_) | ECallAnon(_): "gc_anon_get";
+			case EAnonGet(_): "gc_anon_get";
+			case ECallAnon(_): "gc_anon_call";
 			case ECallHost("hxmc_rt_gc_W_enumEq", _, _): "gc_dyn_eq";
 			case _: null;
 		}
