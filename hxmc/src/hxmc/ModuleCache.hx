@@ -127,6 +127,8 @@ class ModuleCache {
 		ServerCache.dependencyDirtyHook = onDependencyDirty;
 		ServerCache.loadDirtyModuleHook = loadDirty;
 		typing.TypeloadModule.typeFromSourceHook = onTypeFromSource;
+		typing.TypeloadModule.buildClassHook = onBuildClass;
+		compiler.hxb.HxbReader.missingFieldHook = onMissingField;
 		core.TUnification.maybeUsedHook = onMaybeUsed;
 		macros.eval.EvalJit.staticVarHook = onStaticVar;
 		macros.eval.EvalStdLib.volatileHook = onVolatile;
@@ -582,6 +584,40 @@ class ModuleCache {
 			}
 	}
 
+	// TypeloadModule.buildClassHook: a class of a module typed from its
+	// source built (its fields made), lazily, when something first asks for
+	// them: part of the typing of its module (what its build macros do is
+	// that module's, its macros' state among it, whichever module's typing
+	// asked), and while it lasts the restored modules that refer to that
+	// module are typed from their source too (cycleGuard: decoded then,
+	// they would refer to fields it does not have yet)
+	static function onBuildClass(c:TClass, start:Bool) {
+		var s = state;
+		if (s == null) return;
+		if (start) {
+			s.typingStack.push(c.clModule);
+			s.building.push(c.clModule);
+		} else {
+			s.typingStack.pop();
+			s.building.pop();
+		}
+	}
+
+	// HxbReader.missingFieldHook: a restored module refers to a field its
+	// class does not have (yet): of a module typed from its source in this
+	// build whose pending passes make it (an interface's accessors, made in
+	// PConnectField, which the typer runs before the code that reads them is
+	// typed): those passes run now, as TypeloadModule.loadModule does
+	static function onMissingField(c:TClass):Bool {
+		var s = state;
+		if (s == null || c.clModule == null || s.restored(c.clModule) != null) return false;
+		var com = s.comOf(s.roleOfSign(c.clModule.mExtra.mSign));
+		var g = com == null ? null : typerOf(com);
+		if (g == null) return false;
+		context.Typecore.flushPass(g, context.TyperPass.PConnectField, {name: "hxmc.module_cache", args: c.clPath.pack.concat([c.clPath.name])});
+		return true;
+	}
+
 	static function wanted(com:CommonContext):Bool {
 		var env = Sys.getEnv("HXMC_MODULE_CACHE");
 		return env != "0" && CacheDir.define(com, "hxmc.no-module-cache") == null;
@@ -634,7 +670,7 @@ class ModuleCache {
 			var typeModule = typing.TypeloadCacheHook.typeModuleHook;
 			typing.TypeloadCacheHook.typeModuleHook = function(com, delay, path, p) {
 				var s = state;
-				if (s != null && s.creating.length > 0) s.cycleGuard(com, path);
+				if (s != null && (s.creating.length > 0 || s.building.length > 0)) s.cycleGuard(com, path);
 				var r = typeModule(com, delay, path, p);
 				var s = state;
 				if (s != null) s.restoreMonos();
@@ -757,8 +793,11 @@ class ModuleCache {
 				}
 			}
 			var t0 = haxe.Timer.stamp();
-			s.loaded = s.register(0);
-			if (s.signs[1] != null) s.loaded += s.register(1);
+			s.register(0);
+			if (s.signs[1] != null) s.register(1);
+			s.reselect();
+			s.loaded = s.install(0);
+			if (s.signs[1] != null) s.loaded += s.install(1);
 			if (stats())
 				Sys.println('hxmc: module cache: ${s.loaded} modules of ${s.index.variants.length} variants read (${Std.int((s.openTime + haxe.Timer.stamp() - t0) * 1000)} ms)');
 			return;
@@ -1697,18 +1736,37 @@ class ModuleCacheState {
 			case MSBad(_): return;
 			case _:
 		}
-		if (creating.indexOf(sccOf(v)) < 0) return;
+		if (creating.indexOf(sccOf(v)) < 0 && !refersToBuilding(v)) return;
 		mc.mcExtra.mCacheState = MSBad(FileChanged(v.file + " (typed with a module of its cycle)"));
 		cycleTyped++;
 		if (log) Sys.println("hxmc: module cache: " + core.Globals.sTypePath(path) + " typed again with a module of its cycle");
 	}
 	public var openTime = 0.0;
 
-	// the variants of a role that match the build's defines put in the
-	// server's cache: per module, the newest whose reads match (of those,
-	// one whose file has the content it has now: a file edited back), else
-	// the newest (checked dirty); the number of modules
-	public function register(role:Int):Int {
+	// the modules typed from their source whose classes are being built
+	// (TypeloadModule.buildClassHook)
+	public var building:Array<ModuleDef> = [];
+
+	// whether a restored module depends on one whose class is being built,
+	// or is of its cycle
+	function refersToBuilding(v:Variant):Bool {
+		for (m in building) {
+			var role = roleOfSign(m.mExtra.mSign);
+			if (role < 0) continue;
+			var k = ModuleCache.key(m.mPath);
+			for (d in v.deps)
+				if (d.role == role && d.key == k) return true;
+			var w = chosen[role].get(k);
+			if (w != null && w.role == v.role && sccOf(w) == sccOf(v)) return true;
+		}
+		return false;
+	}
+
+	// the variants of a role that match the build's defines chosen: per
+	// module, the newest whose reads match (of those, one whose file has
+	// the content it has now: a file edited back), else the newest (checked
+	// dirty)
+	public function register(role:Int) {
 		var first = new Map<String, Variant>();
 		var more = new Map<String, Array<Variant>>();
 		var c = chosen[role];
@@ -1738,6 +1796,7 @@ class ModuleCacheState {
 		}
 		for (k => v in first)
 			if (!c.exists(k)) c.set(k, v);
+		alternatives[role] = more;
 		// (a module whose macros keep state, edited: typed, its macros use
 		// that state, so the others whose macros keep it there are typed too)
 		for (v in c)
@@ -1748,6 +1807,39 @@ class ModuleCacheState {
 				for (x in v.macroState)
 					retype.set(x, true);
 			}
+	}
+
+	// per role, the other variants whose reads match, per module
+	var alternatives:Array<Map<String, Array<Variant>>> = [new Map(), new Map()];
+
+	// a module without a file of its own, which a macro defined: of its
+	// variants, one whose dependencies are as they were when it was typed
+	// (the one typed with the variant restored for the module whose macro
+	// defines it, which, restored, does not define it again)
+	public function reselect() {
+		for (role in 0...2)
+			for (k => l in alternatives[role]) {
+				var c = chosen[role];
+				var v = c.get(k);
+				if (v == null || v.fileRec != null || (v.file != null && v.file != "" && FileSystem.exists(v.file)) || depsMatch(v)) continue;
+				for (w in l) {
+					if (w == v || w.fileRec != null) continue;
+					c.set(k, w);
+					closure = null;
+					if (depsMatch(w)) {
+						v = w;
+						break;
+					}
+				}
+				c.set(k, v);
+				closure = null;
+			}
+	}
+
+	// the chosen variants of a role put in the server's cache; the number
+	// of modules
+	public function install(role:Int):Int {
+		var c = chosen[role];
 		var cc = com.cs.getContext(signs[role]);
 		var hxb = cc.getHxb();
 		var n = 0;
@@ -1775,6 +1867,14 @@ class ModuleCacheState {
 			n++;
 		}
 		return n;
+	}
+
+	// whether a variant's dependencies have the hashes they had when it was
+	// typed
+	function depsMatch(v:Variant):Bool {
+		for (d in v.deps)
+			if (depHash(d) != d.expect) return false;
+		return true;
 	}
 
 	public function roleOfSign(sign:String):Int

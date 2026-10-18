@@ -39,6 +39,8 @@ GFX_TARGET ?= $(HOST)
 AUDIO_TARGET ?= $(HOST)
 # `make android-programs`, `android-check`, `android-device-check`: android-x86_64 or android-arm64
 ANDROID_TARGET ?= android-x86_64
+# `make ios-programs`, `ios-check`: ios-sim-arm64 or ios-arm64 (`ios-sim-check`: the simulator's, on a Mac)
+IOS_TARGET ?= ios-sim-arm64
 # extra arguments of the port's build (e.g. HXFLAGS="-D retain")
 HXFLAGS ?=
 # the port the tests check
@@ -109,8 +111,8 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
-	android-programs android-check android-device-check shared-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz theme-check theme-fidelity-check ui-draw-check ui-web-check portcheck measure site-check \
+	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
+	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
 help:
@@ -172,6 +174,9 @@ help:
 ## android-programs  bin/android/ANDROID_TARGET/*.apk: APKs written by hxmc (android-x86_64, android-arm64)
 ## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature, classes.dex)
 ## android-device-check  the Android tests on the device or emulator adb reaches (android.sh, android-native.sh, android-mix.sh)
+## ios-programs  bin/ios/IOS_TARGET/*.app, Cube.ipa: iOS apps written by hxmc (ios-sim-arm64, ios-arm64); bin/ios/SimTap (macOS)
+## ios-check   their structure (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature)
+## ios-sim-check  IosTest on an iPhone simulator (a Mac with Xcode: packages/gfx/test/ios.sh)
 ## shared-check  shared libraries of the glibc mode (-D hxmc.shared), loaded by an hxmc program (hxmc/test/SharedCheck.hx)
 ## gfx-check   packages/gfx: the examples (triangle, cube, instances, targets, mips, formats) headless and in a window, against
 ##             golden images (packages/gfx/test/check.sh; Linux: Mesa, Xvfb; macOS: Metal, Cocoa);
@@ -195,18 +200,26 @@ help:
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
-##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx)
+##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx); the
+##             widgets' examples rendered and their reference complete (WidgetExamplesTest.hx; the
+##             reference written to bin/ui/widgets.json, WidgetDocs.hx)
 ## theme-check  packages/theme on Eval: Tailwind's classes read as rules, Tw's rules made at compile time,
 ##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
 ## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
 ##             (packages/theme/test/ref, from ref.mjs; the cases known to differ reported, not failed)
-## ui-layout-fuzz  random flex trees (SEED, COUNT) against Chromium's boxes (Playwright): differences to reduce into layout-cases.mjs
+## web-widgets  the DOM's widgets (packages/web, hxmc.web.widgets): the gallery driven in Chromium by pointer
+##             and keys (packages/web/test/widgets.mjs), the sizes of the counter, form and gallery bundles
+## theme-dom-check  the DOM's widgets (packages/web) under the theme's CSS in Chromium against the same
+##             references (packages/theme/test/dom-fidelity.mjs)
+## ui-layout-fuzz  random flex trees (SEED, COUNT; FEATURES=more: grids, absolute positions, auto margins, order and more) against Chromium's boxes (Playwright): differences to reduce into layout-cases.mjs
+## ui-layout-reduce  one of them (CASE='fuzz 41-87', after ui-layout-fuzz) reduced: nodes and properties dropped while it still differs
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,BoxTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
 ## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
-##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans)
+##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans);
+##             the native form (native-web.mjs); native text editors in a drawn window (web-field.mjs)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -569,6 +582,23 @@ android-device-check: android-programs
 	sh packages/ui/test/android-native.sh bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk bin/android/$(ANDROID_TARGET)
 	sh packages/ui/test/android-mix.sh bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk bin/android/$(ANDROID_TARGET)
 
+# iOS: app bundles written by hxmc (hxmc/src/hxmc/ios/Bundle.hx), IosTest
+# (packages/gfx/test/IosTest.hx) and the cube example (also as an .ipa);
+# SimTap (packages/gfx/test/SimTap.hx), a macOS program that taps the
+# simulator for ios.sh
+ios-programs: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/IosTest.app,$(GFX_CP) -main IosTest $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.gfxtest)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.app,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
+	$(call hxmc,bin/ios/$(IOS_TARGET)/Cube.ipa,$(GFX_CP) -main Cube $(HXMC_ARGS) -D hxmc.target=$(IOS_TARGET) -D hxmc.ios-bundle-id=org.hxmc.cube)
+	$(call hxmc,bin/ios/SimTap,-cp packages/os/src -cp packages/gfx/test -main SimTap $(HXMC_ARGS) -D hxmc.target=macos-arm64)
+# their structure without a Mac (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature; llvm-objdump when there)
+ios-check: ios-programs
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run IosCheck $(foreach a,IosTest.app Cube.app Cube.ipa,bin/ios/$(IOS_TARGET)/$(a))
+# IosTest on an iPhone simulator (packages/gfx/test/ios.sh: a Mac with Xcode)
+ios-sim-check:
+	$(MAKE) --no-print-directory ios-programs IOS_TARGET=ios-sim-arm64
+	sh packages/gfx/test/ios.sh bin/ios/ios-sim-arm64/IosTest.app bin/ios/ios-sim-arm64 bin/ios/SimTap
+
 gfx-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/gfx/WebTest.wasm,$(GFX_CP) -main WebTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/gfx/test/web.mjs bin/gfx/WebTest.wasm bin/gfx
@@ -617,6 +647,16 @@ web-check: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
 	rm -rf bin/web/demo/*.hxmc bin/web/demo/*.log
 	$(NODE) packages/web/test/web.mjs bin/web
 
+# (the DOM's widgets: the theme's CSS on Eval, the examples compiled to JavaScript by the port, driven in Chromium)
+web-widgets: $(TOOL) $(PORT_BIN)
+	@mkdir -p bin/web/widgets
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/web/widgets/shadcn.css
+	for m in counter:WidgetCounter form:WidgetForm gallery:WidgetGallery; do \
+		ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(DOM_CP) -cp packages/web/examples -main $${m#*:} -dce full -D js-es=6 -D analyzer-optimize -js bin/web/widgets/$${m%%:*}.js || exit 1; \
+		printf '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>%s</title><link rel="stylesheet" href="shadcn.css"></head><body><script src="%s.js"></script></body></html>\n' $${m#*:} $${m%%:*} > bin/web/widgets/$${m%%:*}.html; \
+	done
+	$(NODE) packages/web/test/widgets.mjs bin/web/widgets
+
 text-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/text/test -cp packages/gfx/test --run TextTest $(if $(BLESS),--bless)
 
@@ -626,20 +666,34 @@ ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run MarkupTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run GuideTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples/widgets --run WidgetExamplesTest
+	mkdir -p bin/ui; ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/test --run WidgetDocs packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/ui/examples/widgets bin/ui/widgets.json
 
 # random flex trees against Chromium (Playwright): a tool, not a lane
 ui-layout-fuzz: $(TOOL)
-	node packages/ui/test/layout-fuzz.mjs $(or $(SEED),1) $(or $(COUNT),200) bin/ui/fuzz
+	node packages/ui/test/layout-fuzz.mjs $(or $(SEED),1) $(or $(COUNT),200) bin/ui/fuzz $(FEATURES)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run LayoutFuzz bin/ui/fuzz
+
+ui-layout-reduce: $(TOOL)
+	node packages/ui/test/layout-reduce.mjs bin/ui/fuzz/layout-cases.json '$(CASE)' bin/ui/reduce
 
 theme-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run ThemeTest $(TOOL)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run CssTest
+
+# (the theme's CSS on Eval, the DOM's widgets compiled to JavaScript by the port, in Chromium)
+DOM_CP := -cp packages/view/src -cp packages/web/src -cp packages/ui/src -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
+theme-dom-check: $(TOOL) $(PORT_BIN)
+	@mkdir -p bin/theme/dom
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/theme/dom/shadcn.css
+	ulimit -s unlimited 2>/dev/null || true; $(PORT_BIN) $(DOM_CP) -cp packages/theme/src -cp packages/theme/test -main DomFidelity -dce full -D js-es=6 -js bin/theme/dom/domfidelity.js
+	$(NODE) packages/theme/test/dom-fidelity.mjs bin/theme/dom bin/theme/dom/out
 
 theme-fidelity-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/src -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
 	mkdir -p bin/theme/out && LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/theme/$(GFX_TARGET)/FidelityTest packages/theme/test/ref bin/theme/out
 
-UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
+UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
@@ -661,6 +715,7 @@ ui-draw-check: ui-programs
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery.png bin/ui/$(GFX_TARGET)/gallery.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-dark.png bin/ui/$(GFX_TARGET)/gallery-dark.png --dark $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-rtl.png bin/ui/$(GFX_TARGET)/gallery-rtl.png --rtl $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-unstyled.png bin/ui/$(GFX_TARGET)/gallery-unstyled.png --unstyled $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/StressTest
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/EmojiTest packages/ui/test/emoji.png bin/ui/$(GFX_TARGET)/emoji.png
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/BoxTest packages/ui/test/boxes.png bin/ui/$(GFX_TARGET)/boxes.png
@@ -676,6 +731,8 @@ ui-web-check: $(TOOL) $(STD)
 	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
 	$(call hxmc,bin/ui/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
+	$(call hxmc,bin/ui/WebField.wasm,$(UI_CP) -main WebField $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/web-field.mjs bin/ui/WebField.wasm
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
 MACROS ?= verify

@@ -4,6 +4,7 @@
 // accessors that read its strings (arrays of UTF-16 units).
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createRequire } from "node:module";
 const { readFileSync, writeSync } = fs;
 
 const [file, ...args] = process.argv.slice(2);
@@ -150,7 +151,12 @@ function ofJs(t) {
 	for (let i = 0; i < t.length; i++) exports.hxmc_str_set(s, i, t.charCodeAt(i));
 	return s;
 }
-const { instance } = await WebAssembly.instantiate(readFileSync(file), { hxmc });
+// HXMC_WASM_IMPORTS=<file.cjs>: the modules of the program's imports that take
+// and return numbers (@:hxmc.lib externs), as hxmc/bootstrap/wasi.mjs takes
+// them (no memory: getMemory gives null)
+const imports = { hxmc };
+if (process.env.HXMC_WASM_IMPORTS) Object.assign(imports, createRequire(import.meta.url)(path.resolve(process.env.HXMC_WASM_IMPORTS))(() => null, () => exports));
+const { instance } = await WebAssembly.instantiate(readFileSync(file), imports);
 exports = instance.exports;
 try {
 	exports._start();

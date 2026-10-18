@@ -24,7 +24,14 @@ using StringTools;
 // function edited (its dependents typed again), a body edited in a cycle
 // (only that module), and one whose build macro keeps state another macro
 // reads (restored while no macro of the build uses that state, else the
-// build runs again with those modules typed). The warm runs must restore
+// build runs again with those modules typed). Three for modules typed again
+// under restored ones that refer to them: an interface's property read
+// through the accessor Haxe makes for it (the interface edited, its user
+// restored), a cycle whose edited module's class is built while a restored
+// one of the cycle is read (and a field that one reads removed: the same
+// errors; full DCE), and a build macro whose state another module's build
+// macro forces (that module edited: typed again with it; then an error in
+// it: the same errors as without the cache, then fixed). The warm runs must restore
 // every module (none typed again), an edit undone restores the earlier
 // variant. Copies of the std (hxmc's and upstream's) are edited, never the
 // repository's. In bin/hxmc-t/module-cache (removed when every check passes):
@@ -162,7 +169,60 @@ class ModuleCacheCheck {
 			"src/Main.hx" => "class Main {\n\tstatic function count<T>(it:Iterable<T>):Int {\n\t\tvar n = 0;\n\t\tfor (_ in it) n++;\n\t\treturn n;\n\t}\n\n\tstatic function main() {\n\t\tvar b = new Bag();\n\t\ttrace(b.size());\n\t\ttrace(count(b));\n\t}\n}\n",
 			"src/Bag.hx" => "class Bag {\n\tpublic var items:Array<Int>;\n\n\tpublic function new() items = [1, 2];\n\n\tpublic function iterator():Iterator<Int> return items.iterator();\n\n\tpublic function size():Int return items.length;\n}\n"
 		];
+		// (an interface's property read through its accessor by a restored
+		// module, the interface typed again: the accessor Haxe makes for it,
+		// in a later pass, read before that pass)
+		var accessor = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\ttrace(User.width(User.make()));\n\t}\n}\n",
+			"src/Shape.hx" => "interface Shape {\n\tvar width(get, never):Float;\n}\n",
+			"src/Box.hx" => "class Box implements Shape {\n\tpublic var width(get, never):Float;\n\n\tpublic function new() {}\n\n\tfunction get_width():Float return 2.5;\n}\n",
+			"src/User.hx" => "class User {\n\tpublic static function make():Shape return new Box();\n\n\tpublic static function width(s:Shape):Float return s.width;\n}\n"
+		];
+		// (a cycle, Ui and Text: Ui typed again, its class built when its
+		// field's type names Text, Text restored then would read a field of
+		// Ui that its build has not made yet)
+		var building = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\tvar ui = new Ui();\n\t\ttrace(ui.select());\n\t}\n}\n",
+			"src/Ui.hx" => "class Ui {\n\tpublic static var reach = 1.5;\n\n\tpublic var selection:Null<{node:Text, caret:Int}> = null;\n\n\tpublic function new() {}\n\n\tpublic function select():Int {\n\t\tselection = {node: new Text(this), caret: 3};\n\t\treturn selection.node.caret();\n\t}\n}\n",
+			"src/Text.hx" => "class Text {\n\tvar ui:Ui;\n\n\tpublic function new(ui:Ui) this.ui = ui;\n\n\tpublic function caret():Int return ui.selection == null ? -1 : ui.selection.caret + Std.int(Ui.reach);\n}\n"
+		];
+		// (a build macro keeping the fields of Rt, its class built by Copy's
+		// build macro, which copies them into Rt_1: the state Rt's typing
+		// makes, Copy's typed again needs Rt typed again; hxmc.view's
+		// runtimes work so)
+		var state = [
+			"src/Main.hx" => "class Main {\n\tstatic function main() {\n\t\ttrace(Copy.make());\n\t}\n}\n",
+			"src/Rt.hx" => "@:build(RtMacro.build())\nclass Rt {\n\tpublic static function f():Int return 1;\n}\n",
+			"src/Copy.hx" => "@:build(RtMacro.copy())\nclass Copy {\n\tpublic static function make():Int return Rt_1.f() + 10;\n}\n",
+			"src/RtMacro.hx" => [
+				"import haxe.macro.Context;",
+				"import haxe.macro.Expr;",
+				"class RtMacro {",
+				"\tstatic var template:Null<Array<Field>> = null;",
+				"\tpublic static macro function build():Array<Field> {",
+				"\t\ttemplate = Context.getBuildFields();",
+				"\t\treturn null;",
+				"\t}",
+				"\tpublic static macro function copy():Array<Field> {",
+				"\t\ttry {",
+				"\t\t\tContext.getType(\"Rt_1\");",
+				"\t\t} catch (_:Dynamic) {",
+				"\t\t\tswitch Context.getType(\"Rt\") {",
+				"\t\t\t\tcase TInst(c, _): c.get().statics.get();",
+				"\t\t\t\tcase _:",
+				"\t\t\t}",
+				"\t\t\tif (template == null) Context.fatalError(\"Rt's fields are not known\", Context.currentPos());",
+				"\t\t\tContext.defineType({pack: [], name: \"Rt_1\", pos: Context.currentPos(), kind: TDClass(), fields: template});",
+				"\t\t}",
+				"\t\treturn null;",
+				"\t}",
+				"}"
+			].join("\n") + "\n"
+		];
 		return [
+			{name: "accessor", files: accessor, args: ["-cp", "src", "-main", "Main"], edit: "src/Shape.hx", run: "accessor"},
+			{name: "building", files: building, args: ["-cp", "src", "-main", "Main"], edit: "src/Ui.hx", run: "building"},
+			{name: "state", files: state, args: ["-cp", "src", "-main", "Main"], edit: "src/Copy.hx", run: "state"},
 			{name: "dcefull", files: dcefull, args: ["-cp", "src", "-main", "Main", "-dce", "full"], edit: "src/Main.hx", run: "dcefull"},
 			{name: "registry", files: registry, args: ["-cp", "src", "-main", "Main"], edit: "src/Impl.hx", run: "registry"},
 			{name: "cutoff", files: cutoff, args: ["-cp", "src", "-main", "Main"], edit: "src/User.hx", run: "cutoff"},
@@ -246,6 +306,16 @@ class ModuleCacheCheck {
 		}
 		check('$target: $what: the same output$extra', ok);
 		return {read: got.read, encoded: got.encoded, typed: got.typed, log: got.log};
+	}
+
+	// a build that fails with the cache and without it, with the same errors
+	static function gateFail(what:String, target:String, pdir:String, args:Array<String>) {
+		function errors(log:String):String
+			return [for (l in log.split("\n")) if (!l.startsWith("hxmc:") && l.trim() != "") l].join("\n");
+		var ref = build(target, pdir, args, false);
+		var got = build(target, pdir, args, true);
+		var ok = ref.out == null && got.out == null && errors(ref.log) == errors(got.log) && errors(ref.log) != "";
+		check('$target: $what: the same errors' + (ok ? "" : "\n" + errors(got.log) + "\nwithout the cache:\n" + errors(ref.log)), ok);
 	}
 
 	static function edit(path:String, f:String->String)
@@ -399,6 +469,9 @@ class ModuleCacheCheck {
 				// one module edited
 				var orig = File.getContent(t);
 				File.saveContent(t, switch name {
+					// (the interface the same: its dependents restored)
+					case "accessor" | "building": orig + "// edited\n";
+					case "state": orig.replace("+ 10", "+ 11");
 					case "cutoff": orig.replace("10, 20", "10, 21");
 					case "registry": orig.replace("return 7", "return 8");
 					case "dcefull": orig.replace("trace(count(b));", "trace(0);");
@@ -409,7 +482,30 @@ class ModuleCacheCheck {
 				});
 				var e = gate('$name, ${p.edit} edited', target, pdir, p.args);
 				check('$target: $name, ${p.edit} edited: some modules restored', name == "hello" || e.encoded < cold.encoded);
+				if (name == "state") {
+					// a failed build (Copy's own error), then the edit fixed: the
+					// error the build without the cache reports, then the output
+					var good = File.getContent(t);
+					File.saveContent(t, good.replace("+ 11", "+ \"x\""));
+					gateFail('state, Copy with an error', target, pdir, p.args);
+					gateFail('state, Copy with an error, again', target, pdir, p.args);
+					File.saveContent(t, good);
+					gate('state, the error fixed', target, pdir, p.args);
+				}
 				gate('$name, ${p.edit} edited, warm', target, pdir, p.args, again);
+				if (name == "building") {
+					// a field of Ui that Text reads removed: Text's error, as without
+					// the cache; back, Text restored; with full DCE, Ui's static
+					// read by Text only
+					var edited = File.getContent(t);
+					File.saveContent(t, edited.replace("public static var reach = 1.5;", ""));
+					gateFail('building, Ui.reach removed', target, pdir, p.args);
+					File.saveContent(t, edited);
+					gate('building, Ui.reach back', target, pdir, p.args);
+					File.saveContent(t, edited + "// again\n");
+					gate('building, Ui edited, -dce full', target, pdir, p.args.concat(["-dce", "full"]));
+					File.saveContent(t, edited);
+				}
 				// back to the original (an older entry's content again)
 				File.saveContent(t, orig);
 				gate('$name, ${p.edit} back', target, pdir, p.args);

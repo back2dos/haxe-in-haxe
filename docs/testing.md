@@ -158,6 +158,20 @@ against `cube.png` by the rule above, frames in the activity's window, a tap
 and a key as events, Home and back as Suspend and Resume, Back; a screenshot
 and the log). CI's `android` job runs them, the last on an x86-64 emulator
 with KVM (not a required check yet).
+`make ios-check IOS_TARGET=ios-arm64|ios-sim-arm64`: the app bundles of
+`IosTest` and the cube, and the cube's `.ipa` (`hxmc/test/IosCheck.hx`: the
+bundle's files, `Info.plist` read back, the Mach-O's header, build version,
+dylibs and signature's place, the code signature's CodeDirectory: its
+identifier, page hashes and special slots recomputed against the
+`Info.plist`, requirements and `CodeResources`; `llvm-objdump` where
+installed); `make ios-sim-check` on a Mac with Xcode: IosTest on a new
+iPhone simulator (`packages/gfx/test/ios.sh`: `codesign --verify` and
+`plutil -lint` first, the cube headless on the simulator's Metal against
+`cube.png`, frames in the window, its pixels lit, a tap on the Simulator's
+window (`SimTap.hx`) as MouseDown and MouseUp, Settings and back as Suspend
+and Resume; the screenshot, stdout and the system log). CI's `ios` job runs
+the first on Linux, `ios-simulator` the second on a macOS runner (not
+required checks yet).
 `gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
 writes, R8 and RGBA8 textures, blending, scissor) against
 `packages/gfx/test/features.png`.
@@ -181,7 +195,7 @@ atlas against `packages/text/test/sample.png`: the same pixels on every
 machine with that font; Inter's CFF outlines and GPOS kerning against
 `sample-cff.png`, when fonts-inter is installed, as in CI; Arabic, Hebrew and marks against Chromium's widths and ink, grapheme clusters against `Intl.Segmenter`), `make ui-check` (the flexbox layout against
 Chromium's on 89 cases (29 of them CSS grids), `packages/ui/test/layout-expected.json`, which
-`layout-ref.mjs` writes from `layout-cases.mjs` (`make ui-layout-fuzz SEED=n COUNT=n`, a tool and not a lane: random flex trees against Chromium's boxes, a difference reduced by hand into a case there); text wrapping, events and
+`layout-ref.mjs` writes from `layout-cases.mjs` (`make ui-layout-fuzz SEED=n COUNT=n`, a tool and not a lane: random flex trees against Chromium's boxes, `FEATURES=more` grids, absolute positions, auto margins, order, aspect ratios, hidden overflow and display none too, a difference reduced into a case there, `make ui-layout-reduce CASE='fuzz 41-87'` dropping nodes and properties while it still differs; the plain trees of seeds 3, 5, 8, 11, 13, 17, 19, 23, 29, 31, 41 and 99 all match, the more trees differ mostly where aspect ratios meet stretching); text wrapping, events and
 focus; PNG files of every colour type, depth, filter and interlacing,
 `packages/ui/test/png/`, which `png-cases.mjs` writes with the pixels
 expected, checked against Chromium's decoder when written; JPEG files of
@@ -196,8 +210,9 @@ nodes (`MarkupTest.hx`: attributes from Style's properties), the popup widgets d
 100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
 `GuideTest.hx`). `make theme-check` (`@hxmc/theme`: Tailwind's class lists read as rules, Tw's rules made at compile time, shadcn's sheet made, the classes it rejects at compile time). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
-the last two driven through their Ui, drawn headless against `draw.png`,
-`todo.png` and `gallery.png`; `BoxTest`, boxes with their own corners' radii
+the last two driven through their Ui under @hxmc/theme's `Shadcn.sheet`, drawn headless against `draw.png`,
+`todo.png` and `gallery.png` (and the gallery dark, right to left, and
+with no sheet at all: `gallery-unstyled.png`, its frame only); `BoxTest`, boxes with their own corners' radii
 and sides' borders, a clip to rounded corners, box shadows (blurred, a
 spread ring, inset, several), boxes turned, scaled, skewed
 and nested, against Chromium's `boxes.png` (`box-ref.mjs` from
@@ -216,10 +231,17 @@ another process through libatspi, in a D-Bus session with AT-SPI's bus
 (at-spi2-core); on macOS in CI
 `TextInputTest` types through the window's text view and composes in it,
 `MacAccessTest` reads the accessibility tree through NSAccessibility and
-performs its actions; on Windows `WinAccessTest` calls the UI Automation
-providers through their COM interfaces and asks UI Automation for the
-window's element). In the browser: `make ui-web-check` (the native form on the DOM's own
-controls, `native-web.mjs`; the todo example for
+performs its actions, and drives the native views: a field (an
+NSTextField, a password's NSSecureTextField), a text area (an NSTextView),
+a context menu chosen from (NSMenu), the menu bar's item performed; on
+Windows `WinAccessTest` calls the UI Automation providers through their
+COM interfaces and asks UI Automation for the window's element, and drives
+the native views: an EDIT typed into and centred, a popup menu chosen
+from by keys, the window's menu bar and a command of it). In the browser: `make ui-web-check` (the native form on the DOM's own
+controls, `native-web.mjs`; native text editors over a drawn window,
+the page's input and textarea, typed in, submitted, tabbed between drawn
+widgets and hidden under a popup, `web-field.mjs`; the todo example (its
+fields drawn) for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, an input method's composition through the DevTools
 protocol, against `todo.png`). CI runs all five in the `gfx` job.

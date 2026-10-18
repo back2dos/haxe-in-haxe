@@ -12,6 +12,10 @@ import hxmc.Obj;
 @:access(hxmc.ir.Facts)
 @:access(hxmc.MirBuild)
 class DataGen {
+	// iOS: the app's main (packages/os), run by the generated main instead
+	// of the program's body, which it calls itself (mainBody)
+	public static inline var UI_MAIN = "hxmc_ui_main";
+
 	var prep:Prep;
 	var e:Facts;
 	var p:Program;
@@ -120,14 +124,23 @@ class DataGen {
 
 	// ---- everything
 
+	// the bytes of each part (HXMC_STATS)
+	public var sizes:Array<{part:String, bytes:Int}> = [];
+
 	public function run() {
+		function part(name:String, f:() -> Void) {
+			var at = data.buf.len + rodata.buf.len;
+			f();
+			sizes.push({part: name, bytes: data.buf.len + rodata.buf.len - at});
+		}
 		ids();
-		strings();
-		fieldNames();
-		signatures();
+		part('${e.strOrder.length} strings', strings);
+		part('${e.fieldNames.length} field names', fieldNames);
+		part('${p.sigs.length} signatures', signatures);
 		globals();
-		types();
-		dispatch();
+		part('${e.types.length} types', types);
+		part('${p.selectors.length} dispatch rows', dispatch);
+		if (prep.staticClosures) closures();
 		mainBody();
 	}
 
@@ -177,14 +190,17 @@ class DataGen {
 		int32Global("rt_nfield_names", names.length);
 	}
 
+	// (the trampolines of the signatures closures have: Facts.closureSigs,
+	// boundTypes; -D hxmc.jit: every signature's, for the native macros')
 	function signatures() {
+		var all = spareSigs > 0;
 		for (s in p.sigs) {
-			compile(dynTrampoline(s));
-			compile(boundTrampoline(s));
+			if (all || e.closureSigs.exists(s.id)) compile(dynTrampoline(s));
+			if (all || e.boundTypes.exists(s.id)) compile(boundTrampoline(s));
 		}
 		begin(data, "rt_dyncalls", 8, true);
 		for (s in p.sigs)
-			ptr(data, "DYN" + s.id);
+			if (all || e.closureSigs.exists(s.id)) ptr(data, "DYN" + s.id) else data.buf.u64(0, 0);
 		data.buf.zeros(8 * spareSigs);
 		var keys = [for (s in p.sigs) cstr(s.key)];
 		begin(data, "rt_sig_keys", 8, true);
@@ -194,13 +210,13 @@ class DataGen {
 		int32Global("rt_nsigs", p.sigs.length);
 		begin(data, "rt_bound_tramps", 8, true);
 		for (s in p.sigs)
-			ptr(data, "BT" + s.id);
+			if (all || e.boundTypes.exists(s.id)) ptr(data, "BT" + s.id) else data.buf.u64(0, 0);
 		data.buf.zeros(8 * spareSigs);
 		var bt = spareSigs > 0 ? data : rodata;
 		bt.buf.align(4);
 		obj.define("rt_bound_types", bt, bt.buf.len, 4 * (p.sigs.length + spareSigs), true);
 		for (s in p.sigs)
-			bt.buf.u32(e.boundTypes.get(s.id));
+			bt.buf.u32(e.boundTypes.exists(s.id) ? e.boundTypes.get(s.id) : 0);
 		bt.buf.zeros(4 * spareSigs);
 	}
 
@@ -248,7 +264,8 @@ class DataGen {
 			var ss = staticsOf.get(i);
 			var ssSym = null, pmSym = null, fsSym = null, msSym = null, ifSym = null, ctSym = null;
 			if (ss != null) {
-				ss = ss.copy();
+				// (a static function no live code can reach through the class value: left out, Reach)
+				ss = [for (x in ss) if (x.clos == null || p.isLive(x.clos.fn)) x];
 				ss.sort((a, b) -> e.fid(a.name) - e.fid(b.name));
 				ssSym = local(data, "ss", 8);
 				for (x in ss) {
@@ -370,14 +387,74 @@ class DataGen {
 		int32Global("rt_ntypes", types.length);
 	}
 
-	function dispatch() {
-		for (s in 0...p.selectors.length) {
-			begin(data, e.selNames[s], 8, true);
-			for (c in p.classes) {
-				var m = c.findMethod(p.selectors[s].name);
-				if (m != null && m.dispatchSel == s) ptr(data, e.symbol(m)) else data.buf.u64(0, 0);
+	// the closures capturing nothing (Prep.staticClosures), each an object
+	// as the heap has one, outside it: header (one slot, its type), code
+	function closures() {
+		for (l in p.lambdas)
+			if (l.captures.length == 0) {
+				data.buf.align(8);
+				data.buf.u32(1 | (Abi.K_OBJ << 28));
+				data.buf.u32(l.tindex);
+				obj.define(prep.closureSym(l), data, data.buf.len, 8, true);
+				ptr(data, e.symbol(l.fn));
 			}
+	}
+
+	// A dispatch row per selector, indexed by a class's type index - T_FIRST
+	// (MirBuild's ECallDispatch): the implementation the class runs. A call
+	// reads only the entries of the classes implementing the selector, so the
+	// rows are laid over each other, each where its entries find free slots
+	// (or the same function), its symbol at its first slot (the slots before
+	// another row's): a fraction of the classes times the selectors. -D
+	// hxmc.jit: whole rows (the native macros' types come after).
+	function dispatch() {
+		var rows = [];
+		for (s in 0...p.selectors.length) {
+			// (a selector no live code dispatches on: no row, Reach)
+			if (p.liveSelectors != null && !p.liveSelectors[s]) continue;
+			var row = [];
+			for (k in 0...p.classes.length) {
+				var m = p.classes[k].findMethod(p.selectors[s].name);
+				if (m != null && m.dispatchSel == s && p.isLive(m)) row.push({k: k, sym: e.symbol(m)});
+			}
+			rows.push({s: s, row: row});
 		}
+		if (spareTypes > 0) {
+			for (r in rows) {
+				begin(data, e.selNames[r.s], 8, true);
+				var k = 0;
+				for (x in r.row) {
+					data.buf.zeros(8 * (x.k - k));
+					ptr(data, x.sym);
+					k = x.k + 1;
+				}
+				data.buf.zeros(8 * (p.classes.length - k));
+			}
+			return;
+		}
+		// (the largest rows first, each at the first place it fits)
+		var order = [for (i in 0...rows.length) i];
+		order.sort((a, b) -> rows[b].row.length - rows[a].row.length != 0 ? rows[b].row.length - rows[a].row.length : a - b);
+		var slots:Array<Null<String>> = [];
+		var at = [for (_ in rows) 0];
+		for (i in order) {
+			var row = rows[i].row;
+			var d = 0;
+			while (Lambda.exists(row, x -> d + x.k < slots.length && slots[d + x.k] != null && slots[d + x.k] != x.sym))
+				d++;
+			for (x in row) {
+				while (slots.length <= d + x.k)
+					slots.push(null);
+				slots[d + x.k] = x.sym;
+			}
+			at[i] = d;
+		}
+		data.buf.align(8);
+		var base = data.buf.len;
+		for (x in slots)
+			if (x != null) ptr(data, x) else data.buf.u64(0, 0);
+		for (i in 0...rows.length)
+			obj.define(e.selNames[rows[i].s], data, base + 8 * at[i], 0, true);
 	}
 
 	// the allocation stubs the program's code calls (MirBuild.ALLOC_STUB):
@@ -460,9 +537,13 @@ class DataGen {
 			}));
 			return;
 		}
+		// iOS with an app (packages/os: hxmc.os.uikit.UIKitApp exports
+		// UI_MAIN): UIApplicationMain runs on the big stack, and the program's
+		// body from its delegate once the app has launched
+		var body = abi.ios() && Lambda.exists(p.funcs, f -> f.cSymbol == UI_MAIN) ? UI_MAIN : "hx_main_body";
 		compile(MirBuild.synthetic(prep, abi, "main", [I32, I64], I32, (b, ps) -> {
 			b.call("rt_init", [b.iconst(p.globals.length), ps[0], ps[1]], Void);
-			b.call("rt_run_main", [b.symAddr("hx_main_body")], Void);
+			b.call("rt_run_main", [b.symAddr(body)], Void);
 			b.ret(b.iconst(0));
 		}));
 	}

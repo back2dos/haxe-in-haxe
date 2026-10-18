@@ -4,7 +4,7 @@ import haxe.io.Bytes;
 import hxmc.Obj;
 import hxmc.Abi;
 
-// hxmc's linker for macOS: objects (the program's, the runtime object of
+// hxmc's linker for macOS and iOS: objects (the program's, the runtime object of
 // MkRt.macho) -> a Mach-O executable (MH_EXECUTE, position-independent as
 // arm64 macOS requires) that loads /usr/lib/libSystem.B.dylib, written
 // without the SDK or ld64:
@@ -38,6 +38,15 @@ class LinkMachO {
 	var addr = new Map<Section, Int>();
 
 	public var symbols = false; // a symbol table of the code (profilers, debuggers)
+	// the code signature (linker-signed by default; an app bundle's: hxmc.ios.Bundle)
+	public var sign = new CodeSign();
+	// iOS: the oldest version the output runs on (15.0: UILaunchScreen is
+	// 14's, and 15 is the floor of current Xcodes and the App Store's
+	// devices: A9 and later), and the SDK version it declares (18.0: the
+	// App Store's minimum since 2025; a later one would ask for UIScene)
+	public static inline var IOS_MIN = 0x000F0000;
+	public static inline var IOS_SDK = 0x00120000;
+	public var minos = IOS_MIN; // (iOS: -D hxmc.ios-min-version, hxmc.ios.Bundle)
 	// imports from other dylibs than libSystem (@:hxmc.lib): symbol -> install name
 	public var dylibs = new Map<String, String>();
 
@@ -488,11 +497,7 @@ class LinkMachO {
 		// have addresses, as dsymutil's)
 		var dwarfVm = dataEnd;
 		var leVm = dataEnd + align(dwarfSize, PAGE);
-		var cdIdent = "hxmc";
-		var nPages = (leFileOff + sigOffInLe + 4095) >> 12;
-		var cdHeader = 88;
-		var cdLen = cdHeader + cdIdent.length + 1 + 32 * nPages;
-		var sigLen = align(20 + cdLen, 16);
+		var sigLen = sign.size(leFileOff + sigOffInLe);
 		var fileSize = leFileOff + sigOffInLe + sigLen;
 		var out = new Buf(fileSize + 16);
 		out.zeros(fileSize);
@@ -619,14 +624,16 @@ class LinkMachO {
 		h.u32(24);
 		var uuidAt = h.len;
 		h.zeros(16);
-		// build version: macOS, minimum 11.0 (arm64) / 10.15 (x86-64)
+		// build version: macOS, minimum 11.0 (arm64) / 10.15 (x86-64); iOS
+		// and its simulator (abi.platform), minimum IOS_MIN, built against
+		// IOS_SDK (what UIKit's linked-on-or-after behaviours go by)
 		ncmds++;
-		var minos = arm ? 0x000B0000 : 0x000A0F00;
+		var minos = abi.ios() ? this.minos : arm ? 0x000B0000 : 0x000A0F00;
 		h.u32(0x32);
 		h.u32(32);
-		h.u32(1); // PLATFORM_MACOS
+		h.u32(abi.platform == "ios" ? 2 : abi.platform == "ios-simulator" ? 7 : 1); // PLATFORM_IOS, PLATFORM_IOSSIMULATOR, PLATFORM_MACOS
 		h.u32(minos);
-		h.u32(minos); // sdk
+		h.u32(abi.ios() ? IOS_SDK : minos); // sdk
 		h.u32(1);
 		h.u32(3); // TOOL_LD
 		h.u32(0x00010000);
@@ -687,43 +694,10 @@ class LinkMachO {
 		digest.set(6, (digest.get(6) & 0x0f) | 0x40);
 		digest.set(8, (digest.get(8) & 0x3f) | 0x80);
 		out.b.blit(uuidAt, digest, 0, 16);
-		// the signature: SuperBlob { CodeDirectory } (big-endian)
+		// the signature (CodeSign: linker-signed, or a bundle's)
 		var codeLimit = leFileOff + sigOffInLe;
-		var sig = new BeBuf();
-		sig.u32(0xfade0cc0);
-		sig.u32(20 + cdLen);
-		sig.u32(1);
-		sig.u32(0); // CSSLOT_CODEDIRECTORY
-		sig.u32(20);
-		sig.u32(0xfade0c02);
-		sig.u32(cdLen);
-		sig.u32(0x20400);
-		sig.u32(0x20002); // CS_ADHOC | CS_LINKER_SIGNED
-		sig.u32(cdHeader + cdIdent.length + 1); // hashOffset
-		sig.u32(cdHeader); // identOffset
-		sig.u32(0); // nSpecialSlots
-		sig.u32(nPages);
-		sig.u32(codeLimit);
-		sig.u8(32); // hashSize
-		sig.u8(2); // CS_HASHTYPE_SHA256
-		sig.u8(0); // platform
-		sig.u8(12); // log2 page size
-		sig.u32(0); // spare2
-		sig.u32(0); // scatterOffset
-		sig.u32(0); // teamOffset
-		sig.u32(0); // spare3
-		sig.u64(0); // codeLimit64
-		sig.u64(0); // execSegBase
-		sig.u64(textEnd); // execSegLimit
-		sig.u64(1); // CS_EXECSEG_MAIN_BINARY
-		sig.b.str(cdIdent);
-		sig.u8(0);
-		for (p in 0...nPages) {
-			var off = p << 12;
-			var n = codeLimit - off < 4096 ? codeLimit - off : 4096;
-			sig.b.bytes(haxe.crypto.Sha256.make(out.b.sub(off, n)));
-		}
-		out.b.blit(codeLimit, sig.b.b, 0, sig.b.len);
+		var sig = sign.sign(out.b, codeLimit, textEnd);
+		out.b.blit(codeLimit, sig, 0, sig.length);
 		return out.toBytes();
 	}
 
@@ -791,4 +765,7 @@ class BeBuf {
 		u32(v < 0 ? -1 : 0);
 		u32(v);
 	}
+
+	public inline function toBytes():haxe.io.Bytes
+		return b.toBytes();
 }

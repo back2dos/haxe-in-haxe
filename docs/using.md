@@ -6,7 +6,7 @@ The short version is in the [README](../README.md). This covers the npm packages
 
 | Option | |
 | --- | --- |
-| `-D hxmc.target=<target>` | `linux-x86_64`, `linux-arm64`, `windows-x86_64`, `windows-arm64`, `macos-x86_64`, `macos-arm64`, `android-arm64`, `android-x86_64` (an output ending in `.apk`: an APK, [hxmc.md](hxmc.md#android)), `wasm32-wasi` (default: this machine) |
+| `-D hxmc.target=<target>` | `linux-x86_64`, `linux-arm64`, `windows-x86_64`, `windows-arm64`, `macos-x86_64`, `macos-arm64`, `android-arm64`, `android-x86_64` (an output ending in `.apk`: an APK, [hxmc.md](hxmc.md#android)), `ios-arm64`, `ios-sim-arm64` (an output ending in `.app` or `.ipa`: an app bundle, [hxmc.md](hxmc.md#ios)), `wasm32-wasi` (default: this machine) |
 | `-D hxmc.libc=glibc` | Linux: an executable linked dynamically against the system's glibc (2.17 or later; the default is static with musl), which can import C functions of shared libraries (`@:hxmc.lib("libGL.so.1")`) and load them at run time (`hxmc.unsafe.Posix.dlopen`) |
 | `-debug`, `-D hxmc.symbols` | a symbol table (profilers), wasm: a name section |
 | `-D hxmc.shared`, `-D hxmc.exports=<names>` | a shared library exporting the named `@:hxmc.export` functions (Linux in the glibc mode; Android's output always is one) |

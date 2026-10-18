@@ -93,6 +93,7 @@ class WasmGen {
 	var setAt = -1;
 	var setEnd = -1;
 	var setLocal = -1;
+	var retAt = -1; // the body's length after the last return
 
 	public function new(obj:Obj, legacyEh = false) {
 		this.obj = obj;
@@ -164,7 +165,8 @@ class WasmGen {
 			global(Op.GlobalSet, SP);
 		}
 		doTree(f.entry);
-		if (f.ret != Void) op(Op.Unreachable);
+		// (the end of a function ending in a return is not reached)
+		if (f.ret != Void && retAt != b.len) op(Op.Unreachable);
 		op(Op.End);
 		// out: the signature, the locals, the body
 		var sec = obj.section(SECTION, Text, 1);
@@ -860,7 +862,8 @@ class WasmGen {
 				term(x, i);
 				return;
 			}
-			if (folded[i.id] || remat(i)) continue;
+			// (a parameter: read from its local where it is used, value)
+			if (folded[i.id] || remat(i) || i.op == Param) continue;
 			if (i.ty != Void && uses[i.id] == 0 && (pure(i) || i.op == Load || i.op == TlsLoad)) continue;
 			ins(i);
 			if (i.ty != Void) {
@@ -890,6 +893,7 @@ class WasmGen {
 					global(Op.GlobalSet, SP);
 				}
 				op(Op.Return);
+				retAt = b.len;
 			case Br:
 				var tt = t.targets[0], ff = t.targets[1];
 				if (tt.handler || ff.handler) {

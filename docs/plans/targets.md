@@ -62,50 +62,182 @@ module writer carry over; the object model and the runtime would be new.
 
 Started (2026-10-17) behind `-D hxmc.wasm-gc` to compare the two collectors
 (docs/hxmc.md, "WasmGC"): the IR after Lower, emitted directly, with a
-runtime of its own in Haxe over intrinsics. `make wasmgc-bench` under node 22,
-median of 3 (`hxmc/test/wasmgc`):
+runtime of its own in Haxe over intrinsics. Every HaxeBenchmarks case runs,
+its check identical on every target (`make bench`'s `hxmc-wasmgc` target);
+`make wasmgc-check` compares `hxmc/test/wasmgc`'s programs with native.
 
-| program | native s | WasmGC s | linear s | WasmGC RSS MB | linear RSS MB | WasmGC KB | linear KB |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Basics | 0 | 0.03 | 0.1 | 46 | 147 | 11 | 57.2 |
-| Mandelbrot | 0.07 | 0.15 | 0.18 | 52 | 147 | 2.4 | 35.9 |
-| Nbody | 0.15 | 0.13 | 0.21 | 50 | 148 | 3.8 | 35.3 |
-| Trees | 0.15 | 0.34 | 0.48 | 86 | 165 | 2.2 | 33.4 |
+#### Performance against linear memory (2026-10-18)
 
-Every HaxeBenchmarks case runs, its check identical on every target
-(`make bench`'s `hxmc-wasmgc` target). Its run here against linear memory
-(median of 3, node 22; formatter_noio and json after the last runtime fixes):
+The question: can it come close enough to linear memory to be the
+browser's default? First measured, it took a third to a half of the memory
+and was as fast on half the cases, but up to twice as slow where small
+objects are made and read in loops (mandelbrot, formatter_noio). What
+closed the gap, in hxmc:
 
-| case | linear s | WasmGC s | linear MB | WasmGC MB | linear KB | WasmGC KB |
-| --- | --- | --- | --- | --- | --- | --- |
-| alloc | 2.82 | 3.27 | 1555 | 665 | 41 | 9 |
-| bcrypt | 4.23 | 3.15 | 150 | 53 | 277 | 305 |
-| binarytrees | 1.30 | 1.39 | 182 | 84 | 37 | 7 |
-| json | 0.84 | 0.94 | 336 | 189 | 116 | 29 |
-| mandelbrot | 1.09 | 2.27 | 151 | 57 | 42 | 9 |
-| mandelbrot_anon | 3.21 | 4.14 | 151 | 57 | 45 | 9 |
-| nbody | 1.37 | 1.36 | 148 | 49 | 41 | 10 |
-| sha256 | 0.42 | 0.51 | 154 | 67 | 249 | 291 |
-| sha512 | 0.18 | 0.10 | 150 | 55 | 256 | 295 |
-| formatter_noio | 8.93 | 16.9 | 257 | 152 | 1087 | 497 |
+- Scalar replacement on the IR (`wasmgc/IrOpt`): a local that only holds
+  objects made in the function, read through their fields, becomes a
+  local per field (a constructor's writes, right after the allocation,
+  allowed). Calls are inlined only where that lets it happen (a callee
+  returning an object it makes, or passed one made here): Mir's `Inline`
+  and `Sroa` cannot be reused, Mir being memory loads and stores already,
+  and inlining more made the modules larger, not faster (V8 inlines small
+  functions of a WasmGC module itself; it does not take objects out of the
+  heap). Mandelbrot: 1.82 s to 0.70 s; the binaryen run that pointed here
+  (`wasm-opt -O3`: inlining, heap2local) gave 1.10 s.
+- Fewer casts (V8's own `--experimental-wasm-assume-ref-cast-succeeds`
+  measures them: 14% of formatter_noio's time, now 5%): leaf classes'
+  types final; arrays, enums, closures, Bytes typed in locals, fields,
+  globals, signatures, enum arguments and captures (`GcModule.keyOf`);
+  methods with their own typed signatures (the dispatch table holds
+  wrappers); a local only ever cast to one type given it (`FuncGen.refine`:
+  closure parameters, Dynamic read as a class).
+- Inline fast paths: array reads, writes and pushes (kind and range tested,
+  `br_on_cast_fail`, the helper only for another kind or growth);
+  structural reads and writes test the layouts that have the field (they
+  all went through the runtime by name for writes).
+- Runtime: identity hashes (ObjectMap had one bucket: keyed lists were
+  quadratic), Ints of -128...1023 boxed once as `hxmc.rt.Boxes` does,
+  `Null<Int>` loop counters in GcStr typed Int, UTF-8 conversions in one
+  pass, Bytes.compare eight bytes a step, `Type.enumEq` casting once.
+- Size: literals of 24 characters and more made from passive data segments
+  (a byte a character for Latin-1): bcrypt's module 306 KB to 133 KB.
 
-WasmGC takes a third to a half of the memory everywhere and is as fast or
-faster on half the cases. It is slower where small objects are allocated
-and read in tight loops (mandelbrot: V8's allocation and the casts at
-function boundaries; formatter_noio: closures, arrays read through
-helpers). Mandelbrot's gap is the allocations: the native and linear
-builds inline its small methods and replace the `Complex` that does not
-escape by locals (Driver: `Inline`, then `Sroa`, on Mir), which the WasmGC
-path, emitted from the IR before them, does not; binaryen's `wasm-opt -all
---closed-world -O3` (inlining, then heap2local) takes its module from
-2.02 s to 1.10 s, where signature and type refining alone change nothing
-(2026-10-17, node 22). So the first thing to try is inlining and scalar
-replacement on the IR for this path. Also left to try: typed arrays in
-locals (the fast path inline), br_on_cast instead of ref.test then
-ref.cast, precise types for methods (their signatures are shared with the
-dispatch table). ObjectMap has one
-bucket (WasmGC objects have no address to hash); `sys.io.File` streams and
-processes are not supported.
+HaxeBenchmarks under node 22 (V8 12.4), wall time, median of 5 runs
+interleaved (native, linear, WasmGC before and after), peak RSS, module
+size (linear without a name section). `make bench` (`-n 3`) agrees, every
+check identical:
+
+| case | native s | linear s | WasmGC before s | WasmGC s | / linear | native MB | linear MB | WasmGC MB | linear KB | WasmGC before KB | WasmGC KB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| alloc | 1.59 | 2.45 | 2.91 | 2.53 | 1.03 | 749 | 1556 | 678 | 42 | 9 | 10 |
+| bcrypt | 2.97 | 3.45 | 3.10 | 3.11 | 0.90 | 4 | 151 | 55 | 278 | 306 | 133 |
+| binarytrees | 0.71 | 1.10 | 0.94 | 0.96 | 0.87 | 117 | 183 | 85 | 38 | 8 | 8 |
+| json | 0.52 | 0.79 | 0.80 | 0.77 | 0.97 | 140 | 337 | 194 | 117 | 29 | 33 |
+| mandelbrot | 0.75 | 0.98 | 1.82 | 0.70 | 0.71 | 11 | 152 | 54 | 43 | 10 | 10 |
+| mandelbrot_anon | 1.28 | 2.42 | 3.91 | 0.91 | 0.38 | 11 | 152 | 54 | 46 | 10 | 10 |
+| nbody | 0.75 | 1.04 | 1.22 | 0.99 | 0.95 | 0 | 149 | 51 | 42 | 11 | 12 |
+| sha256 | 0.19 | 0.35 | 0.38 | 0.34 | 0.97 | 21 | 155 | 67 | 250 | 291 | 116 |
+| sha512 | 0.02 | 0.14 | 0.08 | 0.07 | 0.50 | 9 | 151 | 56 | 256 | 296 | 120 |
+| formatter_noio | 6.29 | 8.08 | 14.32 | 8.86 | 1.10 | 261 | 258 | 104 | 1092 | 501 | 548 |
+
+Every case is now within 10% of linear memory or faster (seven of ten
+faster), with a third to a half of its memory and modules 2 to 8 times
+smaller. Build time: the formatter's WasmGC build 3% longer than before
+(scalar replacement, the second emission of refined functions; 1.2 s,
+about the linear build's). The native and linear paths are unchanged.
+
+What is left of the gap: formatter_noio (10%) spends it spread thin: the
+casts left (5%: values read from arrays of references, anonymous
+structures' fields, which share layouts across types, and Dynamic), null
+checks (4%, `--experimental-wasm-skip-null-checks`), `array.copy` of
+references (Array.concat in a loop) and Type.enumEq against hxmc's own.
+alloc's collection of half a million 100-byte to 1 KB arrays costs V8
+more than hxmc's nursery, and a byte array has no wider reads. All
+measured on V8 only, and an older one than Chrome's (node 22: no
+Turboshaft for wasm, inlining only for WasmGC modules); SpiderMonkey and
+JavaScriptCore are unmeasured.
+
+#### A real program: the UI stack
+
+Neither ui-counter nor gfx-cube builds. `HXMC_GC_SURVEY=1` lists what each
+lacks (=2 writes the module, those functions trapping):
+
+- ui-counter, 34 constructs, all at the browser boundary, none in the
+  ui, text and view code: imports that take pointers (`@hxmc/os`'s canvas
+  window, text input, clipboard and cursor; the accessibility mirror;
+  WebGPU's shader, buffer and texture uploads; the page's fonts read into
+  a Bytes), raw memory (`Mem`, `malloc`/`free`, `Arena`, `CString`,
+  strings as UTF-8 through memory), and the GL back end (reached because
+  `Device` picks its back end at run time; its calls take pointers too).
+  Imports of numbers only are now supported (`scale`,
+  `prefers_dark`, `font_count`...).
+- gfx-cube, 31: the same, plus `@:hxmc.struct` values (the shaders' Vec2,
+  Vec3, Vec4 and Mat4 data, written into GPU buffers through field
+  addresses).
+
+What does build is the engine itself. StressTest's list of 1000 rows
+without the GPU (markup, signals, styles, flex layout, text shaped with
+DejaVu Sans by `@hxmc/text`, the accessibility tree; a program outside the
+repository: the fonts added from a file, the page's font lookup skipped),
+median of 5, node 22:
+
+| | native | linear | WasmGC |
+| --- | --- | --- | --- |
+| mount (markup to nodes) ms | 17 | 39 | 32 |
+| first layout (styles, flex, text) ms | 33 | 59 | 61 |
+| toggle, relabel, scroll, append (each) ms | 0.7-1 | 0.6-1.1 | 0.5-1.3 |
+| 5 accessibility trees ms | 7 | 7 | 8 |
+| whole run (5 rounds) s | 0.32 | 0.72 | 0.73 |
+| peak RSS MB | 102 | 261 | 204 |
+| module KB (gzip -9) | 2163 | 1609 (396) | 775 (251) |
+
+Frame times (an update's layout and text) are at parity with linear
+memory, the module half the size; painting and the GPU's part could not be
+measured. Getting there needed four fixes found by this program (a
+structural call to a method of another representation, Vector reads in
+generic code, Std.int out of range, BytesBuffer) and the identity hashes.
+
+#### What making it the browser's default would take
+
+1. **Interop with raw memory.** The packages talk to the browser through
+   C-ABI imports with pointers into linear memory, and keep GPU data in
+   memory (`@:hxmc.struct` values, `Arena`). A WasmGC module may also have
+   a linear memory: the plan would be WasmGC objects for Haxe values and a
+   small linear memory for what crosses the boundary, `hxmc.unsafe`
+   (`Mem`, `Ptr`, `Arena`, struct values) working on it as it does now, an
+   allocator for it (the linear runtime's `malloc`), and imports taking
+   addresses in it. What cannot carry over is `Mem.addr(bytes)`: a GC
+   array has no address and JavaScript cannot see into it, so the call
+   sites that hand a Bytes to the browser (WebGPU's buffer and texture
+   writes, the page's fonts, clipboard and text input) would copy through
+   that memory instead (in wasm, a loop; a frame's vertex data copied
+   once more). Strings: through the same memory as UTF-8, or JS String
+   Builtins where every browser has them.
+2. **Bytes and typed arrays.** Keep Bytes a GC i8 array: Haxe code reads
+   and writes it as fast as linear memory and the collector frees it;
+   only the boundary copies. A Bytes that must live in linear memory
+   (vertex buffers rewritten each frame) would be an `hxmc.unsafe` buffer
+   in the package, not a Bytes.
+3. **One implementation of each thing.** The runtime's natives are
+   duplicated (the table below): 1,300 lines of Haxe against the
+   linear runtime's own. Shareable: the algorithms of Str, Arr, Bytes,
+   Date and StringBuf, if they were written against a small layer
+   (length, read a unit, write a unit, allocate, copy) that each runtime
+   implements, one over `Mem` and one over `W`, chosen at compile time;
+   Dyn's reflection and comparison could share their logic but not their
+   tables (descriptors in memory against Meta's generated functions).
+   Not shareable, and needing none: the collector, the shadow stack, the
+   barriers. As the default, that refactoring should come first: two
+   copies of string handling are two places for each bug.
+4. **JavaScript interop.** WasmGC can hand Haxe objects to JavaScript by
+   reference (and hold JavaScript objects as `externref`) where linear
+   memory needs handle tables; worth having for `@hxmc/web`'s islands,
+   not needed to run what exists.
+5. **WASI and everything outside the browser stays linear memory**:
+   node's CLI, wasmtime, the npm compiler module and the playground's
+   compiler (WASI's files and processes, engines without WasmGC or with a
+   slow one). The default would change for browser builds only (the
+   site's examples, `@hxmc/web`'s islands, `@hxmc/os`'s canvas programs).
+6. **Threads**: neither path has them in the browser; linear memory's
+   route (shared memory, workers) exists, WasmGC's waits for
+   shared-everything threads. A program that needs threads would stay
+   on linear memory.
+7. **Engines**: Chrome 119, Firefox 120 and Safari 18.2 have WasmGC; the
+   speeds here are V8's. Before a switch: the site's examples measured in
+   all three (the playground's intermittent WebKit crash, under
+   investigation, is a reason to watch Safari).
+
+**Recommendation.** Speed and memory are no longer the obstacle: WasmGC is
+at parity or faster on HaxeBenchmarks and on the UI engine, with half the
+memory and smaller modules. The obstacle is the packages' boundary with
+the browser. So: not the default yet; next, the hybrid module (a linear
+memory for `hxmc.unsafe` and the imports, copies where a Bytes crosses),
+which makes ui-counter and gfx-cube build; then frame times and sizes of
+the site's examples in Chrome, Firefox and Safari; switch browser builds
+to WasmGC when those hold, with the shared natives (item 3) done first.
+Linear memory stays the WASI target and the fallback.
+
+#### The runtime it duplicates
 
 What the runtime duplicates (hxmc/std/hxmc/rt/gc against hxmc/std/hxmc/rt),
 and why. The rule: reuse the Haxe source where only the memory layer
@@ -116,15 +248,13 @@ differs; write new code where the object model forces it.
 | GcStr | Str's string natives (concat, compare, hash, substr, split, parseInt, Std.string...) | Str reads units through Mem over the string's header and chars (77 Mem calls); a WasmGC string is an i16 array. The algorithms (FNV hash, Int64 digits, parseInt) are kept the same, line for line where possible |
 | GcArr | Arr's Array methods | Arr works on the slot/data layout with element kinds in the header (30 Mem calls); here the kinds are wasm types |
 | GcDyn, GcNative | Dyn's comparison and reflection (as hxmc.Native) | Dyn reads type descriptors and slots through Mem (146 calls); here the tables are Meta's and fields are reached by generated code |
-| GcBytes | Bytes' natives | a Bytes is an i8 array, not malloc'd memory |
+| GcBytes, GcBytesBuffer | Bytes' and BytesBuffer's natives | a Bytes is an i8 array, not malloc'd memory |
 | GcDate, GcSys | Date and WasiSys | the host's calendar and node's fs instead of libc/WASI over linear memory |
 | GcBuf | StringBuf's buffer | the same reason as GcStr |
 
 Not duplicated: everything above the natives (Std, Type, Reflect, the
-maps, haxe.Json, haxe.crypto...) is the same Haxe source. Sharing the
-natives themselves would need a memory layer under Str, Arr and Dyn
-(Mem calls behind an interface the GC build implements with arrays and
-structs): possible for Str and Arr, not for Dyn's descriptors.
+maps, haxe.Json, haxe.crypto...) is the same Haxe source. `sys.io.File`
+streams and processes are not supported.
 
 ## Android
 
@@ -199,6 +329,49 @@ or Windows; install on devices with libimobiledevice. Open questions: the
 app icon's compiled asset catalog (`Assets.car`, undocumented), the App
 Store's declared SDK/Xcode version checks, simulator testing (macOS
 only). No JIT on iOS.
+
+Order:
+
+1. GPU only (done, [hxmc.md](../hxmc.md#ios)): `ios-arm64` and
+   `ios-sim-arm64`, macOS arm64's Mach-O and runtime objects with the
+   platform in `LC_BUILD_VERSION` (minimum 15.0: `UILaunchScreen` is 14's,
+   and 15 is the floor of current Xcodes; SDK 18.0) and `Mem.platform()`
+   for packages; the bundle writer (an XML `Info.plist` with an empty
+   `UILaunchScreen`, `CodeResources`, an ad hoc signature written by the
+   linker with the bundle's special slots, `CodeSign.hx`, which macOS's
+   linker signature now is too), the `.ipa`; `hxmc.os.uikit`:
+   `UIApplicationMain` run by the generated main (`hxmc_ui_main`), the
+   program's body inside UIKit's loop, a `CAMetalLayer`-backed view for the
+   Metal back end, touches, the safe area, Suspend and Resume. CI:
+   `IosCheck` on Linux, IosTest on an iPhone simulator of a macOS runner
+   (`xcrun simctl`, a tap posted on the Simulator's window), not required
+   checks yet. `ios-sim-x86_64` is left out: x86-64 needs
+   `objc_msgSend_stret` for gfx ([graphics.md](graphics.md)) and Intel
+   runners are going away. Left from this step:
+   - device signing: the CMS signature blob by the developer's
+     certificate (RSA or P-256: `P256.hx` has the curve, DER exists for
+     Android), the provisioning profile copied in as
+     `embedded.mobileprovision`, its entitlements (also as DER, slot 7,
+     needed since iOS 15), the designated requirement naming the
+     certificate's chain, the team id: `CodeSign.Identity` is the API,
+     filled from a PKCS#12 export of the developer's identity and a profile
+     downloaded from their account; installs then through
+     libimobiledevice or `xcrun devicectl`;
+   - the app icon and an asset catalog (`Assets.car`: undocumented; a
+     `CFBundleIcons` of plain PNGs works for the home screen until then),
+     `PkgInfo`, a binary `Info.plist`;
+   - keys and text input (a `UIKeyInput` view and an input method, as
+     macOS's text view), multiple touches, UIScene (required by the SDK
+     after iOS 26), `os_log` for what the app prints on a device;
+   - the App Store's checks (the declared SDK and Xcode in `Info.plist`'s
+     DT* keys, `LC_ENCRYPTION_INFO_64`), the main stack (`RT_STACK_MB`'s
+     1 GB reservation; iOS limits an app's address space).
+2. Native controls via UIKit: `hxmc.ui.native` on `UIButton`, `UILabel`,
+   `UITextField`, ... (the AppKit backend's pattern: classes made at run
+   time for targets and delegates).
+3. Mixing: a GPU view among UIKit views (`GpuView` over a
+   `CAMetalLayer`-backed `UIView`), a native field in a drawn tree for text
+   input, as on Android.
 
 ## Shared libraries and position-independent output
 

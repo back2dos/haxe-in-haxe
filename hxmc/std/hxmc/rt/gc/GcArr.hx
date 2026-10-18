@@ -19,7 +19,7 @@ class GcArr {
 	}
 
 	@:hxmc.host("Array_indexOf") static function indexOf(a:Dynamic, x:Dynamic, from:Null<Int>):Int {
-		var n = W.arrLen(a), i = from == null ? 0 : from;
+		var n = W.arrLen(a), i:Int = from == null ? 0 : from;
 		if (i < 0) {
 			i += n;
 			if (i < 0) i = 0;
@@ -32,7 +32,7 @@ class GcArr {
 	}
 
 	@:hxmc.host("Array_lastIndexOf") static function lastIndexOf(a:Dynamic, x:Dynamic, from:Null<Int>):Int {
-		var n = W.arrLen(a), i = from == null ? n - 1 : from;
+		var n = W.arrLen(a), i:Int = from == null ? n - 1 : from;
 		if (i >= n) i = n - 1;
 		if (i < 0) i += n;
 		while (i >= 0) {
@@ -98,7 +98,7 @@ class GcArr {
 	}
 
 	@:hxmc.host("Array_slice") static function slice(a:Dynamic, pos:Int, endp:Null<Int>):Dynamic {
-		var n = W.arrLen(a), end = endp == null ? n : endp;
+		var n = W.arrLen(a), end:Int = endp == null ? n : endp;
 		if (pos < 0) {
 			pos += n;
 			if (pos < 0) pos = 0;

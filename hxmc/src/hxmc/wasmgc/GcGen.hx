@@ -6,14 +6,30 @@ import hxmc.ir.Ir;
 // experiment to compare with the linear-memory target (docs/plans/targets.md,
 // "WasmGC"). Only what main and the static initializers reach is emitted.
 class GcGen {
+	// HXMC_GC_SURVEY=1: what is reached, then what the module would lack (each
+	// unsupported construct, the functions with it); =2: also the module
+	// written, those functions trapping (to measure the rest)
 	public static function run(prog:Program, out:String, o:Options) {
-		var r = new Reach(prog);
-		if (Sys.getEnv("HXMC_GC_SURVEY") == "1") {
-			r.report();
+		var r = new Reach(prog, o.opt);
+		var survey = Sys.getEnv("HXMC_GC_SURVEY");
+		if (survey != "1" && survey != "2") {
+			sys.io.File.saveBytes(out, new GcModule(prog, r).build());
 			return;
 		}
-		var m = new GcModule(prog, r);
-		sys.io.File.saveBytes(out, m.build());
+		r.report();
+		GcModule.survey = new Map();
+		var bytes = try new GcModule(prog, r).build() catch (e:Dynamic) {
+			GcModule.note(Std.string(e), "(the module)");
+			null;
+		}
+		var ks = [for (k in GcModule.survey.keys()) k];
+		ks.sort(Reflect.compare);
+		Sys.println('unsupported (${ks.length}):');
+		for (k in ks) {
+			var fs = GcModule.survey.get(k);
+			Sys.println('  $k: ${fs.length} (${fs.slice(0, 4).join(", ")}${fs.length > 4 ? ", ..." : ""})');
+		}
+		if (survey == "2" && bytes != null) sys.io.File.saveBytes(out, bytes);
 	}
 }
 
@@ -26,12 +42,19 @@ class Reach {
 	public final sels = new Map<Int, Bool>();
 	public final classes = new Map<ClassInfo, Bool>();
 	public final lambdas = new Map<LambdaInfo, Bool>();
+	public final shapes = new Map<ShapeInfo, Bool>(); // the anonymous structures' layouts made
 	// the names called through structural types (ECallAnon): the classes' methods of these names
 	public final anonNames = new Map<String, Bool>();
+	// the functions' bodies and locals as emitted (IrOpt: inlined, objects scalar-replaced)
+	public final bodies = new Map<FuncInfo, {body:Array<Stmt>, locals:Array<Local>}>();
+	final opt:IrOpt;
+	final optimize:Bool;
 	var queue:Array<FuncInfo> = [];
 
-	public function new(prog:Program) {
+	public function new(prog:Program, optimize:Bool) {
 		this.prog = prog;
+		this.optimize = optimize;
+		opt = new IrOpt();
 		for (f in prog.inits)
 			add(f);
 		add(prog.main);
@@ -88,7 +111,9 @@ class Reach {
 	}
 
 	function scan(f:FuncInfo) {
-		for (s in f.body)
+		var b = opt.run(f, optimize);
+		bodies.set(f, b);
+		for (s in b.body)
 			stmt(s);
 	}
 
@@ -118,6 +143,7 @@ class Reach {
 					case _:
 				}
 			case ENewObj(c): cls(c);
+			case ENewAnon(s, _): shapes.set(s, true);
 			case EAnonGet(_): export("gc_anon_get");
 			case ECallAnon(n, _, _, _):
 				export("gc_anon_get");

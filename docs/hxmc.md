@@ -6,7 +6,7 @@ hxmc turns a typed Haxe program into a native executable with its own code
 generator and linker: no C compiler, assembler or system linker at build time.
 
 ```
-typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Sroa, Opt)-->
+typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Sroa, Opt)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
 ```
@@ -16,6 +16,7 @@ typed AST --(ir.Lower)--> hxmc IR --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA
 | `Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, compiles every module (in parallel, cached) and links; `--server` keeps the compilation server resident |
 | `HaxeMain.hx` | `haxe` with hxmc built in (the npm package): `--custom-target hxmc=<out>` |
 | `ir/Ir.hx`, `Lower.hx`, `FnLower.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST |
+| `ir/Reach.hx` | the functions the program can run (Reachability, below): the others are not compiled |
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
 | `UpToDate.hx`, `Fingerprint.hx`, `LowerCache.hx` | rebuilds: the whole build skipped when nothing changed, each module's object reused when its fingerprint is unchanged, lowered bodies reused by the server |
 | `Mir.hx`, `MirBuild.hx`, `Opt.hx`, `Inline.hx`, `Sroa.hx` | the SSA IR, its construction, inlining, scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
@@ -155,6 +156,42 @@ collections. `RT_STATS=1` prints the resizes and what was promoted. A change of 
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 
+## Reachability
+
+Haxe's default DCE (`-dce std`) keeps every field of a user class, and the
+lowering makes every method of each class it sees (method tables reach them
+by name: structural and Dynamic access, `Reflect`). `hxmc/src/hxmc/ir/Reach.hx`
+then keeps what the program can run, a rapid type analysis over the IR before
+anything is compiled: from `main`, the exported functions and `@:keep` methods,
+a function is live when live code calls it or makes a closure of it, a static
+initializer when live code uses a static it sets (as the lowering already
+initializes only the classes whose statics it meets), and a method when live
+code instantiates its class or a subclass and either dispatches on its
+selector or can look its name up. Names looked up: those of structural and
+Dynamic access (a structural read only where the field's type is a
+function's or Dynamic: a method unifies with no other), literals passed to
+the runtime's lookups or to functions
+passing them on (`Reflect.field(o, "x")`, `Reflect.getProperty`'s
+`"get_" + field`), and names from the runtime's own tables (`Reflect.fields`,
+`Type.getInstanceFields`), which name only what the tables keep; a name
+computed any other way keeps every method of the instantiated classes.
+Dropped: the functions, their entries in the method tables (so
+`Type.getInstanceFields` lists the methods kept, as with `-dce full`), the
+dispatch rows of selectors no live code calls, the types of dead closures.
+The dispatch rows themselves (DataGen: a row per selector, indexed by type)
+are laid over each other, as a call reads only the entries of the classes
+implementing the selector. Closures share a type when their signatures and
+captures' representations are the same (the code is in the object), only
+the signatures of methods in the tables have a bound-method type and
+trampoline, only closures' signatures a dynamic-call one, and a closure
+capturing nothing is an object in the data, made once (Prep.staticClosures),
+not allocated where it is used. The tool: 16.8 MB instead of 18.4; ui's
+counter example (with the ui changes of the same work): 1.21 MB instead of
+1.77. `HXMC_STATS=1` prints the live
+functions (and where a name is computed) and the data's parts;
+`HXMC_REACH_WHY=<pack.Class.method>` the chain that keeps a function;
+`HXMC_REACH=0` keeps everything.
+
 ## Module cache
 
 The compilation server's HXB module cache, made durable
@@ -197,7 +234,14 @@ expressions kept, which inlining copies), or of its whole content across
 contexts (a macro's code runs). A module typed again whose interface did
 not change leaves its dependents restored (early cutoff: a body edited in
 a central module of the port types that module again, not its
-dependents); an edit undone restores the earlier variant. Modules built by
+dependents); an edit undone restores the earlier variant (a module a macro
+defined, with no file of its own, the variant whose dependencies are as
+they were: the one typed with the variant restored for the module whose
+macro defines it). A restored module that refers to one typed again reads
+that module's fields once they exist: one read while a class of a module it
+depends on, or of its cycle, is being built is typed from its source too,
+and the fields Haxe makes in a later pass (an interface's property
+accessors) are made before it reads them. Modules built by
 macros are restored too; the state macros keep between calls is tracked:
 the static variables of macro classes (not the std's) the macros run in a
 module's typing use are kept with it (a registry an `@:autoBuild` fills
@@ -205,7 +249,9 @@ for another macro, a counter naming generated types). Such a module is
 restored while no macro of the build uses that state; a macro that uses
 it after such a module was restored makes the build run again, those
 modules typed (`HXMC_MODULE_CACHE_RETYPE`), and an edited one has the
-others that keep state there typed from the start. A callback a macro
+others that keep state there typed from the start. A class's build (its
+fields made, its build macros run, lazily, when first asked for) is part of
+the typing of its module, whichever module's typing asks for it. A callback a macro
 registers while a module is typed (`onGenerate`, `onAfterTyping`,
 `onAfterGenerate`) makes that module typed every build. Not used for
 display requests, the server itself, several compilations, init macros,
@@ -258,7 +304,8 @@ generated `_start` calling `__libc_start_main`; runtime objects of their own,
 imports written from the import libraries), macOS (Mach-O against
 libSystem, ad-hoc signed), each on x86-64 and ARM64, Android (a shared
 library of position-independent code against Bionic, in an APK hxmc writes:
-Android, below), and wasm32-wasi (the
+Android, below), iOS and its simulator on ARM64 (macOS's Mach-O and
+runtime, in an app bundle hxmc writes: iOS, below), and wasm32-wasi (the
 whole runtime in Haxe; exception handling with `exnref`, or with
 `-D hxmc.wasm-eh=legacy` the legacy `try`/`catch_all`/`rethrow`, which node 22
 runs without flags and wasmtime not at all; run with
@@ -414,6 +461,97 @@ the soft keyboard for a drawn window, keys, a composition and a commit). Not yet
 release signing (a keystore), icons and resources, the clipboard
 ([plans/targets.md](plans/targets.md#android)).
 
+## iOS
+
+`-D hxmc.target=ios-arm64` (devices) or `ios-sim-arm64` (the simulator on
+Apple silicon): iOS 15 and later. Darwin is macOS's: the same libSystem,
+struct layouts and runtime objects as `macos-arm64` (`Mem.os()` 1,
+`Mem.target()` 3; `Mem.platform()` 1 or 2 tells iOS and the simulator
+apart, for packages), Mach-O with the iOS or the simulator's platform in
+`LC_BUILD_VERSION` (minimum 15.0, SDK 18.0), TLV descriptors as on macOS,
+the system's frameworks (UIKit, Foundation, Metal, ...) loaded by their
+install names from dyld's shared cache. The output is an executable, or with
+an output ending in `.app` an app bundle, `.ipa` the bundle zipped (no
+Xcode or SDK at build time):
+
+```sh
+haxe -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/examples -main Cube \
+  --custom-target hxmc=bin/Cube.app -D hxmc.target=ios-sim-arm64 -D hxmc.ios-bundle-id=org.example.cube
+xcrun simctl install booted bin/Cube.app
+xcrun simctl launch --console-pty booted org.example.cube   # what the app prints
+```
+
+| Option | |
+| --- | --- |
+| `-D hxmc.ios-bundle-id=<id>` | `CFBundleIdentifier`, the code signature's identifier (default `org.hxmc.<the output's name>`) |
+| `-D hxmc.ios-name=<text>` | the home screen's label (the output's name) |
+| `-D hxmc.ios-version=<n>`, `-D hxmc.ios-version-name=<text>` | `CFBundleVersion` (1), `CFBundleShortVersionString` (1.0) |
+| `-D hxmc.ios-min-version=<major.minor>` | `MinimumOSVersion` and the build version's minimum (15.0, the floor) |
+| `-D hxmc.ios-entitlements=<file>` | entitlements (an XML plist) signed with the code |
+
+Why 15.0: `UILaunchScreen` (the screen's own size without a storyboard) is
+iOS 14's, current Xcodes and the App Store start at 15, which runs on every
+device since the A9; nothing here needs more.
+
+The bundle (`hxmc/src/hxmc/ios/Bundle.hx`): `<name>.app` holds the
+executable `<name>`, `Info.plist` (XML, `Plist.hx`: the bundle id, the
+executable, an empty `UILaunchScreen`, the platform, `MinimumOSVersion`, the
+orientations) and `_CodeSignature/CodeResources` (the other files' SHA-1 and
+SHA-256 with codesign's default rules). The executable's code signature is
+written by the linker (`hxmc/src/hxmc/CodeSign.hx`, shared with macOS, where
+it is the linker-signed ad hoc signature ld64 writes): for a bundle, ad hoc,
+identified by the bundle id, its CodeDirectory's special slots binding the
+`Info.plist`, an empty requirement set and `CodeResources` (and the
+entitlements), as `codesign -s -` signs, which `codesign --verify` accepts
+and the simulator runs. An `.ipa` is the bundle under `Payload/`, stored,
+the executable with mode 0755. The cube's executable: 269 KB, its `.ipa`
+273 KB; a hello world's 134 KB; IosTest's 651 KB.
+
+The app (`packages/os`, `hxmc.os.uikit`): UIKit wants `UIApplicationMain`
+on the main thread before any window, and it never returns. A program
+that uses the os package has `UIKitApp`'s export `hxmc_ui_main`, which
+hxmc's generated `main` runs instead of the program's body (DataGen, on
+the big stack the body would have had): it makes the app delegate's class
+at run time and calls `UIApplicationMain`; once the app has launched, a
+timer on the main run loop runs the program's body (its static
+initializers, then `main`) inside UIKit's loop, and `App.run` turns that
+loop itself without waiting (`CFRunLoopRunInMode`, as SDL does). Nothing
+runs before the body that needs a static's initializer. `UIKitWindow` is
+the one `UIWindow`, its root view controller's view an `HxmcView` (a
+`UIView` subclass made at run time, `+layerClass` `CAMetalLayer`): gfx's
+Metal back end draws to the layer as on macOS (Surface kind `Cocoa`).
+Touches are the left button (MouseDown, MouseMove, MouseUp at the first
+finger down) and their drags `Scroll` too, as on Android; the view's size
+and the safe area (`Window.safeTop`, `safeLeft`, `safeBottom`,
+`safeRight`, in pixels) are measured in `layoutSubviews` and
+`safeAreaInsetsDidChange` (a Resize event when either changes,
+ScaleChange when the scale does); the app delegate's background and
+foreground callbacks are Suspend and Resume (no frames are drawn in the
+background: iOS refuses GPU work there; the layer stays, so the Surface is
+not lost). `UIPasteboard` is the clipboard and the trait collection the
+dark mode. Not yet: keys and text input (a `UIKeyInput` view, as macOS's
+text view), multiple touches, UIScene (the app delegate's lifecycle is
+what the declared SDK gets).
+
+Checks: `hxmc/test/IosCheck.hx` (`make ios-check IOS_TARGET=ios-arm64|ios-sim-arm64`:
+the bundle, `Info.plist` read back, the Mach-O's header and load commands,
+the code signature's CodeDirectory with its page hashes and special slots
+recomputed, `CodeResources`; `llvm-objdump` where installed, `codesign` and
+`plutil` on a Mac), and on a Mac with Xcode `make ios-sim-check`
+(`packages/gfx/test/ios.sh`: `codesign --verify`, a new simulator booted,
+IosTest installed and launched with its stdout in a file, the cube headless
+on the simulator's Metal against `cube.png`, frames in the window and its
+pixels lit, a tap posted on the Simulator's window (`SimTap.hx`, an hxmc
+program for macOS) as MouseDown and MouseUp, a screenshot, Settings and back
+as Suspend and Resume; CI's `ios` and `ios-simulator` jobs, the latter on
+an iPhone 17 simulator of iOS 26.2, Xcode 16.4's runner). Devices need
+what is left ([plans/targets.md](plans/targets.md#ios)): a signature by the
+developer's certificate (a CMS blob over the CodeDirectory), the
+provisioning profile (`embedded.mobileprovision`) and its entitlements
+(`application-identifier`, `com.apple.developer.team-identifier`,
+`get-task-allow`, also in DER), the designated requirement; `CodeSign.Identity`
+is where they go.
+
 ## WebAssembly
 
 WebAssembly is the seventh target, described with the others under Targets above; the playground and the npm fallback run the port as a wasm32-wasi module.
@@ -434,20 +572,35 @@ its index in the exported `__indirect_function_table` (corpus case
 With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the IR after Lower
 becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): objects live in the
 engine's collector, with no linear memory, shadow stack or barriers. What main and the
-initializers reach is emitted (`GcGen.Reach`); every reference is an `eqref`,
-cast to its concrete type where it is used; all types are in one recursion
+initializers reach is emitted (`GcGen.Reach`), each function's body first
+through `IrOpt`: inlining where it lets scalar replacement turn objects
+that never escape into locals (the IR's counterpart of Mir's `Inline` and
+`Sroa`, which this path never reaches; V8 inlines small functions of a
+WasmGC module itself). A reference has the wasm type its IR type proves
+(classes, strings, arrays, enums, closures, Bytes: `GcModule.keyOf`), else
+`eqref` cast where it is used; a local that is only ever cast to one type
+gets it (`FuncGen.refine`, a second emission). All types are in one recursion
 group, so the class hierarchy is wasm's subtyping (`instanceof` is
-`ref.test`); virtual and interface calls go through a funcref table indexed by
-class and selector; closures are structs whose first field is a typed
-function reference (`call_ref`); exceptions are the legacy try/catch
-instructions. The runtime is `hxmc/std/hxmc/rt/gc`: Haxe over intrinsics
-(`hxmc.rt.gc.W`, expanded by `FuncGen.host`), its `@:hxmc.wasmgc` classes the
-only ones whose `@:hxmc.host` functions are bound; Math's transcendental
-functions, float formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
-runs a module under node). A runtime function not covered yet fails the
-build with its name. `make wasmgc-check` compares `hxmc/test/wasmgc`'s programs
-with their native output; `make wasmgc-bench` adds the linear-memory build:
-times, peak RSS, sizes.
+`ref.test`; leaf classes are final types); methods have their own typed
+signatures, virtual and interface calls go through a funcref table indexed
+by class and selector holding wrappers of the table's signature; closures
+are structs whose first field is a typed function reference (`call_ref`);
+array accesses and structural field accesses test the expected kind or
+layouts inline before falling back to the runtime; Ints of -128...1023 are
+boxed once; literals of 24 characters and more come from passive data
+segments; exceptions are the legacy try/catch instructions. The runtime is
+`hxmc/std/hxmc/rt/gc`: Haxe over intrinsics (`hxmc.rt.gc.W`, expanded by
+`FuncGen.host`), its `@:hxmc.wasmgc` classes the only ones whose
+`@:hxmc.host` functions are bound; Math's transcendental functions, float
+formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
+runs a module under node). `@:hxmc.lib` externs taking and returning
+numbers are the module's imports (`HXMC_WASM_IMPORTS`, as `wasi.mjs` takes
+them); pointers are not, there being no linear memory. A runtime function
+not covered yet fails the build with its name; `HXMC_GC_SURVEY=1` lists
+every such construct of a program instead (`=2` also writes the module,
+those functions trapping). `make wasmgc-check` compares `hxmc/test/wasmgc`'s
+programs with their native output; `make wasmgc-bench` adds the
+linear-memory build: times, peak RSS, sizes.
 
 ## Origin
 

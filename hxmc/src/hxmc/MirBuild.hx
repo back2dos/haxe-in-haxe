@@ -1665,6 +1665,9 @@ class MirBuild {
 				}
 				o;
 			case ENewArr(elem, vs): newArr(elem, vs);
+			case ENewClos(l, []) if (p.staticClosures):
+				// (capturing nothing: an object in the data, DataGen.closures)
+				symAddr(p.closureSym(l));
 			case ENewClos(l, caps):
 				var o = alloc(l.captures.length + 1, l.tindex, Abi.K_OBJ, false);
 				storeM(Opt.MInit, 8, o, 0, symAddr(p.funcSym(l.fn)));
@@ -2463,6 +2466,7 @@ class MirBuild {
 			case "os": iconst(abi.osCode());
 			case "arm": iconst(abi.arm ? 1 : 0);
 			case "target": iconst(targetCode(abi));
+			case "platform": iconst(abi.platformCode());
 			case "stack": stackAddr(f.slot(intLiteral(args[0], "Mem.stack"), 16));
 			// (a struct value's memory: FnLower.newSlot)
 			case "structSlot": stackAddr(f.slot((intLiteral(args[0], "a struct slot") + 7) & ~7, intLiteral(args[1], "a struct slot")));

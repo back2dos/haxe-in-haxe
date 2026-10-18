@@ -48,10 +48,10 @@ class Apk {
 		if (!~/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.match(pkg)) throw "hxmc: APK: the package " + pkg + " is not an application id (a.b.c)";
 		var manifest = manifest(pkg, opts.get("label") ?? name, Std.parseInt(opts.get("version") ?? "1"), opts.get("version_name") ?? "1.0",
 			Std.parseInt(opts.get("min_sdk") ?? "29"), Std.parseInt(opts.get("target_sdk") ?? "35"), dex != null, views);
-		var entries = [{name: "AndroidManifest.xml", data: manifest, align: 4}];
+		var entries:Array<Zip.ZipEntry> = [{name: "AndroidManifest.xml", data: manifest, align: 4}];
 		if (dex != null) entries.push({name: "classes.dex", data: dex, align: 4});
 		entries.push({name: "lib/" + abiDir + "/lib" + LIB + ".so", data: so, align: PAGE});
-		var zip = zip(entries);
+		var zip = Zip.stored(entries);
 		var key = debugKey(keyFile);
 		sys.io.File.saveBytes(out, sign(zip, key.d, key.cert));
 	}
@@ -95,72 +95,6 @@ class Apk {
 			])
 		]);
 		return Axml.encode(root);
-	}
-
-	// ---- the zip
-
-	// stored entries, each one's data at a multiple of its alignment (the
-	// local header's extra field padded: Android's alignment field 0xd935,
-	// as zipalign and apksigner write it); a fixed date (1981-01-01) and no
-	// attributes: the same input gives the same bytes
-	public static function zip(entries:Array<{name:String, data:Bytes, align:Int}>):Bytes {
-		var out = new Buf(1 << 20), cd = new Buf(4096);
-		inline function dosTime(b:Buf) {
-			b.u16(0); // 00:00:00
-			b.u16((1 << 9) | (1 << 5) | 1); // 1981-01-01 (1980 + 1)
-		}
-		for (e in entries) {
-			var at = out.len, name = Bytes.ofString(e.name);
-			var crc = haxe.crypto.Crc32.make(e.data);
-			// the data's offset: header (30) + name + extra (4 + 2 + padding)
-			var extra = 6, dataAt = at + 30 + name.length + extra;
-			var pad = (e.align - (dataAt % e.align)) % e.align;
-			extra += pad;
-			out.u32(0x04034b50);
-			out.u16(10); // version needed
-			out.u16(0x0800); // flags: UTF-8 names
-			out.u16(0); // stored
-			dosTime(out);
-			out.u32(crc);
-			out.u32(e.data.length);
-			out.u32(e.data.length);
-			out.u16(name.length);
-			out.u16(extra);
-			out.bytes(name);
-			out.u16(0xd935);
-			out.u16(extra - 4);
-			out.u16(e.align);
-			out.zeros(pad);
-			out.bytes(e.data);
-			cd.u32(0x02014b50);
-			cd.u16(10); // version made by
-			cd.u16(10);
-			cd.u16(0x0800);
-			cd.u16(0);
-			dosTime(cd);
-			cd.u32(crc);
-			cd.u32(e.data.length);
-			cd.u32(e.data.length);
-			cd.u16(name.length);
-			cd.u16(0); // extra
-			cd.u16(0); // comment
-			cd.u16(0); // disk
-			cd.u16(0); // internal attributes
-			cd.u32(0); // external attributes
-			cd.u32(at);
-			cd.bytes(name);
-		}
-		var cdAt = out.len;
-		out.buf(cd);
-		out.u32(0x06054b50);
-		out.u16(0);
-		out.u16(0);
-		out.u16(entries.length);
-		out.u16(entries.length);
-		out.u32(cd.len);
-		out.u32(cdAt);
-		out.u16(0);
-		return out.toBytes();
 	}
 
 	// ---- the signature (APK Signature Scheme v2)

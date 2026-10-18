@@ -16,6 +16,11 @@ class Options {
 	// hxmc.android-label=<text>, -D hxmc.android-min-sdk=<n>, -D
 	// hxmc.android-target-sdk=<n>, -D hxmc.android-version=<code>
 	public var android = new Map<String, String>();
+	// iOS's app bundle (hxmc.ios.Bundle): -D hxmc.ios-bundle-id=<id>, -D
+	// hxmc.ios-name=<text>, -D hxmc.ios-version=<n>, -D
+	// hxmc.ios-version-name=<text>, -D hxmc.ios-min-version=<major.minor>, -D
+	// hxmc.ios-entitlements=<file>
+	public var ios = new Map<String, String>();
 	public var opt = true; // MIR optimizations (HXMC_OPT=0: off)
 	public var jobs = 0; // parallel module compilations (HXMC_JOBS, -D hxmc.jobs; 0: the cores)
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
@@ -101,6 +106,10 @@ class Options {
 		for (k in ["package", "label", "min_sdk", "target_sdk", "version", "version_name", "key"]) {
 			var v = def("hxmc.android_" + k); // (-D turns the dashes into underscores)
 			if (v != null) o.android.set(k, v);
+		}
+		for (k in ["bundle_id", "name", "version", "version_name", "min_version", "entitlements"]) {
+			var v = def("hxmc.ios_" + k);
+			if (v != null) o.ios.set(k, v);
 		}
 		o.opt = env("HXMC_OPT") != "0";
 		var eh = def("hxmc.wasm_eh"); // (-D turns the dash into an underscore)
