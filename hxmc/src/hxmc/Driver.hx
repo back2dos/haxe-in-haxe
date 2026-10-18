@@ -41,9 +41,14 @@ class Driver {
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
 	}
 
+	// (-D hxmc.jit: every function stays, for the native macros the compiler
+	// loads, and closures are made as they are in those, Prep.staticClosures;
+	// native macros' own code makes a Driver itself, Guest)
 	public static function run(prog:Program, out:String, o:Options) {
 		var t0 = haxe.Timer.stamp();
+		if (!o.jit) hxmc.ir.Reach.run(prog, o.stats);
 		var d = new Driver(prog, out, o);
+		d.prep.staticClosures = !o.jit;
 		var t1 = haxe.Timer.stamp();
 		d.build(t0, t1);
 	}
@@ -370,6 +375,7 @@ class Driver {
 		dg.allocStubs(objs, demit);
 		dg.stubs(objs, demit);
 		dg.cstrLiterals(objs);
+		if (o.stats) Sys.println('hxmc: data: ' + [for (x in dg.sizes) '${x.part} ${x.bytes} bytes'].join(", "));
 		var t3 = haxe.Timer.stamp();
 		if (abi.wasm) {
 			var stack = Sys.getEnv("HXMC_WASM_STACK_KB");

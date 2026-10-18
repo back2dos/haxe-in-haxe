@@ -365,8 +365,15 @@ class Program {
 	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String, ?tls:String, ?bss:Int, ?sym:String, ?exp:String}> = [];
 	public var inits:Array<FuncInfo> = []; // static initializers, run before main
 	public var main:FuncInfo;
+	public var roots:Array<FuncInfo> = []; // live whatever reaches them (Reach)
+	// (Reach) the live functions and the selectors live code dispatches on; null: all
+	public var live:Null<Map<FuncInfo, Bool>> = null;
+	public var liveSelectors:Null<Array<Bool>> = null;
 
 	public function new() {}
+
+	public inline function isLive(f:FuncInfo):Bool
+		return live == null || live.exists(f);
 
 	public function sig(args:Array<Ty>, ret:Ty):SigInfo {
 		var key = [for (a in args) Ir.repr(a)].join("") + "_" + Ir.repr(ret);

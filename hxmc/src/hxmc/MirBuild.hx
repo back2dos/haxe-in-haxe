@@ -1665,6 +1665,9 @@ class MirBuild {
 				}
 				o;
 			case ENewArr(elem, vs): newArr(elem, vs);
+			case ENewClos(l, []) if (p.staticClosures):
+				// (capturing nothing: an object in the data, DataGen.closures)
+				symAddr(p.closureSym(l));
 			case ENewClos(l, caps):
 				var o = alloc(l.captures.length + 1, l.tindex, Abi.K_OBJ, false);
 				storeM(Opt.MInit, 8, o, 0, symAddr(p.funcSym(l.fn)));
