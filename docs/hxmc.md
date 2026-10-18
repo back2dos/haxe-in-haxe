@@ -394,8 +394,9 @@ a pipe of the callbacks' commands; the callbacks run on the UI thread, which
 the runtime does not know, and wait for the ones whose state the program
 must take (a window created or going, an input queue, pause, destroy).
 `AndroidWindow` is the activity's window behind `Window`, `App.run` polls
-the looper (input queue: touches as the left button, their drags also as
-`Scroll`, keys as X11 KeySyms), draws only with a window and not paused,
+the looper (input queue: touches as in the browser, `hxmc.os.TouchDrag`:
+a tap a click, a drag `Scroll`s at where it started that glide when let
+go, keys as X11 KeySyms), draws only with a window and not paused,
 and sleeps in the looper otherwise; a window taken by the system is
 `Surface.lost` (gfx lets go of its EGL surface first) and a `Suspend`
 event, a new one `Resume`. `packages/gfx`'s GL back end is EGL's default
@@ -468,7 +469,10 @@ device or emulator (`make android-device-check`; CI: an x86-64 emulator)
 (the form's own checks on the device, uiautomator's accessibility dump,
 taps and text typed through the input method) and `android-mix.sh` (the
 cube in a `GpuView` among views, its surface taken by Home and given back;
-the soft keyboard for a drawn window, keys, a composition and a commit). Not yet: one ABI per APK,
+the soft keyboard for a drawn window, keys, a composition and a commit),
+`packages/os/test/android-touch.sh` (a fling in a drawn scroll box, which
+glides on), android.sh also a drag held on the cube and a fling; `make
+touch-check` runs `TouchDrag`'s own test on the host. Not yet: one ABI per APK,
 release signing (a keystore), icons and resources, the clipboard
 ([plans/targets.md](plans/targets.md#android)).
 
@@ -531,8 +535,9 @@ runs before the body that needs a static's initializer. `UIKitWindow` is
 the one `UIWindow`, its root view controller's view an `HxmcView` (a
 `UIView` subclass made at run time, `+layerClass` `CAMetalLayer`): gfx's
 Metal back end draws to the layer as on macOS (Surface kind `Cocoa`).
-Touches are the left button (MouseDown, MouseMove, MouseUp at the first
-finger down) and their drags `Scroll` too, as on Android; the view's size
+Touches (the first finger down) are as on Android and in the browser
+(`hxmc.os.TouchDrag`: a tap a click, a drag `Scroll`s with
+`Mods.TOUCH`, a glide when let go); the view's size
 and the safe area (`Window.safeTop`, `safeLeft`, `safeBottom`,
 `safeRight`, in pixels) are measured in `layoutSubviews` and
 `safeAreaInsetsDidChange` (a Resize event when either changes,
@@ -553,7 +558,8 @@ recomputed, `CodeResources`; `llvm-objdump` where installed, `codesign` and
 IosTest installed and launched with its stdout in a file, the cube headless
 on the simulator's Metal against `cube.png`, frames in the window and its
 pixels lit, a tap posted on the Simulator's window (`SimTap.hx`, an hxmc
-program for macOS) as MouseDown and MouseUp, a screenshot, Settings and back
+program for macOS) as MouseDown and MouseUp, a fling (SimTap's quick drag)
+as scrolls at where it started that glide on, a screenshot, Settings and back
 as Suspend and Resume; CI's `ios` and `ios-simulator` jobs, the latter on
 an iPhone 17 simulator of iOS 26.2, Xcode 16.4's runner). Devices need
 what is left ([plans/targets.md](plans/targets.md#ios)): a signature by the
