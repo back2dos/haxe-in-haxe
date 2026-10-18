@@ -211,7 +211,7 @@ help:
 ##             and keys (packages/web/test/widgets.mjs), the sizes of the counter, form and gallery bundles
 ## theme-dom-check  the DOM's widgets (packages/web) under the theme's CSS in Chromium against the same
 ##             references (packages/theme/test/dom-fidelity.mjs)
-## ui-layout-fuzz  random flex trees (SEED, COUNT) against Chromium's boxes (Playwright): differences to reduce into layout-cases.mjs
+## ui-layout-fuzz  random flex trees (SEED, COUNT; FEATURES=more: grids, absolute positions, auto margins, order and more) against Chromium's boxes (Playwright): differences to reduce into layout-cases.mjs
 ## ui-layout-reduce  one of them (CASE='fuzz 41-87', after ui-layout-fuzz) reduced: nodes and properties dropped while it still differs
 ## ui-programs  bin/ui/GFX_TARGET/{UiDrawTest,TodoTest,GalleryTest,StressTest,ClipboardTest,EmojiTest,BoxTest,WindowTest}[.exe], NativeTest (GTK 3, Win32, AppKit), TextInputTest (X11), LinuxAccessTest and AtspiProbe (AT-SPI), WinAccessTest (Windows): packages/ui's test programs (Linux: glibc mode)
 ## ui-draw-check  packages/ui's GPU renderer (hxmc.ui.draw): the sample UI headless against
@@ -671,7 +671,7 @@ ui-check: $(TOOL)
 
 # random flex trees against Chromium (Playwright): a tool, not a lane
 ui-layout-fuzz: $(TOOL)
-	node packages/ui/test/layout-fuzz.mjs $(or $(SEED),1) $(or $(COUNT),200) bin/ui/fuzz
+	node packages/ui/test/layout-fuzz.mjs $(or $(SEED),1) $(or $(COUNT),200) bin/ui/fuzz $(FEATURES)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run LayoutFuzz bin/ui/fuzz
 
 ui-layout-reduce: $(TOOL)
