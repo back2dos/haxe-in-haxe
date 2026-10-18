@@ -184,13 +184,6 @@ class GcNative {
 		}
 	}
 
-	// (the iterators of an Array taken as values: linear memory's are the runtime's hx_array_iterator)
-	@:hxmc.host("Array_iterator") static function arrayIterator(a:Array<Dynamic>):Dynamic
-		return new haxe.iterators.ArrayIterator(a);
-
-	@:hxmc.host("Array_keyValueIterator") static function arrayKeyValueIterator(a:Array<Dynamic>):Dynamic
-		return new haxe.iterators.ArrayKeyValueIterator(a);
-
 	// ---- statics reached through a class value (hxmc.ir.Lower.reflectStatics), by its index
 
 	static var classIndices:Null<Map<Int, Int>>;

@@ -166,8 +166,13 @@ class Arr {
 		insert(a, 0, x);
 
 	// iterator and keyValueIterator as values (their calls are inline)
-	@:hxmc.host("Array_iterator") static function iterator(a:Dynamic):Dynamic
+	@:hxmc.host("Array_iterator") static function iterator(a:Dynamic):Dynamic {
+		#if hxmc.wasm_gc
+		return new haxe.iterators.ArrayIterator<Dynamic>(a);
+		#else
 		return Dyn.arrayIterator(a);
+		#end
+	}
 
 	@:hxmc.host("Array_keyValueIterator") static function keyValueIterator(a:Dynamic):Dynamic
 		return new haxe.iterators.ArrayKeyValueIterator<Dynamic>(a);
