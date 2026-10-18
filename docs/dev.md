@@ -28,20 +28,32 @@ the output, `--custom-target hxmc=<out>`, says how the program runs:
 What happens:
 
 - The compiler stays resident: the dev server starts it as a compilation
-  server (`--wait`) and each build is a request to it, with `-D hxmc.dev`
-  added. Typed modules, lowered bodies and compiled objects stay in memory;
-  a build types again only the modules that changed and those that depend
-  on them.
+  server (`--server-connect`: it connects to the dev server and takes each
+  build on that one connection) and each build is a request to it, with
+  `-D hxmc.dev` added. Typed modules, lowered bodies and compiled objects
+  stay in memory; a build types again only the modules that changed and
+  those that depend on them. The typed modules are kept as they are
+  (`-D disable-hxb-cache`, Haxe's in-memory server cache), not written as
+  HXB after each build and read back in the next (`HXMC_DEV_HXB_CACHE=1`:
+  the HXB cache, Haxe's default); either way a build makes the bytes a
+  fresh build makes (`make dev-check`).
 - The class paths and libraries the build names (and its hxml files) are
   watched; a change builds again (several changes close together: one
   build).
 - A build that compiles reloads the program. In the browser the page asks
   the running module for its snapshot, keeps it in `sessionStorage` and
-  loads again with the new module. Natively the program writes its
-  snapshot to a file and exits, and the new build starts with it.
+  loads again with the new module; it does so as soon as the program is
+  typed (the server says so), while hxmc makes its code, the module held
+  back until the build ends, so that the page, its scripts, the fonts and
+  the GPU device are ready when it comes (the module is compiled as it
+  arrives). Natively the program writes its snapshot to a file and exits,
+  and the new build starts once the snapshot is written.
 - A build with errors changes nothing: the last good build keeps running.
   The errors show in the terminal and, in the browser, in an overlay over
-  the page, which goes away with the next build that compiles.
+  the page, which goes away with the next build that compiles. (Errors are
+  the typer's; one of hxmc's own, after the page started loading again, a
+  link failure, gives the page the last good build again, with the overlay
+  and the state carried.)
 - Each reload prints its time, from the change seen to the new build's
   first frame: `hxmc dev: reloaded in 1043 ms (build 896 ms)`.
 
@@ -231,23 +243,48 @@ llvmpipe; ui's Counter (about 400 modules, 1700 functions) and Gallery (about
 
 | | build | save to frame | target |
 | --- | --- | --- | --- |
-| Counter, browser (wasm) | 0.93 s | 1.07 s | 0.5 s |
-| Counter, browser (WasmGC) | 0.79 s | 0.99 s | 0.5 s |
-| Counter, native | 0.88 s | 1.08 s | 0.5 s |
-| Gallery, browser (wasm) | 1.35 s | 1.61 s | 1.5 s |
-| Gallery, browser (WasmGC) | 1.38 s | 1.76 s | 1.5 s |
-| Gallery, native | 1.39 s | 1.67 s | 1.5 s |
+| Counter, browser (wasm) | 0.38-0.40 s | 0.45-0.49 s | 0.5 s |
+| Counter, browser (WasmGC) | 0.37 s | 0.47-0.49 s | 0.5 s |
+| Counter, native | 0.38-0.42 s | 0.52-0.56 s | 0.5 s |
+| Gallery, browser (wasm) | 0.88-0.93 s | 1.07-1.14 s | 1.5 s |
+| Gallery, browser (WasmGC) | 0.79-0.80 s | 1.10-1.11 s | 1.5 s |
+| Gallery, native | 0.73-0.75 s | 0.90-0.93 s | 1.5 s |
 
-(Runs vary by about 10%.) The build is most of it; the reload itself, the
-page loading again or the process starting, is 0.15-0.3 s. Of the build,
-in the compilation server: 0.4-0.5 s reads every cached module back from
-its HXB and caches each again (the server's HXB cache, as upstream's),
-the Gallery's edit types its large module of markup again (0.25 s of
-macros), DCE takes 0.1 s, and hxmc replays the lowered bodies of the
-modules not typed again (`LowerCache`, by module step: 0.1 s where
-lowering everything takes 0.2-0.35 s) and fingerprints every module to
-reuse its object (0.2-0.3 s with the link). Neither target is met yet: what
-is left is in [plans/dev-loop.md](plans/dev-loop.md).
+(Two runs each, the machine shared and busy, load 1.1-2.1; runs vary by
+about 10%. The build before these changes, measured alongside: Counter
+0.95-1.12 s save to frame, Gallery 1.53-1.85 s.) Of an edit's build, in
+the compilation server: 0.1-0.15 s is Haxe's (typing the changed module,
+DCE 0.06-0.08 s, the module checks; the Gallery's edit types its large
+module of markup again, 0.2-0.3 s of macros), and hxmc's is 0.18 s for the
+Counter, 0.35 s for the Gallery: lowering (`LowerCache` replays the
+bodies of the modules not typed again, as bindHosts left them: 0.06 s, 0.1
+s), Reach and the program's facts (0.04 s, 0.08 s), the modules' keys
+(`Fingerprint`, on every core: 0.02 s, 0.03 s), the data and the link
+(0.05 s, 0.08 s). After the build, the reload: in the browser the page
+has loaded again meanwhile (the program typed, the server says so), and
+the new module runs to its first frame in 0.05-0.1 s (the Counter) to
+0.15-0.3 s (the Gallery, WasmGC); natively the new process starts once
+the old one has written its snapshot, and its first frame is 0.12-0.14 s
+later, most of it loading Mesa (llvmpipe) and making the window.
+
+Before: the compilation server kept its typed modules as HXB (Haxe's
+default), so each build wrote every module as HXB and read each back
+(0.3-0.4 s); `-D disable-hxb-cache` (Haxe's in-memory mode) is most of the
+difference (with the HXB cache, the builds above are 0.84 s and 1.2 s
+natively). The rest: hxmc's lowering, keys and analyses made cheaper
+(bindHosts kept with the replayed bodies, an inlined callee's key text
+written once a build, string literals' names kept, Reach's and Facts'
+fixpoints walking each body once, WasmGC's IrOpt on every core, the
+processor count asked once), one connection to the server (a request per
+connection could find the server reading before it was sent, which waits
+50 ms), the page loading again during the build and fetching its module
+and fonts from its start, a 10 ms idle wake in a dev build (was 50 ms)
+and a 10 ms window for changes close together (was 20 ms).
+
+Note: the edits the measurement makes are the same each run (`"edit 1"`,
+...), so the objects of the edited module are often in the object store
+from an earlier run; a new edit compiles that module too (the Gallery's
+large one: 0.05 s more).
 
 ## Tests
 
@@ -257,7 +294,11 @@ store across a reload, natively and on Eval, a changed type reset),
 shown later), then `hxmc dev` on ui's Counter in headless Chromium (as wasm
 and as WasmGC) and natively under Xvfb: an edit keeps the count, a changed
 type resets it, a compile error shows in the overlay (the terminal) while
-the last good build keeps running, the fix reloads with the count kept.
+the last good build keeps running, the fix reloads with the count kept;
+then the compilation server's builds, asked as `hxmc dev` asks them,
+through edits of the Counter and of a module it uses whose API changes,
+each against a fresh build of the same sources, byte for byte
+(`packages/os/test/dev/dev-verify.mjs <compiler> [example] [native|web|web-gc]`).
 
 ## Not yet
 
