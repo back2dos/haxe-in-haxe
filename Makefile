@@ -821,6 +821,9 @@ dev-check: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/dev/RefreshTest,$(DEV_VIEW_CP) -main RefreshTest $(HXMC_ARGS) -D hxmc.dev)
 	bin/dev/RefreshTest save bin/dev/refresh.snapshot
 	HXMC_DEV_SNAPSHOT=bin/dev/refresh.snapshot bin/dev/RefreshTest restore -
+	$(call hxmc,bin/dev/RefreshTestChanged,$(DEV_VIEW_CP) -main RefreshTest $(HXMC_ARGS) -D hxmc.dev -D refresh_changed)
+	HXMC_DEV_SNAPSHOT=bin/dev/refresh.snapshot bin/dev/RefreshTestChanged restore - > bin/dev/refresh-changed.log 2>&1 || { cat bin/dev/refresh-changed.log; exit 1; }
+	cat bin/dev/refresh-changed.log; grep -q "main.tuned reset: its initial value changed" bin/dev/refresh-changed.log
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(DEV_VIEW_CP) -D hxmc.dev --run RefreshTest save bin/dev/refresh-eval.snapshot
 	ulimit -s unlimited 2>/dev/null || true; HXMC_DEV_SNAPSHOT=bin/dev/refresh-eval.snapshot $(TOOL) $(DEV_VIEW_CP) -D hxmc.dev --run RefreshTest restore -
 	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web

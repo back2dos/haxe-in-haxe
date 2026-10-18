@@ -246,6 +246,13 @@ resets it and says so:
 hxmc.dev: Counter.main.count reset: its type changed
 ```
 
+A signal's initial value is part of it too (its source, hashed, as React
+does for `useState`): editing `signal(0)` to `signal(5)` starts it at 5,
+and says so (`hxmc.dev: App.main.count reset: its initial value
+changed`); an edit elsewhere keeps its value. A class marked
+`@:hot(reset)` (or the function a signal is made in) keeps none of its
+signals: each build starts them afresh (React's `// @refresh reset`).
+
 Values go through `haxe.Serializer`, so a signal keeps data: numbers,
 strings, booleans, arrays, maps, structures, enums and class instances of
 data. A signal whose type is not data (a function, `Dynamic`, a node of the
