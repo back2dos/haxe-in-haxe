@@ -848,11 +848,13 @@ class Regalloc {
 			for (k in segAt[r]...segAt[r] + segN[r]) {
 				var x = segFrom[k], y = segTo[k];
 				if (y - x < 3) continue;
-				// the first call after x
+				// the first call at or after x (a range starting at a call:
+				// live into a block the call begins, or read by the call; one
+				// a definition starts begins after the instruction)
 				var lo = 0, hi = nc;
 				while (lo < hi) {
 					var mid = (lo + hi) >> 1;
-					if (coldCalls[mid] <= x) lo = mid + 1 else hi = mid;
+					if (coldCalls[mid] < x) lo = mid + 1 else hi = mid;
 				}
 				while (lo < nc && coldCalls[lo] + 1 < y) {
 					pairCall.push(lo);
