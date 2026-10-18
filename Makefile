@@ -200,7 +200,9 @@ help:
 ##             line layout, and a text sample through the atlas against packages/text/test/sample.png
 ## ui-check    packages/ui on Eval: the layout against Chromium's flexbox (layout-expected.json,
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
-##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx)
+##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx); the
+##             widgets' examples rendered and their reference complete (WidgetExamplesTest.hx; the
+##             reference written to bin/ui/widgets.json, WidgetDocs.hx)
 ## theme-check  packages/theme on Eval: Tailwind's classes read as rules, Tw's rules made at compile time,
 ##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
 ## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
@@ -215,7 +217,8 @@ help:
 ##             packages/ui/test/draw.png (also in a window, under Xvfb), then the todo example (markup, signals, widgets) driven
 ##             through its Ui and drawn against todo.png (Linux: Mesa, DejaVu Sans; BLESS=1 rewrites them)
 ## ui-web-check  the todo example as wasm32-wasi in headless Chromium, on WebGPU and WebGL2, driven by
-##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans)
+##             real pointer and keyboard events, against todo.png (packages/ui/test/web.mjs; DejaVu Sans);
+##             the native form (native-web.mjs); native text editors in a drawn window (web-field.mjs)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -662,6 +665,8 @@ ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run MarkupTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run GuideTest
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples/widgets --run WidgetExamplesTest
+	mkdir -p bin/ui; ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/test --run WidgetDocs packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/ui/examples/widgets bin/ui/widgets.json
 
 # random flex trees against Chromium (Playwright): a tool, not a lane
 ui-layout-fuzz: $(TOOL)
@@ -681,10 +686,10 @@ theme-dom-check: $(TOOL) $(PORT_BIN)
 	$(NODE) packages/theme/test/dom-fidelity.mjs bin/theme/dom bin/theme/dom/out
 
 theme-fidelity-check: $(TOOL) $(STD) $(HOST_RT)
-	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/src -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/theme/$(GFX_TARGET)/FidelityTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -cp packages/theme/test -main FidelityTest $(HXMC_ARGS) $(GFX_ARGS))
 	mkdir -p bin/theme/out && LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/theme/$(GFX_TARGET)/FidelityTest packages/theme/test/ref bin/theme/out
 
-UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples
+UI_CP := -cp packages/os/src -cp packages/gfx/src -cp packages/gfx/test -cp packages/text/src $(UI_VIEW) -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples
 ui-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/ui/$(GFX_TARGET)/UiDrawTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main UiDrawTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/ui/$(GFX_TARGET)/TodoTest$(call EXE,$(GFX_TARGET)),$(UI_CP) -main TodoTest $(HXMC_ARGS) $(GFX_ARGS))
@@ -706,6 +711,7 @@ ui-draw-check: ui-programs
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery.png bin/ui/$(GFX_TARGET)/gallery.png $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-dark.png bin/ui/$(GFX_TARGET)/gallery-dark.png --dark $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-rtl.png bin/ui/$(GFX_TARGET)/gallery-rtl.png --rtl $(if $(BLESS),--bless)
+	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/GalleryTest packages/ui/test/gallery-unstyled.png bin/ui/$(GFX_TARGET)/gallery-unstyled.png --unstyled $(if $(BLESS),--bless)
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/StressTest
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/EmojiTest packages/ui/test/emoji.png bin/ui/$(GFX_TARGET)/emoji.png
 	LIBGL_ALWAYS_SOFTWARE=1 env -u DISPLAY bin/ui/$(GFX_TARGET)/BoxTest packages/ui/test/boxes.png bin/ui/$(GFX_TARGET)/boxes.png
@@ -721,6 +727,8 @@ ui-web-check: $(TOOL) $(STD)
 	$(NODE) packages/ui/test/web.mjs bin/ui/WebTodo.wasm bin/ui
 	$(call hxmc,bin/ui/NativeForm.wasm,$(UI_CP) -main NativeForm $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
 	$(NODE) packages/ui/test/native-web.mjs bin/ui/NativeForm.wasm bin/ui
+	$(call hxmc,bin/ui/WebField.wasm,$(UI_CP) -main WebField $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(NODE) packages/ui/test/web-field.mjs bin/ui/WebField.wasm
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
 MACROS ?= verify

@@ -210,8 +210,9 @@ nodes (`MarkupTest.hx`: attributes from Style's properties), the popup widgets d
 100000 rows scrolled; the examples of `packages/ui/GUIDE.md`, run by
 `GuideTest.hx`). `make theme-check` (`@hxmc/theme`: Tailwind's class lists read as rules, Tw's rules made at compile time, shadcn's sheet made, the classes it rejects at compile time). Natively: `make
 ui-draw-check` (the sample UI, the todo example and the widget gallery,
-the last two driven through their Ui, drawn headless against `draw.png`,
-`todo.png` and `gallery.png`; `BoxTest`, boxes with their own corners' radii
+the last two driven through their Ui under @hxmc/theme's `Shadcn.sheet`, drawn headless against `draw.png`,
+`todo.png` and `gallery.png` (and the gallery dark, right to left, and
+with no sheet at all: `gallery-unstyled.png`, its frame only); `BoxTest`, boxes with their own corners' radii
 and sides' borders, a clip to rounded corners, box shadows (blurred, a
 spread ring, inset, several), boxes turned, scaled, skewed
 and nested, against Chromium's `boxes.png` (`box-ref.mjs` from
@@ -230,10 +231,17 @@ another process through libatspi, in a D-Bus session with AT-SPI's bus
 (at-spi2-core); on macOS in CI
 `TextInputTest` types through the window's text view and composes in it,
 `MacAccessTest` reads the accessibility tree through NSAccessibility and
-performs its actions; on Windows `WinAccessTest` calls the UI Automation
-providers through their COM interfaces and asks UI Automation for the
-window's element). In the browser: `make ui-web-check` (the native form on the DOM's own
-controls, `native-web.mjs`; the todo example for
+performs its actions, and drives the native views: a field (an
+NSTextField, a password's NSSecureTextField), a text area (an NSTextView),
+a context menu chosen from (NSMenu), the menu bar's item performed; on
+Windows `WinAccessTest` calls the UI Automation providers through their
+COM interfaces and asks UI Automation for the window's element, and drives
+the native views: an EDIT typed into and centred, a popup menu chosen
+from by keys). In the browser: `make ui-web-check` (the native form on the DOM's own
+controls, `native-web.mjs`; native text editors over a drawn window,
+the page's input and textarea, typed in, submitted, tabbed between drawn
+widgets and hidden under a popup, `web-field.mjs`; the todo example (its
+fields drawn) for
 wasm32-wasi in headless Chromium on WebGPU and WebGL2, driven by real pointer
 and keyboard events, an input method's composition through the DevTools
 protocol, against `todo.png`). CI runs all five in the `gfx` job.
