@@ -18,8 +18,11 @@
 // - <out>.wasm: in the browser. This serves a page at http://localhost:<port>/
 //   running it with the browser modules of the packages it uses (each
 //   package's imports.mjs, @hxmc/os's browser.mjs), and talks to it over a
-//   WebSocket (/__hxmc/ws). A reload: the page asks the module for its
-//   snapshot, keeps it in sessionStorage and loads again, with the new build.
+//   WebSocket (/__hxmc/ws). A reload swaps the new build in, in the same
+//   page: the running module snapshots and disposes (what it registered with
+//   the page dropped, its GPU objects released), and the new one runs from
+//   the snapshot against the same canvas and GPU device (WebGPU, or the
+//   canvas's WebGL2 context: ?gfx=webgl2); the page never loads again.
 // - anything else: a native program, started here with HXMC_DEV=<host:port>
 //   (this server's socket for it) and HXMC_DEV_SNAPSHOT=<file>. A reload: it
 //   writes its snapshot to that file and exits; the new build starts with it.
@@ -35,7 +38,8 @@
 //                     {"type":"log","text":<text>}         its output (the page's console)
 // The snapshot is a string: haxe.Serializer's of an array of strings, key,
 // type hash, value (Hot.save's encoding: haxe.Serializer's by default), ...
-// This prints one line per reload: `hxmc dev: reloaded in <n> ms (build <m> ms)`,
+// This prints one line per swap: `hxmc dev: swapped in <n> ms (build <m> ms)`
+// (a native program without the dev host: `reloaded`, a new process),
 // from the change seen to the new build's first frame.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -168,7 +172,7 @@ const fonts = [...packages.values()].some((p) => p.json.haxe.name === 'hxmc.text
 // --- the compilation server ---
 
 const log = (s) => {
-	if (!quiet || s.startsWith('hxmc dev: reloaded') || s.startsWith('hxmc dev: error')) console.log(s);
+	if (!quiet || s.startsWith('hxmc dev: swapped') || s.startsWith('hxmc dev: reloaded') || s.startsWith('hxmc dev: error')) console.log(s);
 };
 
 // hxmc's std, given last to each build as the compiler does to its own
@@ -297,7 +301,7 @@ function measured() {
 	if (!timing) return;
 	const t = timing;
 	timing = null;
-	log(`hxmc dev: reloaded in ${Math.round(performance.now() - t.seen)} ms (build ${t.build} ms)`);
+	log(`hxmc dev: ${browser ? 'swapped' : 'reloaded'} in ${Math.round(performance.now() - t.seen)} ms (build ${t.build} ms)`);
 }
 
 // natively: the program's connection
@@ -389,7 +393,10 @@ window.hxmcDevLoad.fonts.catch(() => {});
 <pre id="hxmc-dev-overlay" role="alert"></pre>
 <script type="module">
 import { run } from '/__hxmc/os/browser.mjs';
-const KEY = 'hxmc.dev.snapshot:' + location.pathname;
+// A new build is swapped in, in this page: the running one snapshots and
+// disposes (host.dispose(): what it registered dropped, its GPU objects
+// released), and the new one runs from the snapshot against the same
+// canvas and GPU device; the page never loads again.
 const overlay = document.getElementById('hxmc-dev-overlay');
 const show = (text) => {
 	overlay.innerHTML = '';
@@ -398,37 +405,74 @@ const show = (text) => {
 	overlay.append(b, text);
 	overlay.style.display = 'block';
 };
-const ws = new WebSocket('ws://' + location.host + '/__hxmc/ws');
-const send = (m) => ws.readyState === 1 ? ws.send(JSON.stringify(m)) : ws.addEventListener('open', () => ws.send(JSON.stringify(m)), { once: true });
-const restored = sessionStorage.getItem(KEY);
-sessionStorage.removeItem(KEY);
-const restoreBytes = restored === null ? null : new TextEncoder().encode(restored);
-let host = null, reloadFn = 0, snapshot = null;
-window.hxmcDev = { log: [], frames: 0 };
-const dev = (h) => {
-	host = h;
-	return { hxmc_dev: {
-		restore_length: () => restoreBytes === null ? -1 : restoreBytes.length,
-		restore_take: (p) => h.bytes(p, restoreBytes.length).set(restoreBytes),
-		register: (f) => (reloadFn = f),
-		send: (p, n) => (snapshot = new TextDecoder().decode(h.bytes(p, n).slice())),
-		frame: () => { window.hxmcDev.frames++; send({ type: 'frame' }); },
-	} };
-};
+let ws = null;
+const pending = [];
+const send = (m) => (ws && ws.readyState === 1 ? ws.send(JSON.stringify(m)) : pending.push(m));
+window.hxmcDev = { log: [], frames: 0, swaps: 0, gpu: null, canvas: null, instance: null };
 const out = (s) => { window.hxmcDev.log.push(s); console.log(s); send({ type: 'log', text: s }); };
-ws.onmessage = (e) => {
-	const m = JSON.parse(e.data);
-	if (m.type === 'error') show(m.message);
-	if (m.type === 'ok') overlay.style.display = 'none';
-	if (m.type === 'reload') {
-		if (host && reloadFn) host.call(reloadFn);
-		if (snapshot !== null) sessionStorage.setItem(KEY, snapshot);
-		location.reload();
+const IMPORTS = [${imports.map((p) => `'/__hxmc/pkg/${p.json.haxe.name}/imports.mjs'`).join(', ')}];
+const fonts = await window.hxmcDevLoad.fonts.catch(() => []);
+// the running build: its host, its reload callback, the snapshot it sent
+let current = null, gpu = null, canvases = [];
+async function start(wasm, restoreBytes) {
+	const state = { host: null, reloadFn: 0, snapshot: null };
+	const dev = (h) => {
+		state.host = h;
+		return { hxmc_dev: {
+			restore_length: () => restoreBytes === null ? -1 : restoreBytes.length,
+			restore_take: (p) => h.bytes(p, restoreBytes.length).set(restoreBytes),
+			register: (f) => (state.reloadFn = f),
+			send: (p, n) => (state.snapshot = new TextDecoder().decode(h.bytes(p, n).slice())),
+			frame: () => { window.hxmcDev.frames++; send({ type: 'frame' }); },
+		} };
+	};
+	current = state;
+	window.hxmcDev.instance = state;
+	await run(wasm, { imports: [...IMPORTS, dev], fonts, stdout: out, stderr: (s) => out(s), track: true, canvas: canvases[0], gpu,
+		// (?gfx=webgl2: WebGL2, even where WebGPU is)
+		gfx: new URLSearchParams(location.search).get('gfx') ?? undefined });
+	const g = state.host.gfx;
+	if (!gpu && g && g.device) gpu = window.hxmcDev.gpu = { adapter: g.adapter, device: g.device };
+	window.hxmcDev.canvas = state.host.os?.canvases?.[0] ?? document.querySelector('canvas');
+}
+// a new build: compiled as it arrives (the server holds it back until the
+// build ends; 409: it failed, the running one stays), then swapped in
+async function swap() {
+	const r = await fetch('/__hxmc/app.wasm?swap=' + Date.now());
+	if (!r.ok) return;
+	const module = await WebAssembly.compileStreaming(r);
+	const old = current;
+	let snapshot = null;
+	if (old && old.host) {
+		old.host.swapping = true;
+		if (old.reloadFn) old.host.call(old.reloadFn);
+		snapshot = old.snapshot;
+		old.host.dispose();
+		window.hxmcDev.left = old.host.gfx?.left ?? 0;
+		if (old.host.os?.canvases?.length) canvases = old.host.os.canvases;
 	}
-};
-ws.onclose = () => setTimeout(() => location.reload(), 1000);
-window.hxmcDevLoad.fonts.then((fonts) => run(window.hxmcDevLoad.wasm, { imports: [${imports.map((p) => `'/__hxmc/pkg/${p.json.haxe.name}/imports.mjs'`).join(', ')}${imports.length ? ', ' : ''}dev],
-	fonts, stdout: out, stderr: (s) => out(s) }))
+	await start(module, snapshot === null ? null : new TextEncoder().encode(snapshot));
+	window.hxmcDev.swaps++;
+}
+let swaps = Promise.resolve();
+const queueSwap = () => (swaps = swaps.then(swap).catch((e) => { show(String(e && e.stack || e)); send({ type: 'log', text: 'error: ' + (e && e.stack || e) }); }));
+// (the dev server's socket; gone, it is asked for again, and a build it made meanwhile swapped in)
+function connect(again) {
+	ws = new WebSocket('ws://' + location.host + '/__hxmc/ws');
+	ws.onopen = () => {
+		for (const m of pending.splice(0)) ws.send(JSON.stringify(m));
+		if (again) queueSwap();
+	};
+	ws.onmessage = (e) => {
+		const m = JSON.parse(e.data);
+		if (m.type === 'error') show(m.message);
+		if (m.type === 'ok') overlay.style.display = 'none';
+		if (m.type === 'reload') queueSwap();
+	};
+	ws.onclose = () => setTimeout(() => connect(true), 1000);
+}
+connect(false);
+swaps = start(window.hxmcDevLoad.wasm, null)
 	.catch((e) => { show(String(e && e.stack || e)); send({ type: 'log', text: 'error: ' + (e && e.stack || e) }); });
 </script></body></html>`;
 
@@ -449,7 +493,13 @@ const httpServer = http.createServer((req, res) => {
 	if (p === '/' || p === '/index.html') {
 		res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
 		res.end(page());
-	} else if (p === '/__hxmc/app.wasm') built.then(() => serveFile(res, out));
+	} else if (p === '/__hxmc/app.wasm') built.then(() => {
+		// (a swap after a build that failed: the running build stays)
+		if (lastError !== null && new URL(req.url, 'http://x').searchParams.has('swap')) {
+			res.writeHead(409, { 'cache-control': 'no-store' });
+			res.end();
+		} else serveFile(res, out);
+	});
 	else if (p === '/__hxmc/os/browser.mjs' && osPackage) serveFile(res, path.join(osPackage.dir, 'browser.mjs'));
 	else if (p.startsWith('/__hxmc/pkg/')) {
 		const [name, ...rest] = p.slice(12).split('/');
