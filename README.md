@@ -59,7 +59,9 @@ editors, lix and rebuilding the compiler from source:
 | `HXMC_MODULE_CACHE=0`, `-D hxmc.no-module-cache` | turn off the module cache (on by default: typed modules are kept between builds, a rebuild types only what changed) |
 
 Rebuilds only recompile changed modules; `haxe --wait 6000` plus
-`haxe --connect 6000 build.hxml` keeps everything in memory.
+`haxe --connect 6000 build.hxml` keeps everything in memory. `haxe --dev
+build.hxml` is the dev loop: it rebuilds on save and reloads the program,
+keeping its state ([docs/dev.md](docs/dev.md)).
 
 ## Libraries
 
@@ -113,6 +115,7 @@ commit (`make reference`).
 | | |
 | --- | --- |
 | [docs/using.md](docs/using.md) | npm packages, the launcher, editors and lix, libraries, fast rebuilds |
+| [docs/dev.md](docs/dev.md) | the dev loop: `hxmc dev`, live reload, fast refresh by keyed state, `hxmc.dev.Hot` for state libraries, the protocol |
 | [docs/development.md](docs/development.md) | repository layout, building, bootstrap, the developer loop |
 | [docs/testing.md](docs/testing.md) | the harnesses, hxmc's corpus, graphics tests, CI, benchmarks |
 | [docs/porting.md](docs/porting.md) | the rules for every change of the port |

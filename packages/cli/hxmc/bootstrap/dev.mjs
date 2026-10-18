@@ -1,7 +1,7 @@
 // `hxmc dev` and `haxe --dev` (docs/dev.md): the dev loop. Save a file, see
 // the change, keep where you were.
 //
-//   node dev.mjs <compiler> [--port <n>] [--quiet] <haxe arguments: build.hxml, ...>
+//   node dev.mjs <compiler> [--port <n>] [--host <address>] [--quiet] <haxe arguments: build.hxml, ...>
 //
 // The compiler (hxmc's native one: the npm package's haxe, or the tool) stays
 // resident as a compilation server (`--wait`: typed modules, lowered bodies
@@ -51,7 +51,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 function usage(msg) {
 	if (msg) console.error('hxmc dev: ' + msg);
-	console.error('usage: hxmc dev [--port <n>] <build.hxml | haxe arguments> (the output: --custom-target hxmc=<out>; <out>.wasm runs in the browser)');
+	console.error('usage: hxmc dev [--port <n>] [--host <address>] <build.hxml | haxe arguments> (the output: --custom-target hxmc=<out>; <out>.wasm runs in the browser)');
 	process.exit(2);
 }
 
@@ -61,10 +61,13 @@ const argv = process.argv.slice(2);
 const compiler = argv.shift();
 if (!compiler) usage('no compiler');
 let port = Number(process.env.HXMC_DEV_PORT ?? 4321);
+// (the page on this machine only; --host 0.0.0.0 shows it to the network: a phone)
+let host = process.env.HXMC_DEV_HOST ?? '127.0.0.1';
 let quiet = false;
 const args = [];
 for (let i = 0; i < argv.length; i++) {
 	if (argv[i] === '--port') port = Number(argv[++i]);
+	else if (argv[i] === '--host') host = argv[++i];
 	else if (argv[i] === '--quiet') quiet = true;
 	else args.push(argv[i]);
 }
@@ -479,7 +482,13 @@ async function rebuild(seen) {
 	}
 	building = true;
 	const t0 = performance.now();
+	// (natively: the running program's file moved aside, as a running executable cannot be written over)
+	const aside = out + '.running';
+	const moved = !browser && child !== null && fs.existsSync(out) && (() => {
+		try { fs.renameSync(out, aside); return true; } catch { return false; }
+	})();
 	const r = await build();
+	if (moved && !fs.existsSync(out)) fs.renameSync(aside, out);
 	const ms = Math.round(performance.now() - t0);
 	if (r.messages) (r.ok ? console.log : console.error)(r.messages);
 	if (!r.ok) {
@@ -530,8 +539,8 @@ for (const h of hxmls) fs.watch(h, () => changed(h));
 
 if (browser) {
 	await new Promise((resolve, reject) => {
-		httpServer.once('error', (e) => (e.code === 'EADDRINUSE' ? httpServer.listen(++port, resolve) : reject(e)));
-		httpServer.listen(port, resolve);
+		httpServer.once('error', (e) => (e.code === 'EADDRINUSE' ? httpServer.listen(++port, host, resolve) : reject(e)));
+		httpServer.listen(port, host, resolve);
 	});
 	log(`hxmc dev: http://localhost:${port}/ (${path.relative(cwd, out)}; watching ${watched.size} class paths)`);
 } else log(`hxmc dev: ${path.relative(cwd, out)} (watching ${watched.size} class paths)`);

@@ -1,7 +1,9 @@
 # The dev loop: live reload and fast refresh
 
 Save a file, see the change, keep where you were. Four steps, each useful on
-its own; the first two give most of it.
+its own; the first two give most of it. Steps 1 and 2 are built:
+[docs/dev.md](../dev.md) (how to use them, the primitives as built, the
+protocol, the times measured).
 
 ## Principles
 
