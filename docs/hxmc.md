@@ -588,10 +588,17 @@ are structs whose first field is a typed function reference (`call_ref`);
 array accesses and structural field accesses test the expected kind or
 layouts inline before falling back to the runtime; Ints of -128...1023 are
 boxed once; literals of 24 characters and more come from passive data
-segments; exceptions are the legacy try/catch instructions. The runtime is
-`hxmc/std/hxmc/rt/gc`: Haxe over intrinsics (`hxmc.rt.gc.W`, expanded by
-`FuncGen.host`), its `@:hxmc.wasmgc` classes the only ones whose
-`@:hxmc.host` functions are bound; Math's transcendental functions, float
+segments; exceptions are the legacy try/catch instructions. The natives of
+strings, StringBuf, arrays, Bytes, BytesBuffer and Date are the linear
+runtime's own (`Str`, `Arr`, `Bytes`, `Date`: `@:hxmc.anyHeap`), written
+over `hxmc.rt.Repr`, the representation chosen at compile time:
+`MemRepr` over `Mem` in linear memory, `hxmc.rt.gc.GcRepr` here, over
+intrinsics (`hxmc.rt.gc.W`, expanded by `FuncGen.host`); the rest of
+this runtime is `hxmc/std/hxmc/rt/gc` (Dynamic's comparisons, reflection
+over Meta's tables, the system over the host, what linear memory's
+generated code does inline), whose `@:hxmc.wasmgc` classes and the
+`@:hxmc.anyHeap` ones are the only ones whose `@:hxmc.host` functions are
+bound; Math's transcendental functions, float
 formatting and parsing are the host's (`hxmc/bootstrap/wasmgc.mjs`, which
 runs a module under node). `@:hxmc.lib` externs taking and returning
 numbers are the module's imports (`HXMC_WASM_IMPORTS`, as `wasi.mjs` takes

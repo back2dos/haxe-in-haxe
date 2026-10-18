@@ -36,6 +36,13 @@ extern class W {
 	static function arrKind(a:Dynamic):Int;
 	// a[i] boxed (null out of range)
 	static function arrGet(a:Dynamic, i:Int):Dynamic;
+	// a[i] of an array of Ints, Bools (0 or 1), Floats, Int64s, references (an
+	// array of another kind: converted; 0 or null out of range)
+	static function arrGetI(a:Dynamic, i:Int):Int;
+	static function arrGetB(a:Dynamic, i:Int):Int;
+	static function arrGetF(a:Dynamic, i:Int):Float;
+	static function arrGetL(a:Dynamic, i:Int):hxmc.I64;
+	static function arrGetP(a:Dynamic, i:Int):Dynamic;
 	// a[i] = v, unboxed (the array grows as Haxe's do)
 	static function arrSet(a:Dynamic, i:Int, v:Dynamic):Void;
 	static function arrNew(kind:Int, n:Int):Dynamic;
@@ -52,6 +59,8 @@ extern class W {
 	static function bytesFill(b:Dynamic, pos:Int, v:Int, n:Int):Void;
 	static function bytesGetI32(b:Dynamic, pos:Int):Int;
 	static function bytesSetI32(b:Dynamic, pos:Int, v:Int):Void;
+	static function bytesGetI64(b:Dynamic, pos:Int):hxmc.I64;
+	static function bytesSetI64(b:Dynamic, pos:Int, v:hxmc.I64):Void;
 	// reflection (hxmc.wasmgc.Meta): the class of an object, the names of its
 	// fields (class or anonymous structure: their order is objGet's), a field by index
 	static function classOf(o:Dynamic):Dynamic;
@@ -83,8 +92,10 @@ extern class W {
 	// a file's bytes (null when it cannot be read), written (appended)
 	static function readFile(path:String):Dynamic;
 	static function writeFile(path:String, b:Dynamic, append:Bool):Bool;
-	// GcDate's calendar (op codes there)
+	// the calendar (GcRepr's date fields: op codes there)
 	static function dateNum(op:Int, t:Float, y:Int, m:Int, d:Int, h:Int, mi:Int, s:Int):Float;
 	static function f32Bits(v:Float):Int;
 	static function bitsF32(v:Int):Float;
+	static function f64Bits(v:Float):hxmc.I64;
+	static function bitsF64(v:hxmc.I64):Float;
 }

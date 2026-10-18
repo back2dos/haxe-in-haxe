@@ -27,7 +27,7 @@ class WinSys {
 	@:hxmc.noGc static function wide(s:String):Ptr {
 		var n = Str.len(s);
 		var w = LibC.malloc(2 * n + 2);
-		LibC.memcpy(w, Str.chars(s), 2 * n);
+		LibC.memcpy(w, Str.unitsAddr(s), 2 * n);
 		Mem.setI16(w, 2 * n, 0);
 		return w;
 	}
@@ -43,7 +43,7 @@ class WinSys {
 	static function ofWide(w:Ptr):String {
 		var n = wlen(w);
 		var s = Str.make(n);
-		LibC.memcpy(Str.chars(s), w, 2 * n);
+		LibC.memcpy(Str.unitsAddr(s), w, 2 * n);
 		return s;
 	}
 

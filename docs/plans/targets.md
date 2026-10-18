@@ -198,17 +198,9 @@ generic code, Std.int out of range, BytesBuffer) and the identity hashes.
    only the boundary copies. A Bytes that must live in linear memory
    (vertex buffers rewritten each frame) would be an `hxmc.unsafe` buffer
    in the package, not a Bytes.
-3. **One implementation of each thing.** The runtime's natives are
-   duplicated (the table below): 1,300 lines of Haxe against the
-   linear runtime's own. Shareable: the algorithms of Str, Arr, Bytes,
-   Date and StringBuf, if they were written against a small layer
-   (length, read a unit, write a unit, allocate, copy) that each runtime
-   implements, one over `Mem` and one over `W`, chosen at compile time;
-   Dyn's reflection and comparison could share their logic but not their
-   tables (descriptors in memory against Meta's generated functions).
-   Not shareable, and needing none: the collector, the shadow stack, the
-   barriers. As the default, that refactoring should come first: two
-   copies of string handling are two places for each bug.
+3. **One implementation of each thing.** Done (2026-10-18, below): the
+   natives of Str, Arr, Bytes, Date and StringBuf are written once over
+   `hxmc.rt.Repr`, one implementation over `Mem` and one over `W`.
 4. **JavaScript interop.** WasmGC can hand Haxe objects to JavaScript by
    reference (and hold JavaScript objects as `externref`) where linear
    memory needs handle tables; worth having for `@hxmc/web`'s islands,
@@ -237,24 +229,40 @@ the site's examples in Chrome, Firefox and Safari; switch browser builds
 to WasmGC when those hold, with the shared natives (item 3) done first.
 Linear memory stays the WASI target and the fallback.
 
-#### The runtime it duplicates
+#### One runtime
 
-What the runtime duplicates (hxmc/std/hxmc/rt/gc against hxmc/std/hxmc/rt),
-and why. The rule: reuse the Haxe source where only the memory layer
-differs; write new code where the object model forces it.
+The natives of strings, StringBuf, arrays, Bytes, BytesBuffer and Date
+(`hxmc.rt.Str`, `Arr`, `Bytes`, `Date`) are one implementation for both
+paths (`@:hxmc.anyHeap`), written over `hxmc.rt.Repr`: the representation
+chosen at compile time, `MemRepr` over `Mem` (rt.h's layouts, the
+barriers) or `hxmc.rt.gc.GcRepr` over `W` (arrays of units and bytes, the
+arrays' kinds as wasm types). What a native means (index normalization,
+UTF-8 and UTF-16 conversion, number formatting and parsing, hashing,
+searching, sorting, the calendar's formats, errors) is written once;
+`Repr` is the storage: a string's units, an array's elements by kind,
+block copies, StringBuf's and BytesBuffer's storage, a date's fields. All
+of it inline, so linear memory's natives compile to what they did: every
+program of the corpus (185 executables and modules), the HaxeBenchmarks
+cases and the tool are byte-identical to before, natively and as wasm.
+WasmGC gets linear memory's semantics where its copies had drifted
+(`Array.insert` with a negative position, `String.indexOf` from a
+negative start, `Std.parseInt`'s 32-bit wrap, UTF-8 decoding, bounds
+errors), and FPHelper. Removed from `hxmc/std/hxmc/rt/gc`: GcStr's
+string natives, GcBuf, GcArr, GcBytes, GcBytesBuffer, GcDate (1,300 lines
+of duplicated natives to 380 of GcRepr's representation).
 
-| GC module | duplicates | why |
+What stays WasmGC's own, and why:
+
+| GC module | what | why |
 | --- | --- | --- |
-| GcStr | Str's string natives (concat, compare, hash, substr, split, parseInt, Std.string...) | Str reads units through Mem over the string's header and chars (77 Mem calls); a WasmGC string is an i16 array. The algorithms (FNV hash, Int64 digits, parseInt) are kept the same, line for line where possible |
-| GcArr | Arr's Array methods | Arr works on the slot/data layout with element kinds in the header (30 Mem calls); here the kinds are wasm types |
-| GcDyn, GcNative | Dyn's comparison and reflection (as hxmc.Native) | Dyn reads type descriptors and slots through Mem (146 calls); here the tables are Meta's and fields are reached by generated code |
-| GcBytes, GcBytesBuffer | Bytes' and BytesBuffer's natives | a Bytes is an i8 array, not malloc'd memory |
-| GcDate, GcSys | Date and WasiSys | the host's calendar and node's fs instead of libc/WASI over linear memory |
-| GcBuf | StringBuf's buffer | the same reason as GcStr |
+| GcRepr | the representation (W) | the counterpart of MemRepr |
+| GcStr | `hx_str_eq`, StringBuf.addChar's common case | linear memory's generated code does them inline (MirBuild) |
+| GcDyn, GcNative | Dynamic's comparison, Std.string's dispatch, reflection (as hxmc.Native) | Dyn reads type descriptors and slots through Mem (146 calls); here the tables are Meta's and fields are reached by generated code. Their shared part would be a few lines of comparison: moving it out of Dyn would change linear memory's code |
+| GcSys | WasiSys | the host's (node's) fs instead of WASI over linear memory |
 
-Not duplicated: everything above the natives (Std, Type, Reflect, the
-maps, haxe.Json, haxe.crypto...) is the same Haxe source. `sys.io.File`
-streams and processes are not supported.
+Not duplicated either: everything above the natives (Std, Type, Reflect,
+the maps, haxe.Json, haxe.crypto...) is the same Haxe source.
+`sys.io.File` streams and processes are not supported.
 
 ## Android
 

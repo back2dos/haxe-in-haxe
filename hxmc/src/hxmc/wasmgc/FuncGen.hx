@@ -1191,6 +1191,9 @@ class FuncGen {
 				case "arrSet":
 					all();
 					call(Helpers.arrSetDyn(m));
+				case "arrGetI" | "arrGetB" | "arrGetF" | "arrGetL" | "arrGetP":
+					all();
+					call(Helpers.arrGet(m, name.substr(w.length + 6).toLowerCase()));
 				case "arrNew":
 					all();
 					call(Helpers.arrNew(m));
@@ -1234,6 +1237,12 @@ class FuncGen {
 				case "bytesSetI32":
 					all();
 					call(Helpers.bytesSet(m, false));
+				case "bytesGetI64":
+					all();
+					call(Helpers.bytesGet(m, true));
+				case "bytesSetI64":
+					all();
+					call(Helpers.bytesSet(m, true));
 				case "f32Bits":
 					all();
 					op(0xB6);
