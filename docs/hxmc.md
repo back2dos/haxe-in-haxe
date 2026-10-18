@@ -238,11 +238,21 @@ hxmc target and implements `haxe.ds.Vector<T>` as an abstract over
 `hxmc.NativeArray<T>`. Indexing, length and construction inline to the same
 operations as NativeArray. `toData`/`fromData` share NativeArray storage;
 `toArray`/`fromArrayCopy` copy. `MkStd` keeps the upstream
-Vector for Eval and macros in the merged `bin/hxmc/std`, and for WasmGC
-(`-D hxmc.wasm-gc`), which does not implement NativeArray: there Vector is the
-original over an Array, its reads unchecked (`EArrGetU`). `make bench-arrays`
+Vector for Eval and macros in the merged `bin/hxmc/std`. `make bench-arrays`
 compares Array, NativeArray and Vector
 ([measurement notes](../hxmc/test/bench/README.md)).
+
+WasmGC (`-D hxmc.wasm-gc`, below) has the same NativeArray over the engine's
+arrays: one of a known element type is the bare GC array of its kind (i32,
+f64, i64, eqref, Bool i8), its accesses
+`array.get`/`array.set`/`array.len`, `blit` of one kind `array.copy`
+(`FuncGen.narray`); the empty arrays are one immutable global per kind. One
+of a Dynamic element is an `eqref`: reference storage is accessed inline
+(`br_on_cast`), other kinds and the wrapper (a struct of its storage and
+whether a view took it) through `Helpers.na*` and `rt/gc/GcNArray`, which
+has `rt/NArray`'s views, wrappers, copies, defaults and errors. There the
+engine checks every index too: an access out of bounds that the define
+leaves untested traps.
 
 `-D hxmc.native-array-outofbounds` decides what an index out of bounds
 does, at code generation (`Lower.bounds`, `FnLower.nativeRead`): not
@@ -256,7 +266,7 @@ test a dominating one decides (`v[i] += x` tests once with `throws`).
 The std's own loops use `unsafeGet`/`unsafeSet`, which are never tested;
 `blit` copies so when both ranges are in bounds, else element by element
 with the define's accesses. Dynamic indexing follows the define too
-(`Dyn.dynAget`, an error when it is not defined). The define is registered
+(`Dyn.dynAget`, WasmGC's `GcDyn.aget`; an error when it is not defined). The define is registered
 for `haxe --help-defines` by `hxmc.Defines`, leaving `haxe/src` unchanged.
 
 ## Module cache
@@ -704,7 +714,9 @@ by class and selector holding wrappers of the table's signature; closures
 are structs whose first field is a typed function reference (`call_ref`);
 array accesses and structural field accesses test the expected kind or
 layouts inline before falling back to the runtime (an Array's or a
-String's methods called structurally: `gc_anon_call`); Ints of -128...1023 are
+String's methods called structurally: `gc_anon_call`); `hxmc.NativeArray`
+(and so `haxe.ds.Vector`) is the engine's bare array of its kind (Native
+arrays, above); Ints of -128...1023 are
 boxed once; literals of 24 characters and more come from passive data
 segments; exceptions are the legacy try/catch instructions. The natives of
 strings, StringBuf, arrays, Bytes, BytesBuffer and Date are the linear
@@ -747,8 +759,10 @@ builds too. A runtime function
 not covered yet fails the build with its name; `HXMC_GC_SURVEY=1` lists
 every such construct of a program instead (`=2` also writes the module,
 those functions trapping). `make wasmgc-check` compares `hxmc/test/wasmgc`'s
-programs with their native output (`Unsafe.hx`: the linear memory); `make wasmgc-bench` adds the
-linear-memory build: times, peak RSS, sizes.
+programs (`Unsafe.hx`: the linear memory), and the corpus cases
+`GcCheck.CASES` that need nothing WasmGC lacks, with their native output (a
+program's `// define:` lines apply to both builds); `make wasmgc-bench`
+adds the linear-memory build: times, peak RSS, sizes.
 
 ## Origin
 

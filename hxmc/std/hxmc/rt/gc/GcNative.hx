@@ -236,8 +236,17 @@ class GcNative {
 
 	// ---- Dynamic access (o.name on a Dynamic)
 
-	@:hxmc.host("hx_dyn_get") static function dynGet(o:Dynamic, name:String):Dynamic
+	@:hxmc.host("hx_dyn_get") static function dynGet(o:Dynamic, name:String):Dynamic {
+		// (a String's, an Array's, a NativeArray's length, as hxmc.rt.Dyn's)
+		if (name.length == 6 && name == "length")
+			switch W.kind(o) {
+				case 4: return (o : String).length;
+				case 7: return W.arrLen(o);
+				case 11 if (W.naKind(o) >= 0): return W.naLen(o);
+				case _:
+			}
 		return getField(o, name);
+	}
 
 	@:hxmc.host("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
 		setField(o, name, v);

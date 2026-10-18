@@ -22,10 +22,6 @@
 
 package haxe.ds;
 
-// WasmGC has no NativeArray: there haxe.ds.Vector is the original, over an Array
-// (hxmc.MkStd).
-// mkstd: original if hxmc.wasm_gc
-
 private typedef VectorData<T> = hxmc.NativeArray<T>;
 
 /**

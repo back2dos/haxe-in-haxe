@@ -255,8 +255,15 @@ class FuncGen {
 			case ENewClos(l, _): "t" + m.lambdaTypeOf(l);
 			case ENewBox(t, _): "t" + m.boxType(t);
 			case ENewAnon(s, _): "t" + m.shapeType(s);
+			case ECallHost("hxmc_narray_new", [EInt(k), _], _): "t" + m.naType(GcModule.NA_KINDS[k]);
 			case _: rOf(e);
 		}
+
+	// the kind of the NativeArray storage e's static type is (GcModule.NA_KINDS), or null
+	function dataKind(e:Ex):Null<String> {
+		var k = wtype(e);
+		return k.charAt(0) == "t" ? m.naKindOf(Std.parseInt(k.substr(1))) : null;
+	}
 
 	// the value of e on the stack as a value of key k (keyOf: cast when a type)
 	function exprKey(e:Ex, k:String)
@@ -487,12 +494,7 @@ class FuncGen {
 	// br_on_cast_fail to the enclosing block (its result an eqref): the eqref on
 	// the stack not an array of kind k; else the array, then in tmp
 	function castArr(k:String):Int {
-		op(0xFB);
-		op(0x19);
-		op(1); // (nullable eqref in, a non-null array out)
-		Enc.uleb(b, 0);
-		op(0x6D);
-		Enc.sleb(b, m.arrType(k));
+		brOnCastFail(m.arrType(k));
 		var t = temp("t" + m.arrType(k));
 		localSet(t);
 		return t;
@@ -641,14 +643,8 @@ class FuncGen {
 	}
 
 	// br_on_cast_fail to the enclosing block (its result an eqref) unless the eqref on the stack has the layout
-	function castShape(s:ShapeInfo) {
-		op(0xFB);
-		op(0x19);
-		op(1);
-		Enc.uleb(b, 0);
-		op(0x6D);
-		Enc.sleb(b, m.shapeType(s));
-	}
+	function castShape(s:ShapeInfo)
+		brOnCastFail(m.shapeType(s));
 
 	var excCount = 0;
 
@@ -860,7 +856,8 @@ class FuncGen {
 			case EArrGet(t, a, i):
 				arrGet(GcModule.elemKind(t), a, i);
 			case EArrGetU(t, a, i):
-				// (unchecked: a Vector's; of references as an array's, for generic code, Vector<T>'s, reads one of any kind)
+				// (unchecked: upstream's Vector over an Array, which hxmc's std replaces; of
+				// references as an array's, for generic code, Vector<T>'s, reads one of any kind)
 				var k = GcModule.elemKind(t);
 				if (k == "p") arrGet(k, a, i) else {
 					exprAs(a, m.arrType(k));
@@ -1024,6 +1021,124 @@ class FuncGen {
 			case _: op(0x40);
 		}
 
+	// ---- hxmc.NativeArray (FnLower.nativeRead, nativeWrite; rt/gc/GcNArray):
+	// a NativeArray of a known element type is the bare data array of its kind,
+	// accessed directly; one of a Dynamic element may be storage of any kind or a
+	// wrapper (made for an erased type parameter), reference storage accessed
+	// inline, the rest through Helpers.naGet and GcNArray.set
+
+	// the most elements of each kind (MirBuild's: the same programs fail)
+	static final NA_LIMITS = [0x0FFFFFFD, 0x1FFFFFFA, 0x0FFFFFFD, 0x0FFFFFFD, 0x7FFFFFE8];
+
+	function narray(name:String, args:Array<Ex>) {
+		var p = m.dataType("p");
+		switch name {
+			case "hxmc_narray_new":
+				var kn = switch args[0] {
+					case EInt(k): k;
+					case _: unsupported("a NativeArray of a kind not constant");
+				};
+				var d = m.naType(GcModule.NA_KINDS[kn]);
+				// (1 to the most elements by one unsigned test; none: the empty array
+				// of the kind; else the error)
+				var n = temp("i");
+				expr(args[1]);
+				localTee(n);
+				i32(1);
+				op(0x6B);
+				i32(NA_LIMITS[kn]);
+				op(0x49);
+				op(0x04);
+				op(0x63);
+				Enc.sleb(b, d);
+				localGet(n);
+				gc(0x07, d);
+				op(0x05);
+				localGet(n);
+				op(0x45);
+				op(0x04);
+				op(0x63);
+				Enc.sleb(b, d);
+				op(0x23);
+				Enc.uleb(b, m.emptyArray(GcModule.NA_KINDS[kn]));
+				op(0x05);
+				call(m.exportOf("hx_narray_bad_length"));
+				op(0x00);
+				op(0x0B);
+				op(0x0B);
+				release("i", n);
+			case "hxmc_narray_length":
+				var k = dataKind(args[0]);
+				expr(args[0]);
+				if (k != null) gc(0x0F) else call(Helpers.naLen(m));
+			case "hxmc_narray_dget":
+				// (reference storage inline: the eqref left for the slow path when not)
+				var ix = inLocal(args[1]);
+				op(0x02);
+				op(0x6D);
+				frames.push(FPlain);
+				op(0x02);
+				op(0x6D);
+				frames.push(FPlain);
+				expr(args[0]);
+				brOnCastFail(p);
+				localGet(ix.l);
+				gc(0x0B, p);
+				op(0x0C);
+				Enc.uleb(b, 1);
+				end();
+				localGet(ix.l);
+				call(Helpers.naGet(m));
+				end();
+				ix.done();
+			case "hxmc_narray_dset":
+				var ix = inLocal(args[1]), vx = inLocal(args[2]);
+				block(FPlain, 0x02);
+				op(0x02);
+				op(0x6D);
+				frames.push(FPlain);
+				expr(args[0]);
+				brOnCastFail(p);
+				localGet(ix.l);
+				localGet(vx.l);
+				gc(0x0E, p);
+				op(0x0C);
+				Enc.uleb(b, 1);
+				end();
+				localGet(ix.l);
+				localGet(vx.l);
+				call(m.exportOf("hx_narray_set_slow"));
+				end();
+				vx.done();
+				ix.done();
+			case _ if (StringTools.startsWith(name, "hxmc_narray_get_")):
+				var k = name.substr(name.length - 1), d = m.naType(k);
+				exprAs(args[0], d);
+				expr(args[1]);
+				// (Bools: unsigned bytes)
+				gc(k == "b" ? 0x0D : 0x0B, d);
+			case _ if (StringTools.startsWith(name, "hxmc_narray_set_")):
+				var d = m.naType(name.substr(name.length - 1));
+				exprAs(args[0], d);
+				expr(args[1]);
+				expr(args[2]);
+				gc(0x0E, d);
+			case _:
+				unsupported("the intrinsic " + name);
+		}
+	}
+
+	// br_on_cast_fail to the enclosing block (its result an eqref) unless the
+	// eqref on the stack is a (non-null) t; else that, as a t
+	function brOnCastFail(t:Int) {
+		op(0xFB);
+		op(0x19);
+		op(1);
+		Enc.uleb(b, 0);
+		op(0x6D);
+		Enc.sleb(b, t);
+	}
+
 	// the value on the stack (of type t) boxed, as Dynamic
 	function boxTop(t:Ty)
 		m.box(b, t);
@@ -1106,6 +1221,10 @@ class FuncGen {
 				switch n {
 					case "String": test(m.stringType);
 					case "Array": test(m.arrBaseType);
+					case "hxmc_NativeArray":
+						call(Helpers.naKind(m));
+						i32(0);
+						op(0x4E);
 					case "Bool": test(m.dynType(TBool));
 					case "Int" | "Float" | "Dynamic":
 						call(Helpers.kind(m));
@@ -1143,6 +1262,10 @@ class FuncGen {
 				expr(a);
 		if (StringTools.startsWith(name, "hxmc_unsafe_Mem_")) {
 			mem(name.substr(16), args);
+			return;
+		}
+		if (StringTools.startsWith(name, "hxmc_narray_")) {
+			narray(name, args);
 			return;
 		}
 		var w = "hxmc_rt_gc_W_";
@@ -1291,6 +1414,47 @@ class FuncGen {
 				case "arrBlit":
 					all();
 					call(Helpers.arrBlit(m));
+				case "naKind":
+					all();
+					call(Helpers.naKind(m));
+				case "naNew":
+					all();
+					call(Helpers.naNew(m));
+				case "naLen":
+					all();
+					call(Helpers.naLen(m));
+				case "naGet":
+					all();
+					call(Helpers.naGet(m));
+				case "naSet":
+					all();
+					call(Helpers.naSet(m));
+				case "naCopy":
+					// (storage of one kind known here: array.copy inline)
+					var k = dataKind(args[0]);
+					if (k != null && dataKind(args[2]) == k) {
+						all();
+						gc(0x11, m.naType(k), m.naType(k));
+						i32(1);
+					} else {
+						all();
+						call(Helpers.naCopy(m));
+					}
+				case "naStorage":
+					all();
+					call(Helpers.naStorage(m));
+				case "naWrap":
+					all();
+					i32(0);
+					gc(0x00, m.nwrapType);
+				case "naSetStorage":
+					exprAs(args[0], m.nwrapType);
+					expr(args[1]);
+					gc(0x05, m.nwrapType, 0);
+				case "naFix":
+					exprAs(args[0], m.nwrapType);
+					i32(1);
+					gc(0x05, m.nwrapType, 1);
 				case "bytesNew":
 					all();
 					gc(0x07, m.bytesType);
@@ -1401,12 +1565,6 @@ class FuncGen {
 			case "hx_dyn_call":
 				all();
 				call(m.dynCall());
-			case "hx_dyn_aget":
-				all();
-				call(Helpers.arrGetDyn(m));
-			case "hx_dyn_aset":
-				all();
-				call(Helpers.arrSetDyn(m));
 			case "haxe_io_Bytes_alloc":
 				all();
 				gc(0x07, m.bytesType);
@@ -1748,7 +1906,8 @@ class FuncGen {
 			case "ult":
 				expr(args[0]);
 				expr(args[1]);
-				op(0x54);
+				// (Ints: NativeArray's bounds tests, FnLower.inBounds)
+				op(rOf(args[0]) == "i" ? 0x49 : 0x54);
 			case "f64Bits":
 				expr(args[0]);
 				op(0xBD);

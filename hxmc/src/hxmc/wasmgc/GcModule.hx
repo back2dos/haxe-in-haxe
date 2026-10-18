@@ -16,6 +16,9 @@ import hxmc.wasmgc.GcGen.Uses;
 //     go through a funcref table indexed by class x selector (call_indirect)
 //   $String: array (mut i16), UTF-16
 //   $ArrBase {len}, $Arr_k {len, data: $Data_k} (k: i32, i64, f64, eqref)
+//   hxmc.NativeArray of a known element type: the bare $Data_k (Bool: $NBool,
+//     array (mut i8)); one made for an erased type parameter $NWrap {storage,
+//     fixed} (rt/gc/GcNArray)
 //   $Enum {tag}, a constructor with arguments a subtype {tag, args...}
 //   $Clos_s {fn: (ref $Fn_s)}, a closure a subtype with its captures; $Fn_s
 //     takes the closure first
@@ -33,6 +36,8 @@ class GcModule {
 	var tString = -1;
 	var tBytes = -1; // haxe.io.Bytes: array (mut i8)
 	var tArrBase = -1;
+	var tNWrap = -1; // a NativeArray made for an erased type parameter: {storage, fixed}
+	var tNBool = -1; // a NativeArray<Bool>: array (mut i8)
 	final tData = new Map<String, Int>(); // by kind
 	final tArr = new Map<String, Int>();
 	var tEnum = -1;
@@ -245,6 +250,8 @@ class GcModule {
 			case TRef(RObj(c)) if (!c.isInterface): "t" + classType(c);
 			case TRef(RStr): "t" + tString;
 			case TRef(RArr(_)): "t" + tArrBase;
+			// (of a Dynamic element: storage of any kind, or a wrapper)
+			case TRef(RNativeArr(e)) if (!e.match(TRef(RAny))): "t" + naType(elemKind(e));
 			case TRef(REnum(e)): "t" + (e == null ? tEnum : enumBase(e));
 			case TRef(RClos(s)): "t" + closType(s);
 			case TRef(RNative("haxe_io_Bytes")): "t" + tBytes;
@@ -304,6 +311,10 @@ class GcModule {
 		tFunBase = structType([], -1, true);
 		// {added fields (GcFields), layout index}
 		tAnonBase = structType([{r: "p", mut: true}, {r: "i", mut: true}], -1, true);
+		// {storage, fixed: a typed view took it}
+		tNWrap = structType([{r: "p", mut: true}, {r: "i", mut: true}], -1, false);
+		// (a NativeArray's Bools: one byte each, as natively)
+		tNBool = arrayType(b -> b.u8(0x78));
 		for (k in ["i", "f", "l", "b"])
 			tDyn.set(k, structType([{r: k == "b" ? "i" : k, mut: false}], -1, false));
 		for (k in ["i", "f", "l", "p"])
@@ -880,6 +891,42 @@ class GcModule {
 
 	public function dataType(k:String):Int
 		return tData.get(k);
+
+	// a NativeArray's storage of the kind: an Array's data array, but Bool's packed (i8)
+	public function naType(k:String):Int
+		return k == "b" ? tNBool : tData.get(k);
+
+	// the kind of NativeArray storage of the type, or null
+	public function naKindOf(t:Int):Null<String> {
+		for (k in NA_KINDS)
+			if (naType(k) == t) return k;
+		return null;
+	}
+
+	// a NativeArray's element kinds by their numbers (FnLower.nativeKind, rt.Types.AK_*)
+	public static final NA_KINDS = ["p", "i", "f", "l", "b"];
+
+	public var nwrapType(get, never):Int;
+
+	function get_nwrapType()
+		return tNWrap;
+
+	// the NativeArray of no elements of the kind (an immutable global): typed
+	// code makes no other (FuncGen, as MirBuild.EMPTY_ARRAY)
+	final emptyGlobal = new Map<String, Int>();
+
+	public function emptyArray(k:String):Int {
+		var g = emptyGlobal.get(k);
+		if (g != null) return g;
+		var tb = new Buf();
+		refType(tb, naType(k), false);
+		var ib = new Buf();
+		gc(ib, 0x08, naType(k), 0);
+		ib.u8(0x0B);
+		g = newGlobal(tb, ib, false);
+		emptyGlobal.set(k, g);
+		return g;
+	}
 
 	// an array's element kind in the IR: b for Bool, else its representation
 	public static function elemKind(t:Ty):String

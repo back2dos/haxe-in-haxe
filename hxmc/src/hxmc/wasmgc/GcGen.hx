@@ -40,12 +40,15 @@ class GcGen {
 	}
 
 	// the runtime's exports this target's code calls for an expression
-	// (FuncGen: structural access it does not know the layout of, enum comparisons)
+	// (FuncGen: structural access it does not know the layout of, enum
+	// comparisons, NativeArray's error and slow path)
 	static function runtimeCalls(e:Ex):Null<String>
 		return switch e {
 			case EAnonGet(_): "gc_anon_get";
 			case ECallAnon(_): "gc_anon_call";
 			case ECallHost("hxmc_rt_gc_W_enumEq", _, _): "gc_dyn_eq";
+			case ECallHost("hxmc_narray_new", _, _): "hx_narray_bad_length";
+			case ECallHost("hxmc_narray_dset", _, _): "hx_narray_set_slow";
 			case _: null;
 		}
 }

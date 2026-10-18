@@ -64,7 +64,10 @@ Started (2026-10-17) behind `-D hxmc.wasm-gc` to compare the two collectors
 (docs/hxmc.md, "WasmGC"): the IR after Lower, emitted directly, with a
 runtime of its own in Haxe over intrinsics. Every HaxeBenchmarks case runs,
 its check identical on every target (`make bench`'s `hxmc-wasmgc` target);
-`make wasmgc-check` compares `hxmc/test/wasmgc`'s programs with native.
+`make wasmgc-check` compares `hxmc/test/wasmgc`'s programs (and the
+NativeArray and Vector corpus cases) with native. `hxmc.NativeArray` and the
+std's Vector over it are the same as natively (docs/hxmc.md, "Native
+arrays"): a Vector is the engine's bare array of its kind.
 
 #### Performance against linear memory (2026-10-18)
 
@@ -392,6 +395,7 @@ What stays WasmGC's own, and why:
 | --- | --- | --- |
 | GcRepr | the representation (W) | the counterpart of MemRepr |
 | GcStr | `hx_str_eq`, StringBuf.addChar's common case | linear memory's generated code does them inline (MirBuild) |
+| GcNArray | NArray's NativeArray views, wrappers, copies, defaults and errors | the same logic over W.na*: a NativeArray is the engine's array of its kind, its kind its wasm type, a wrapper a struct |
 | GcDyn, GcNative | Dynamic's comparison, Std.string's dispatch, reflection (as hxmc.Native) | Dyn reads type descriptors and slots through Mem (146 calls); here the tables are Meta's and fields are reached by generated code. Their shared part would be a few lines of comparison: moving it out of Dyn would change linear memory's code |
 | GcSys | WasiSys | the host's (node's) fs instead of WASI over linear memory |
 

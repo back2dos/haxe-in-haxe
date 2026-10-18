@@ -4,7 +4,8 @@ package hxmc;
 	Fixed-size, GC-managed storage specialized for its element type.
 
 	Bool uses 8-bit elements, Int uses 32 bits, Float and Int64 use 64 bits,
-	and other types use references (including boxed nullable numbers).
+	and other types use references (including boxed nullable numbers). With
+	`-D hxmc.wasm-gc`, it is the engine's array of that type.
 	Elements start at zero, false or null. Out of bounds, `-D
 	hxmc.native-array-outofbounds` decides: not tested when not defined,
 	`throws`, `silent` (as haxe.ds.Vector). Casts between storage types are
@@ -58,6 +59,10 @@ package hxmc;
 	**/
 	public static inline function blit<T>(src:NativeArray<T>, srcPos:Int, dest:NativeArray<T>, destPos:Int, length:Int):Void {
 		var inBounds = (srcPos | destPos | length) >= 0 && length <= src.length - srcPos && length <= dest.length - destPos;
+		#if hxmc.wasm_gc
+		// (-D hxmc.wasm-gc: storage of one kind by array.copy, which overlapping ranges take too)
+		if (inBounds && hxmc.rt.gc.W.naCopy(dest, destPos, src, srcPos, length)) {} else
+		#end
 		if (src == dest && srcPos < destPos) {
 			var i = length;
 			if (inBounds)

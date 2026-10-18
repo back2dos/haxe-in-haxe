@@ -241,8 +241,8 @@ help:
 ##             (ARRAY_BENCH_ARGS="65536 128 7 bin/vector-bench/results.json")
 ## measure     peak memory and time of the self-compile (ours, the reference) and of the
 ##             tool's builds (haxe/test/Measure.hx)
-## wasmgc-check  -D hxmc.wasm-gc (WasmGC, an experiment): hxmc/test/wasmgc's programs as WasmGC
-##             modules under node, their output against the native build's (hxmc/test/GcCheck.hx);
+## wasmgc-check  -D hxmc.wasm-gc (WasmGC, an experiment): hxmc/test/wasmgc's programs and a few corpus
+##             cases as WasmGC modules under node, their output against the native build's (hxmc/test/GcCheck.hx);
 ##             wasmgc-bench adds linear-memory wasm: times, peak RSS, sizes
 ## quick       after every edit (under a minute): the tool, then the x64 corpus, again with
 ##             RT_VERIFY=1, and the wasm corpus under node (CASES restricts the corpus)

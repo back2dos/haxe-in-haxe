@@ -50,6 +50,27 @@ extern class W {
 	static function arrSetLen(a:Dynamic, n:Int):Void;
 	// dst[di...di+n] = src[si...si+n] (one kind, dst long enough)
 	static function arrBlit(dst:Dynamic, di:Int, src:Dynamic, si:Int, n:Int):Void;
+	// hxmc.NativeArray (GcNArray): storage is an array of its kind (0 references,
+	// 1 Int, 2 Float, 3 Int64, 4 Bool: rt.Types.AK_*); a wrapper holds storage.
+	// The kind: the storage's, 5 a wrapper no typed view took yet, 6 one a view
+	// took (AK_OPEN, AK_WRAP); -1 not a NativeArray
+	static function naKind(a:Dynamic):Int;
+	// new storage, zeroed
+	static function naNew(kind:Int, n:Int):Dynamic;
+	// the length, element i boxed, set unboxed for the kind (unchecked): of a
+	// wrapper, its storage's
+	static function naLen(a:Dynamic):Int;
+	static function naGet(a:Dynamic, i:Int):Dynamic;
+	static function naSet(a:Dynamic, i:Int, v:Dynamic):Void;
+	// dst[di...di+n] = src[si...si+n] (in bounds, overlapping too) when both are
+	// storage of one kind, and true; else false
+	static function naCopy(dst:Dynamic, di:Int, src:Dynamic, si:Int, n:Int):Bool;
+	// a's storage: a itself, unless a wrapper
+	static function naStorage(a:Dynamic):Dynamic;
+	// a new wrapper of the storage (kind 5), its storage replaced, fixed (kind 6)
+	static function naWrap(s:Dynamic):Dynamic;
+	static function naSetStorage(w:Dynamic, s:Dynamic):Void;
+	static function naFix(w:Dynamic):Void;
 	// haxe.io.Bytes: an array of bytes
 	static function bytesNew(n:Int):Dynamic;
 	static function bytesLen(b:Dynamic):Int;

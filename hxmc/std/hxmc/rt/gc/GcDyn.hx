@@ -63,6 +63,45 @@ class GcDyn {
 		return (r : Dynamic);
 	}
 
+	// a[i] on a Dynamic: an Array's (null out of range), a NativeArray's (out
+	// of bounds as -D hxmc.native-array-outofbounds says for typed access, the
+	// default of its storage's kind when silent; an error when it is not
+	// defined), else null
+	@:hxmc.host("hx_dyn_aget") static function aget(a:Dynamic, i:Int):Dynamic {
+		if (Std.isOfType(a, Array)) return W.arrGet(a, i);
+		if (W.naKind(a) < 0) return null;
+		var n = W.naLen(a);
+		if (i < 0 || i >= n) {
+			#if (hxmc.native_array_outofbounds == "silent")
+			return GcNArray.defaultOf(a);
+			#elseif (hxmc.native_array_outofbounds == "throws")
+			throw GcNArray.outOfBounds(i, n, null, 0, null, null);
+			#else
+			throw "Invalid NativeArray index";
+			#end
+		}
+		return W.naGet(a, i);
+	}
+
+	@:hxmc.host("hx_dyn_aset") static function aset(a:Dynamic, i:Int, v:Dynamic):Void {
+		if (Std.isOfType(a, Array)) {
+			W.arrSet(a, i, v);
+			return;
+		}
+		if (W.naKind(a) < 0) throw "Invalid array access";
+		var n = W.naLen(a);
+		if (i < 0 || i >= n) {
+			#if (hxmc.native_array_outofbounds == "silent")
+			return;
+			#elseif (hxmc.native_array_outofbounds == "throws")
+			throw GcNArray.outOfBounds(i, n, null, 0, null, null);
+			#else
+			throw "Invalid NativeArray index";
+			#end
+		}
+		GcNArray.set(a, i, v);
+	}
+
 	// (for the generated code's enum comparisons: hxmc.wasmgc.Meta.enumEq)
 	@:hxmc.export("gc_dyn_eq") static function dynEqExport(a:Dynamic, b:Dynamic):Bool
 		return eq(a, b);
@@ -86,6 +125,8 @@ class GcDyn {
 				b.toString();
 			case 8: "<function>";
 			case 9: @:privateAccess Str.ofI64(W.unboxI64(v));
+			// (the runtime type's name, as hxmc.rt.Dyn's)
+			case 11 if (W.naKind(v) >= 0): "hxmc.NativeArray";
 			case _: "[object]";
 		}
 
