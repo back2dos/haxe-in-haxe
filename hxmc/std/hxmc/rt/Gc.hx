@@ -782,7 +782,9 @@ class Gc {
 
 	@:hxmc.noGc static function majorCollect(need:I64) {
 		majors++;
+		#if hxmc.gc_prefault
 		if (pfState > 0) prefaultCancel();
+		#end
 		fromStart = oldStart;
 		fromEnd = oldPtr;
 		curRegion ^= 1;
@@ -934,19 +936,23 @@ class Gc {
 		m.value.hw = m.value.sp;
 	}
 
+	#if hxmc.gc_prefault
 	// ---- the old space's pages, faulted in ahead of the minor collections
-	// by a helper thread (Linux; RT_PREFAULT=0: none). A page a collection
-	// copies into for the first time costs it a fault and the kernel's
-	// zeroing of the page (the port's self-build: a tenth of the time of
-	// its main thread's minor collections). After each minor collection the
-	// helper is asked for the pages up to as much past the end of the old
-	// space as the collection promoted (PF_MIN to PF_MAX); it touches each
-	// page with an atomic addition of zero, which leaves a word the
-	// collector or an allocation of a large object writes meanwhile as it
-	// is. It starts once the old space passes PF_START (small programs never
-	// start it), and a major collection drops what is left of its requests
-	// (pfGen). It never runs Haxe code: it is no mutator, collections do
-	// not wait for it.
+	// by a helper thread (Linux; RT_PREFAULT=0: none). Opt-in, with -D
+	// hxmc.gc-prefault (the compilers' builds pass it): it trades CPU time
+	// for wall time (the HaxeBenchmarks' alloc: 7.6% less wall time, 20%
+	// more CPU time). A page a collection copies into for the first time
+	// costs it a fault and the kernel's zeroing of the page (the port's
+	// self-build: a tenth of the time of its main thread's minor
+	// collections), on the collection's critical path. After each minor
+	// collection the helper is asked for the pages up to as much past the
+	// end of the old space as the collection promoted (PF_MIN to PF_MAX); it
+	// touches each page with an atomic addition of zero, which leaves a word
+	// the collector or an allocation of a large object writes meanwhile as
+	// it is. It starts once the old space passes PF_START (small programs
+	// never start it), and a major collection drops what is left of its
+	// requests (pfGen). It never runs Haxe code: it is no mutator,
+	// collections do not wait for it.
 	static inline var PF_START = 64 << 20;
 	static inline var PF_MIN = 4 << 20;
 	static inline var PF_MAX = 16 << 20;
@@ -1022,6 +1028,7 @@ class Gc {
 		}
 		return Ptr.nil();
 	}
+	#end
 
 	// a collection, with every other thread stopped (unless another thread
 	// collected meanwhile: the caller then retries its allocation)
@@ -1037,7 +1044,9 @@ class Gc {
 				youngBytes += used;
 				promotedBytes += oldPtr.diff(before);
 				if (!minorFixed) adaptNursery(oldPtr.diff(before), used, allocating);
+				#if hxmc.gc_prefault
 				if (pfState >= 0) prefaultAhead(oldPtr.diff(before));
+				#end
 			}
 		}
 		allocating = 0;
@@ -1297,7 +1306,9 @@ class Gc {
 		#end
 		releasePages = Os.envInt("RT_RELEASE", 1) != 0;
 		gcBfs = Os.has("RT_BFS");
+		#if hxmc.gc_prefault
 		if (Os.envInt("RT_PREFAULT", 1) == 0) pfState = -1;
+		#end
 		// transparent huge pages for the heap: the old space grows by hundreds of
 		// MB and is copied into fresh pages, so 4 KB page faults add up
 		hugePages = L.MADV_HUGEPAGE != 0 && Os.envInt("RT_HUGE", 0) != 0; // opt-in: it costs more kernel time than it saves here

@@ -88,16 +88,19 @@ SCRIPT := ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp hax
 # the hxmc target: bin/hxmc/std (hxmc/std merged with the Eval originals for
 # macros), given last
 HXMC_ARGS := -cp bin/hxmc/std --custom-target hxmc
+# the compilers' runtime: the collector's helper thread that faults in the old
+# space's pages ahead of the minor collections (less wall time, more CPU time)
+COMPILER_ARGS := -D hxmc.gc-prefault
 # the tool is the port (haxe/src) with hxmc (hxmc/src) as
 # its generate hook, typed against hxmc's std, without the port's other
 # target generators
 TOOL_CP := -cp haxe/src -cp hxmc/src -main hxmc.Main -D disable-parallelism -D hih_no_generators -cp bin/hxmc/std
-TOOL_ARGS := $(TOOL_CP) --custom-target hxmc
+TOOL_ARGS := $(TOOL_CP) $(COMPILER_ARGS) --custom-target hxmc
 # the port (typed with -D disable-parallelism; the binary runs its parallel
 # passes unless its own invocation passes that define)
-PORT_ARGS := -cp haxe/src -main haxe.Main -D disable-parallelism $(HXFLAGS) $(HXMC_ARGS)
+PORT_ARGS := -cp haxe/src -main haxe.Main -D disable-parallelism $(COMPILER_ARGS) $(HXFLAGS) $(HXMC_ARGS)
 # `haxe` with hxmc built in (the npm package's compiler: every generator)
-PKG_ARGS := -cp haxe/src -cp hxmc/src -main hxmc.HaxeMain -D disable-parallelism $(HXMC_ARGS)
+PKG_ARGS := -cp haxe/src -cp hxmc/src -main hxmc.HaxeMain -D disable-parallelism $(COMPILER_ARGS) $(HXMC_ARGS)
 EXE = $(if $(findstring windows,$(1)),.exe)
 RELEASE_BIN := bin/release/$(TARGET)/haxe$(call EXE,$(TARGET))
 LIX_BIN := bin/release/$(TARGET)/lix$(call EXE,$(TARGET))

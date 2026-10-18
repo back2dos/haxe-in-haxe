@@ -156,10 +156,12 @@ collections and promote less of what they are working on (the tool's
 parallel code generation: 256 MB). Threads take at most 64 KB of it at a time
 (their TLAB, zeroed while it fits in the cache; `RT_TLAB_KB`), in fresh
 pages up to a 2 MB boundary, so that no two threads fault in the same
-transparent huge page. On Linux, once the old space passes 64 MB, a helper
-thread faults in its pages ahead of the minor collections, which would
-otherwise wait for the kernel to zero each fresh page they copy into
-(`RT_PREFAULT=0`: no helper). `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
+transparent huge page. With `-D hxmc.gc-prefault` (the compilers' builds
+pass it: `COMPILER_ARGS`), on Linux, once the old space passes 64 MB, a
+helper thread faults in its pages ahead of the minor collections, which
+would otherwise wait for the kernel to zero each fresh page they copy into
+(`RT_PREFAULT=0`: no helper). It trades CPU time for wall time: the
+HaxeBenchmarks' alloc takes 7.6% less wall time and 20% more CPU time with it. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 

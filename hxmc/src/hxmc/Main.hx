@@ -20,7 +20,9 @@ package hxmc;
 //   -D hxmc.native-array-outofbounds=throws|silent
 //                                   NativeArray/Vector accesses out of bounds throw, or read the
 //                                   default and write nothing (default: not tested)
-//   HXMC_RT_OBJ                     the runtime object (default: <tool dir>/rt/<target>/rt.o)
+//   -D hxmc.gc-prefault             Linux: the collector faults in the old space's pages on a helper
+//                                   thread: less wall time for more CPU time (the compilers' builds)
+//   HXMC_RT_OBJ                    the runtime object (default: <tool dir>/rt/<target>/rt.o)
 //   HXMC_STATS=1                    print what the build did and how long it took
 class Main {
 	static var start = haxe.Timer.stamp();
