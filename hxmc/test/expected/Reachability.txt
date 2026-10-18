@@ -1,0 +1,15 @@
+exit 0
+4
+3
+derived
+found by Reflect.field
+42
+byReflection,get_answer,kept,name
+byReflection true
+get_answer true
+kept true
+name true
+12
+Square(5)
+first second
+derived
