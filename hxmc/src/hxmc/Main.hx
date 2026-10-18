@@ -15,6 +15,8 @@ package hxmc;
 //   -D hxmc.shared                  a shared library (Linux in the glibc mode; Android's is always one: an
 //                                   output ending in .apk is an APK holding it, hxmc.android.Apk)
 //   -D hxmc.exports=<names>         the names a shared library exports
+//   -D hxmc.output=<path>           the output, instead of --custom-target's (hxmc dev: the iOS
+//                                   simulator's builds as dylibs, where the build names its app)
 //   -D hxmc.no-frame-pointers       x86-64: no frame record in functions (the default keeps one, for
 //                                   perf -g and debuggers; HXMC_FRAME_POINTERS=0 off; arm64 always)
 //   -debug                          source lines for debuggers (DWARF on ELF and Mach-O), symbols

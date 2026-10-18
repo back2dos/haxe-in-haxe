@@ -22,7 +22,7 @@ class Driver {
 
 	function new(prog:Program, out:String, o:Options) {
 		this.o = o;
-		this.out = out;
+		this.out = o.output != null ? o.output : out;
 		prep = new Prep(prog);
 		abi = Abi.get(o.target);
 		abi.setLibc(o.libc);
