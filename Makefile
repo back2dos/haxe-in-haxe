@@ -502,7 +502,8 @@ $(REFERENCE): bin/lix/lix
 # --- Tests (docs/testing.md) ---
 
 CASES_FILE ?= haxe/test/conformance-cases.txt
-TEST_ENV = HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT=$(abspath $(PORT_BIN))
+# (exported: SCRIPT is a command list, which an assignment in front would not reach)
+TEST_ENV = export HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT=$(abspath $(PORT_BIN));
 test: $(PORT_BIN) $(REFERENCE)
 	$(TEST_ENV) $(SCRIPT) Conformance -j $(JOBS) --cases $(CASES_FILE)
 test-display: $(PORT_BIN) $(REFERENCE)
