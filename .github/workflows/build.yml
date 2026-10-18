@@ -30,14 +30,16 @@
 #     ARM64 the cross-built programs, gfx-arm64; on Windows x86-64 and arm64
 #     the cross-built programs on D3D11's WARP, gfx-windows; on macOS built
 #     from the npm packages after npm-pack, gfx-macos), packages/os's audio
-#     in the same jobs (make audio-check, audio-web-check), then
+#     in the same jobs (make audio-check, audio-web-check) and its touch
+#     gesture (touch-check, gfx's job), then
 #     packages/view, web, text, ui and theme (their checks on Eval, the sample UI and the
 #     todo example drawn on llvmpipe, the todo example in Chromium on WebGPU
 #     and WebGL2, web's demo page hydrated in Chromium).
 #   - android: the APKs for android-arm64 and android-x86_64 checked, then
 #     AndroidTest, AndroidNativeTest (views, real input, accessibility),
-#     AndroidMixTest (a GPU view among views) and AndroidTextTest (the input
-#     method in a drawn window) on an x86-64 emulator (not required yet:
+#     AndroidMixTest (a GPU view among views), AndroidTextTest (the input
+#     method in a drawn window) and AndroidTouchTest (a fling in a drawn
+#     scroll box) on an x86-64 emulator (not required yet:
 #     continue-on-error).
 #   - ios: the app bundles for ios-arm64 and ios-sim-arm64 checked, then
 #     (ios-simulator, on a macOS runner) IosTest on an iPhone simulator (not
@@ -622,6 +624,8 @@ jobs:
           make gfx-check GFX_TARGET=linux-x86_64
       - name: audio (ALSA's null and file devices)
         run: make audio-check AUDIO_TARGET=linux-x86_64
+      - name: touch (TouchDrag, the gesture of Android and iOS)
+        run: make touch-check
       - name: gfx (WebGPU, WebGL2 in Chromium)
         run: |
           set -ex
@@ -706,8 +710,9 @@ jobs:
   # and android-x86_64, checked without a device (make android-check: zip,
   # manifest, ELF, v2 signature; the SDK's zipalign, aapt and apksigner),
   # then AndroidTest.apk on an x86-64 emulator with KVM (android.sh: the cube
-  # headless against cube.png, frames in the window, input, Home and back,
-  # Back; the screenshot and logcat as an artifact). Not a required check yet
+  # headless against cube.png, frames in the window, input (a drag held on
+  # the cube, a fling), Home and back, Back; the screenshot and logcat as an
+  # artifact; android-touch.sh: a fling in a drawn scroll box). Not a required check yet
   # (continue-on-error): emulators on hosted runners are slow to boot and
   # sometimes flaky.
   android:
@@ -752,6 +757,7 @@ jobs:
             sh packages/gfx/test/android.sh bin/android/android-x86_64/AndroidTest.apk bin/android/android-x86_64
             sh packages/ui/test/android-native.sh bin/android/android-x86_64/AndroidNativeTest.apk bin/android/android-x86_64
             sh packages/ui/test/android-mix.sh bin/android/android-x86_64/AndroidMixTest.apk bin/android/android-x86_64/AndroidTextTest.apk bin/android/android-x86_64
+            sh packages/os/test/android-touch.sh bin/android/android-x86_64/AndroidTouchTest.apk bin/android/android-x86_64
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -111,7 +111,7 @@ endef
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
 	lix lix-release lix-dist reference bench test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-shader-check \
-	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
+	android-programs android-check android-device-check touch-check shared-check ios-programs ios-check ios-sim-check \
 	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench
 
@@ -173,7 +173,8 @@ help:
 ## gfx-programs  bin/gfx/GFX_TARGET/{GfxTest,Triangle,Cube,Instances,Targets,Mips,Formats}[.exe]: packages/gfx's test programs (Linux: glibc mode)
 ## android-programs  bin/android/ANDROID_TARGET/*.apk: APKs written by hxmc (android-x86_64, android-arm64)
 ## android-check  their structure (hxmc/test/ApkCheck.hx: zip, manifest, ELF, v2 signature, classes.dex)
-## android-device-check  the Android tests on the device or emulator adb reaches (android.sh, android-native.sh, android-mix.sh)
+## android-device-check  the Android tests on the device or emulator adb reaches (android.sh, android-native.sh, android-mix.sh, android-touch.sh)
+## touch-check  packages/os's touch gesture (TouchDrag, Android's and iOS's: a tap, a drag, a fling's glide) natively here
 ## ios-programs  bin/ios/IOS_TARGET/*.app, Cube.ipa: iOS apps written by hxmc (ios-sim-arm64, ios-arm64); bin/ios/SimTap (macOS)
 ## ios-check   their structure (hxmc/test/IosCheck.hx: bundle, Info.plist, Mach-O, code signature)
 ## ios-sim-check  IosTest on an iPhone simulator (a Mac with Xcode: packages/gfx/test/ios.sh)
@@ -578,9 +579,10 @@ android-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk,$(UI_CP) -main AndroidNativeTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.nativetest)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk,$(UI_CP) -cp packages/gfx/examples -main AndroidMixTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.mixtest)
 	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk,-cp packages/os/src -cp packages/os/test -main AndroidTextTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.texttest)
+	$(call hxmc,bin/android/$(ANDROID_TARGET)/AndroidTouchTest.apk,$(UI_CP) -cp packages/os/test -main AndroidTouchTest $(HXMC_ARGS) -D hxmc.target=$(ANDROID_TARGET) -D hxmc.android-package=org.hxmc.touchtest)
 # their structure without a device (hxmc/test/ApkCheck.hx: zip, manifest, ELF, signature, classes.dex; zipalign, aapt, apksigner, dexdump when there)
 android-check: android-programs
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck $(foreach a,AndroidTest Cube AndroidNativeTest AndroidMixTest AndroidTextTest,bin/android/$(ANDROID_TARGET)/$(a).apk)
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp hxmc/test -cp haxe/test -cp hxmc/src --run ApkCheck $(foreach a,AndroidTest Cube AndroidNativeTest AndroidMixTest AndroidTextTest AndroidTouchTest,bin/android/$(ANDROID_TARGET)/$(a).apk)
 # shared libraries of the glibc mode loaded by an hxmc program (hxmc/test/SharedCheck.hx), Android's built
 shared-check: $(TOOL) $(STD) $(HOST_RT)
 	$(SCRIPT) SharedCheck
@@ -589,6 +591,7 @@ android-device-check: android-programs
 	sh packages/gfx/test/android.sh bin/android/$(ANDROID_TARGET)/AndroidTest.apk bin/android/$(ANDROID_TARGET)
 	sh packages/ui/test/android-native.sh bin/android/$(ANDROID_TARGET)/AndroidNativeTest.apk bin/android/$(ANDROID_TARGET)
 	sh packages/ui/test/android-mix.sh bin/android/$(ANDROID_TARGET)/AndroidMixTest.apk bin/android/$(ANDROID_TARGET)/AndroidTextTest.apk bin/android/$(ANDROID_TARGET)
+	sh packages/os/test/android-touch.sh bin/android/$(ANDROID_TARGET)/AndroidTouchTest.apk bin/android/$(ANDROID_TARGET)
 
 # iOS: app bundles written by hxmc (hxmc/src/hxmc/ios/Bundle.hx), IosTest
 # (packages/gfx/test/IosTest.hx) and the cube example (also as an .ipa);
@@ -621,6 +624,11 @@ audio-programs: $(TOOL) $(STD) $(HOST_RT)
 	$(call hxmc,bin/audio/$(AUDIO_TARGET)/Tone$(call EXE,$(AUDIO_TARGET)),$(OS_CP) -main Tone $(HXMC_ARGS) $(AUDIO_ARGS))
 audio-check: audio-programs
 	sh packages/os/test/audio.sh bin/audio/$(AUDIO_TARGET)
+
+# packages/os's touch gesture (TouchDrag: Android's and iOS's), natively on this host
+touch-check: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/os/TouchDragTest,$(OS_CP) -main TouchDragTest $(HXMC_ARGS) $(if $(filter linux-%,$(HOST)),-D hxmc.libc=glibc))
+	bin/os/TouchDragTest
 
 audio-web-check: $(TOOL) $(STD)
 	$(call hxmc,bin/audio/AudioTest.wasm,$(OS_CP) -main AudioTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
