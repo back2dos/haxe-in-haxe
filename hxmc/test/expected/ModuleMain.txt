@@ -1,0 +1,5 @@
+exit 0
+module-level main
+42
+class 9
+calls 2

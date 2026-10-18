@@ -1,0 +1,6 @@
+exit 0
+[copy,greeting]
+héllo, wörld €
+
+19 68c3a96c6c6f2c2077c3b6726c6420e282ac0a
+null null

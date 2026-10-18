@@ -15,7 +15,8 @@ using StringTools;
 // output ("exit <code>" and stdout) must equal hxmc/test/expected/<case>.txt.
 // The golden files are frozen: a new case gets one with --bless (written from
 // hxmc's own output, to be checked by hand). A `// define: <name>[=<value>]`
-// line of a case's source adds that -D to its build. --target cross-builds
+// line of a case's source adds that -D to its build, a `// resource:
+// <file>@<name>` line that resource (the file next to the source). --target cross-builds
 // for another target (linux-arm64 runs under qemu-aarch64-static, windows-x86_64 under
 // wine64, wasm32-wasi under node or, with HXMC_WASM_RUNNER=wasmtime,
 // wasmtime; --wasm-eh legacy: built with -D hxmc.wasm-eh=legacy, run under
@@ -144,6 +145,10 @@ class Corpus {
 		if (FileSystem.exists(src))
 			for (l in File.getContent(src).split("\n"))
 				if (l.trim().startsWith("// define: ")) cmd = cmd.concat(["-D", l.trim().substr(11)]);
+				else if (l.trim().startsWith("// resource: ")) {
+					var r = l.trim().substr(13).split("@");
+					cmd = cmd.concat(["--resource", FileSystem.fullPath(c.cps[0] + "/" + r[0]) + (r.length > 1 ? "@" + r[1] : "")]);
+				}
 		var r = exec(cmd, {env: ["HXMC_STATS" => "1"]});
 		File.saveContent(d + "/hxmc.log", r.out + r.err);
 		if (r.code != 0) return {name: c.name, status: "hxmc-fail", detail: tail(r.out + r.err, 2000)};

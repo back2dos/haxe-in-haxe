@@ -105,19 +105,18 @@ class Main {
 	}
 
 	static function generate(com:context.Common.CommonContext, out:String) {
-		var path = com.main.mainPath;
-		var mainClass = null;
-		for (t in com.types)
-			switch t {
-				case TClassDecl(c) if (c.clPath.name == path.name && c.clPath.pack.join(".") == path.pack.join(".")):
-					mainClass = c;
-				case _:
-			}
+		// the class whose static main the program runs, as the other targets
+		// find it (Common.getEntryPoint): the -main module's statics when they
+		// hold main (a module-level `function main()`), else its class of that name
+		if (com.main.mainPath == null) throw "a program needs an entry point: -main <module>";
+		var mainClass = context.Common.getEntryPoint(com).cls;
 		var opts = Options.read(com);
 		var abi = Abi.get(opts.target);
 		abi.setLibc(opts.libc);
 		hxmc.ir.Lower.targetOs = abi.osCode();
 		hxmc.ir.Lower.wasmGc = opts.wasmGc;
+		// (genjs's order: `Hashtbl.fold (fun name data acc -> (name,data) :: acc) com.resources []`)
+		hxmc.ir.Lower.resources = com.resources.fold((name, data, acc:Array<{name:String, data:String}>) -> [{name: name, data: codegen.Codegen.bytesSerialize(data)}].concat(acc), []);
 		// WebAssembly's runtime is typed with the program only for that target
 		if (abi.wasm && !Lambda.exists(com.types, t -> switch t {
 			case TClassDecl(c): c.clPath.pack.join(".") == "hxmc.rt.wasm" && c.clPath.name == "Gc";

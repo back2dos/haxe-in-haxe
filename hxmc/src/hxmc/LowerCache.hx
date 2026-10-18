@@ -58,12 +58,21 @@ class LowerCache {
 	var platform = -1; // (and its Apple platform: Mem.platform)
 	var lines = false; // and whether they have their positions (Lower.lines)
 	var wasmGc = false; // (and the runtime's implementations they call: Lower.wasmGc)
+	var resources:Array<{name:String, data:String}> = []; // (and haxe.Resource's content: Lower.resources)
+
+	static function sameResources(a:Array<{name:String, data:String}>, b:Array<{name:String, data:String}>):Bool {
+		if (a.length != b.length) return false;
+		for (i in 0...a.length)
+			if (a[i].name != b[i].name || a[i].data != b[i].data) return false;
+		return true;
+	}
 
 	public function lower(main:TClass, types:Array<ModuleType>, basic:BasicTypes):Program {
 		hits = misses = keyed = 0;
 		why = null;
 		build++;
-		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines || Lower.wasmGc != wasmGc) {
+		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines || Lower.wasmGc != wasmGc
+			|| !sameResources(Lower.resources, resources)) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
 			byKey = new Map();
@@ -71,6 +80,7 @@ class LowerCache {
 			platform = Lower.targetPlatform;
 			lines = Lower.lines;
 			wasmGc = Lower.wasmGc;
+			resources = Lower.resources;
 		}
 		var l = new CachedLower(this, true, types);
 		var prog = try Lower.program(main, types, basic, l) catch (m:Mismatch) {
@@ -141,7 +151,7 @@ enum LCall {
 	CStaticClos(f:FuncInfo, r:LambdaInfo);
 	CHostClos(name:String, sig:SigInfo, self:Null<Ty>, r:LambdaInfo);
 	CCtorClos(ci:CtorInfo, sig:SigInfo, r:LambdaInfo);
-	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
+	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
 	CAdapter(from:SigInfo, to:SigInfo, r:LambdaInfo);
 	CDynAdapter(to:SigInfo, r:LambdaInfo);
 	CLambda(sig:SigInfo, captures:Array<Local>, name:String, module:String, r:LambdaInfo);
@@ -514,7 +524,7 @@ class CachedLower extends Lower {
 		return r;
 	}
 
-	override public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, ?cls:TClass}>, owner:FuncInfo):LambdaInfo {
+	override public function boundClosure(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>, owner:FuncInfo):LambdaInfo {
 		depth++;
 		var r = super.boundClosure(f, dispatch, owner);
 		depth--;
@@ -647,7 +657,7 @@ class CachedLower extends Lower {
 			case CCtorClos(ci, s, r):
 				bindLambda(r, ctorClosure(obj(ci), obj(s)));
 			case CBoundClos(f, d, owner, r):
-				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), cls: d.cls == null ? null : tc(d.cls)}, obj(owner)));
+				bindLambda(r, boundClosure(obj(f), d == null ? null : {sel: sel(d.sel), sig: obj(d.sig), args: [for (t in d.args) mapTy(t)], cls: d.cls == null ? null : tc(d.cls)}, obj(owner)));
 			case CAdapter(from, to, r):
 				bindLambda(r, adapter(obj(from), obj(to)));
 			case CDynAdapter(to, r):
