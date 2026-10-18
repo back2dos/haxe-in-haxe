@@ -247,10 +247,12 @@ class Regalloc {
 		weight.resize(n);
 		for (r in 0...n)
 			weight[r] = 0;
+		// per physical register: the position after its last definition in
+		// the block (one from an earlier block is before the block's start)
+		for (k in 0...NPHYS)
+			openFixed[k] = -1;
 		for (bi in 0...nb) {
 			var b = f.blocks[bi];
-			for (k in 0...NPHYS)
-				openFixed[k] = -1;
 			var p = b.from;
 			var cold = b.cold;
 			var w:Float = cold ? 0.125 : 1.0;
@@ -287,7 +289,7 @@ class Regalloc {
 							}
 						}
 					} else if (r >= 0) {
-						var from = openFixed[r] >= 0 ? openFixed[r] : b.from;
+						var from = openFixed[r] >= b.from ? openFixed[r] : b.from;
 						addFixed(r, from, p);
 						if (cold) {
 							if (r < 32) fixLo[bi] |= 1 << r else fixHi[bi] |= 1 << (r - 32);
@@ -859,18 +861,18 @@ class Regalloc {
 				}
 			}
 		}
-		var at = [for (_ in 0...nc + 1) 0];
+		var at = Arrays.filled(nc + 1, 0);
 		for (c in pairCall)
 			at[c + 1]++;
 		for (k in 0...nc)
 			at[k + 1] += at[k];
-		var saved = [for (_ in 0...pairCall.length) 0];
+		var saved = Arrays.filled(pairCall.length, 0);
 		var fill = at.copy();
 		for (k in 0...pairCall.length)
 			saved[fill[pairCall[k]]++] = pairReg[k];
-		var slotOf = [for (_ in 0...NPHYS) -1];
+		var slotOf = Arrays.filled(NPHYS, -1);
 		var defs = s.defs, uses = s.uses;
-		var clobbered = [for (_ in 0...NPHYS) -1]; // stamped by call
+		var clobbered = Arrays.filled(NPHYS, -1); // stamped by call
 		var ptAt = s.ptAt, ptVal = s.ptVal;
 		var ci = 0;
 		for (b in f.blocks) {

@@ -367,13 +367,27 @@ class Opt {
 		}
 		var idom = MFunc.ints(n, -1);
 		idom[0] = 0;
-		var preds = [for (b in order) [for (p in b.preds) if (p.mark == inOrder) p.tmp]];
+		// the predecessors in the order, by index: predIdx[predAt[k]...predAt[k + 1]]
+		var predAt = new Vector<Int>(n + 1);
+		var m = 0;
+		for (k in 0...n) {
+			predAt[k] = m;
+			for (p in order[k].preds)
+				if (p.mark == inOrder) m++;
+		}
+		predAt[n] = m;
+		var predIdx = new Vector<Int>(m);
+		m = 0;
+		for (b in order)
+			for (p in b.preds)
+				if (p.mark == inOrder) predIdx[m++] = p.tmp;
 		var changed = true;
 		while (changed) {
 			changed = false;
 			for (k in 1...n) {
 				var d = -1;
-				for (p in preds[k]) {
+				for (q in predAt[k]...predAt[k + 1]) {
+					var p = predIdx[q];
 					if (idom[p] < 0) continue;
 					if (d < 0) d = p else {
 						var x = p, y = d;
