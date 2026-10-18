@@ -104,6 +104,8 @@ parentPort.on("message", m => {
 				procs.set(pid, q);
 				return reply(pid);
 			}
+			// (a child's later errors, a pipe closed early: what reading and waiting tell)
+			child.on("error", () => {});
 			child.stdin.on("error", () => {});
 			[child.stdout, child.stderr].forEach((s, i) => {
 				s.on("data", c => {
