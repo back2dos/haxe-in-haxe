@@ -346,13 +346,22 @@ class Driver {
 			for (f in byModule.get(order[mi]))
 				weight[mi] += f.body.length + f.locals.length;
 		todo.sort((a, b) -> weight[b] - weight[a]);
+		// the register allocator's working storage, taken by a module and given
+		// back (at most one per thread: its arrays keep their capacity)
+		var scratches:Array<Regalloc.Scratch> = [];
 		parallel(todo.length, jobs, k -> {
 			var mi = todo[k];
 			var obj = new Obj();
 			var emit = Target.emitter(abi, obj);
-			var ras = new Regalloc.Scratch(Target.selector(abi));
+			lock.acquire();
+			var ras = scratches.pop();
+			lock.release();
+			if (ras == null) ras = new Regalloc.Scratch(Target.selector(abi));
 			for (f in byModule.get(order[mi]))
 				compileFunc(f, obj, emit, ras);
+			lock.acquire();
+			scratches.push(ras);
+			lock.release();
 			// (WebAssembly objects are not cached: ElfWriter has no relocations for them)
 			if (!abi.wasm) {
 				var b = ElfWriter.write(obj, abi.arm);
