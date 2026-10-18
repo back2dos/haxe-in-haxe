@@ -23,13 +23,13 @@ class Gc {
 	static inline var K_FWD = 15;
 	static inline var MINOR_MAX = 32 << 20;
 	static inline var MIN_OLD = 16 << 20;
-	static inline var SHADOW = 64 << 20;
+	static inline var STACK_MB = 4; // the shadow stack's default (RT_STACK_MB)
 	static inline var CHUNK = 1 << 20;
 	static inline var LARGE = 128 << 10; // larger objects get a region of their own
 	static inline var GRAN_SHIFT = 16; // chunks and regions start at multiples of 64 KB
 	static inline var GRAN = 1 << GRAN_SHIFT;
 
-	static var nurseryBase:Ptr; // MINOR_MAX reserved
+	static var nurseryCap:Int; // the nursery's region (from youngStart): its largest size so far
 	static var youngStart:Ptr;
 	static var youngEnd:Ptr;
 	static var youngDirty:Ptr; // the nursery above this holds zeros (never used yet)
@@ -116,14 +116,11 @@ class Gc {
 		if (minorSize > MINOR_MAX) minorSize = MINOR_MAX;
 		stats = Wasi.envInt("RT_STATS", -1) >= 0;
 		verifying = Wasi.envInt("RT_VERIFY", -1) >= 0;
-		nurseryBase = Heap.regionZero(MINOR_MAX);
-		youngStart = nurseryBase;
-		setYoungEnd(youngStart.add(minorSize));
-		if (verifying) Wasm.memset(youngStart, POISON, minorSize);
-		youngDirty = youngStart;
+		// (the nursery's region as large as the nursery: resizeNursery grows it)
+		var before = Heap.freshFrom();
+		placeNursery(Heap.region(minorSize), minorSize, before);
 		zchunk = Wasi.envInt("RT_ZCHUNK_KB", 32) << 10;
 		if (zchunk < 4096) zchunk = 4096;
-		Mem.setPtr(Mem.sym("rt_young_start"), 0, youngStart);
 		emptyChunk();
 		var om = Wasi.envInt("RT_OLD_MB", 32);
 		oldLimit = (om : I64) << 20;
@@ -134,7 +131,16 @@ class Gc {
 		fromChunks = Heap.malloc(24 * fromCap);
 		cur = -1;
 		newState = 1;
-		stackBase = Heap.regionZero(SHADOW);
+		// the shadow stack: RT_STACK_MB (4 MB), its end checked where a frame
+		// first goes deeper (MirBuild.raiseHw: rt_stack_overflow); a browser's
+		// wasm stack (about 1 MB) runs out well before (node's wasi.mjs sets it
+		// from --stack-size: as large as node's stack)
+		var smb = Wasi.envInt("RT_STACK_MB", STACK_MB);
+		if (smb < 1) smb = 1;
+		if (smb > 1024) smb = 1024;
+		stackMb = smb;
+		stackBase = Heap.regionZero(smb << 20);
+		Mem.setPtr(Mem.sym("rt_sp_limit"), 0, stackBase.add(smb << 20));
 		Mem.tlsSet("rt_sp", stackBase);
 		Mem.tlsSet("rt_sp_hw", stackBase);
 		nglobals = ng;
@@ -162,6 +168,27 @@ class Gc {
 	@:hxmc.noGc static function setYoungEnd(e:Ptr) {
 		youngEnd = e;
 		Mem.setPtr(Mem.sym("rt_young_end"), 0, e);
+	}
+
+	// the nursery in the region r of cap bytes (empty: at startup, or right
+	// after a minor collection); what the region holds below `before`
+	// (Heap.freshFrom() before it was taken) may not be zeros
+	@:hxmc.noGc static function placeNursery(r:Ptr, cap:Int, before:Ptr) {
+		nurseryCap = cap;
+		youngStart = r;
+		Mem.setPtr(Mem.sym("rt_young_start"), 0, r);
+		setYoungEnd(r.add(minorSize));
+		youngDirty = !r.ult(before) ? r : r.add(cap).ult(before) ? r.add(cap) : before;
+		if (verifying) Wasm.memset(r, POISON, minorSize);
+	}
+
+	static var stackMb:Int;
+
+	@:hxmc.export("rt_stack_overflow") @:hxmc.noGc static function stackOverflow():Void {
+		Wasi.writeLit(2, "stack overflow: the shadow stack's ");
+		Wasi.writeInt(2, stackMb);
+		Wasi.writeLit(2, " MB are full (RT_STACK_MB sets its size)\n");
+		Wasi.exit(2);
 	}
 
 	// ---- allocation
@@ -540,7 +567,36 @@ class Gc {
 		}
 	}
 
+	// (right after a minor collection: the nursery is empty, so it may move)
 	@:hxmc.noGc static function resizeNursery(size:Int) {
+		if (stats) {
+			Wasi.writeLit(2, "gc: nursery ");
+			Wasi.writeInt(2, size >> 10);
+			Wasi.writeLit(2, size > nurseryCap ? " KB (its region grown)\n" : " KB\n");
+		}
+		if (size > nurseryCap) {
+			// its region grown in place when it is the last one, else a new one
+			// (the old one freed: chunks and other regions reuse it); when
+			// memory cannot grow so far, the nursery stays as it is
+			var before = Heap.freshFrom();
+			if (Heap.tryExtend(youngStart, nurseryCap, size)) {
+				// (what it gained may hold what a region released lowering the top left)
+				var hi = youngStart.add(size);
+				if (youngStart.add(nurseryCap).ult(before)) youngDirty = hi.ult(before) ? hi : before;
+				nurseryCap = size;
+			} else {
+				var r = Heap.tryRegion(size);
+				if (r.isNull()) {
+					if (stats) Wasi.writeLit(2, "gc: nursery not grown (memory cannot grow so far)\n");
+					growthOff = true;
+					return;
+				}
+				Heap.release(youngStart, nurseryCap);
+				minorSize = size;
+				placeNursery(r, size, before);
+				return;
+			}
+		}
 		minorSize = size;
 		setYoungEnd(youngStart.add(size));
 	}

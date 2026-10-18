@@ -66,6 +66,11 @@ export function runWasm(module, args, env = process.env) {
 	const e = { ...env, PWD: wasiPath(process.cwd()) };
 	// (one thread: the port sizes its task pool by NUMBER_OF_PROCESSORS, set on Windows)
 	delete e.NUMBER_OF_PROCESSORS;
+	// the runtime's shadow stack as large as node's stack (--stack-size, in KB:
+	// deep recursion, the compiler's) unless RT_STACK_MB says (default 4 MB)
+	const stackKb = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? '').split(/\s+/)]
+		.map((a) => /^--stack[-_]size=(\d+)$/.exec(a)).filter(Boolean).map((m) => +m[1]).pop();
+	if (e.RT_STACK_MB === undefined && stackKb > 4096) e.RT_STACK_MB = String(Math.ceil(stackKb / 1024));
 	for (const k of PATH_VARS) if (e[k]) e[k] = e[k].split(path.delimiter).map(wasiPath).join(':');
 	const pre = preopens();
 	// (HXMC_WASI_DEBUG=1: what the module is given)
