@@ -638,6 +638,8 @@ jobs:
           make theme-fidelity-check GFX_TARGET=linux-x86_64
           make theme-dom-check web-widgets
           make ui-web-check
+      - name: The dev loop (hxmc dev in Chromium and natively under Xvfb)
+        run: make dev-check
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: ui-images-linux-x86_64, path: "bin/ui/**/*.png", retention-days: 7, if-no-files-found: ignore}

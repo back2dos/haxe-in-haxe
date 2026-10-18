@@ -118,7 +118,9 @@ kept in the user cache directory (`HXMC_CACHE` overrides; only what changed
 is typed and compiled again, and outputs share objects), and the compilation server keeps
 typed modules, lowered bodies and compiled objects in memory:
 `haxe --wait 6000`, then `haxe --connect 6000 build.hxml` (a no-change rebuild
-of a small program in about 0.4 s).
+of a small program in about 0.4 s). `haxe --dev build.hxml` does that for you,
+watching the sources and reloading the program on each save with its state
+kept: [dev.md](dev.md).
 
 ### Macros and the module cache
 

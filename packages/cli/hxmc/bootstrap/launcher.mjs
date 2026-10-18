@@ -61,6 +61,8 @@ export function toolEnv(extra = {}) {
 	if (!env.HAXE_STD_PATH) env.HAXE_STD_PATH = stdDir;
 	if (!env.HXMC_STD) env.HXMC_STD = path.join(bootDir, 'hxmc-std');
 	if (!env.HXMC_RT_DIR) env.HXMC_RT_DIR = path.join(bootDir, 'rt');
+	// (`haxe --dev`: the dev loop's server, docs/dev.md)
+	if (!env.HXMC_DEV_SCRIPT) env.HXMC_DEV_SCRIPT = path.join(bootDir, 'dev.mjs');
 	return env;
 }
 
