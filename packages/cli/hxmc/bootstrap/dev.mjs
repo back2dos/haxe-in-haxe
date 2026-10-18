@@ -24,8 +24,13 @@
 //   the snapshot against the same canvas and GPU device (WebGPU, or the
 //   canvas's WebGL2 context: ?gfx=webgl2); the page never loads again.
 // - anything else: a native program, started here with HXMC_DEV=<host:port>
-//   (this server's socket for it) and HXMC_DEV_SNAPSHOT=<file>. A reload: it
-//   writes its snapshot to that file and exits; the new build starts with it.
+//   (this server's socket for it) and HXMC_DEV_SNAPSHOT=<file>. On Linux in
+//   the glibc mode it runs in a dev host (hxmc.dev.DevHost: one process for
+//   the session, each build a shared library it loads; the window and the GL
+//   context kept): a reload names the new library, the build writes its
+//   snapshot, disposes and returns, the host runs the new one. Otherwise a
+//   reload: it writes its snapshot to that file and exits; the new build
+//   starts with it.
 //
 // The protocol, JSON lines (natively) or WebSocket text messages (browser):
 //   to the program:   {"type":"reload"[,"snapshot":<file>]}   a new build is ready:

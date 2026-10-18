@@ -3,11 +3,13 @@
 Save a file, see the change, keep where you were. `hxmc dev` builds the
 program, runs it, and on every save builds it again and swaps it in; the
 new build starts fresh, with the old build's state carried over by key
-(fast refresh). The page is never reloaded: the new module runs in the same
-page, on the same canvas and GPU device (step 3, "No reloads"; natively the
-program is still a new process, for now). The design and what comes next:
+(fast refresh). Nothing reloads or restarts (step 3, "No reloads"): in the
+browser the new module runs in the same page, on the same canvas and GPU
+device; natively on Linux each build is a shared library loaded into the
+same process, the dev host, on the same window and GL context (macOS and
+Windows: a new process per build, for now). The design and what comes next:
 [plans/dev-loop.md](plans/dev-loop.md) (steps 1 and 2 are built, step 3 in
-the browser).
+the browser and on Linux).
 
 ```sh
 npx haxe --dev build.hxml          # the npm package
@@ -51,8 +53,39 @@ What happens:
   instantiated in the same page, from the snapshot, against the same canvas
   (its last frame shown until the new build's first), the same `GPUDevice`
   (or the canvas's WebGL2 context: the page's `?gfx=webgl2`) and the same
-  fonts. Natively the program writes its snapshot to a file and exits,
-  and the new build starts once the snapshot is written.
+  fonts. Natively on Linux (the dev host, below) the running build writes
+  its snapshot, disposes and returns, and the host loads the new build
+  into the same process. Elsewhere natively the program writes its
+  snapshot to a file and exits, and the new build starts once the snapshot
+  is written.
+- The dev host (Linux, the glibc mode; `HXMC_DEV_HOST=0`: a process per
+  build instead): `hxmc.dev.DevHost`, a small executable built once (and
+  cached in `~/.cache/hxmc/dev-host`), is the process of the whole session.
+  Each build is a shared library (`-D hxmc.shared -D hxmc.dev-host`,
+  added by the dev server; the output renamed `<out>.dev/<n>.so`, a fresh
+  name per build), with its own runtime and heap: the host writes the
+  address of its state block into the library's `hxmc_dev_state` and calls
+  `hxmc_dev_run`, which runs the program's main on a thread of its own
+  (`hxmc.dev.Hosted`). The state block holds what survives a swap: the X
+  display connection and the window (`hxmc.os`'s X11 window) and the EGL
+  display, config, context and window surface (`hxmc.gfx`'s GL back end),
+  made by the first build and taken by each next one instead of made; the
+  window keeps its size and position, its last frame shown until the new
+  build's first. At a reload the dev server names the new library
+  (`"library"`); the build snapshots, disposes (its GL objects deleted, the
+  context released from its thread, its input method closed: nothing of
+  the host's destroyed) and returns from main; its runtime gives its heap
+  back (the old space's regions, the nursery, the stacks: `Gc.releaseHeap`,
+  shared libraries only), and the host opens the new library before it
+  closes the old one, so that the system libraries both use (X11, EGL, the
+  GPU driver) stay loaded. The host's memory stays flat across swaps
+  (about 125 MB resident for ui's Counter after twelve, as after the
+  first). Only the handles and the snapshot cross: no shared heap, no old
+  code reachable. A build that ends by itself (its window closed) names no
+  next library and the host ends; the next build starts it again. A
+  program's own threads must end in its `Hot.onDispose` functions before
+  its library is closed. Release builds are the same bytes: all of this is
+  under `-D hxmc.dev-host`.
 - Disposing an instance in the browser (`host.dispose()`,
   `@hxmc/os`'s `browser.mjs`, option `track`): the program's own disposal
   first (`Hot.onDispose`: the view's roots, and `hxmc.gfx.Device`, which
@@ -75,8 +108,8 @@ What happens:
   link failure, gives the page the last good build again, with the overlay
   and the state carried.)
 - Each swap prints its time, from the change seen to the new build's
-  first frame: `hxmc dev: swapped in 420 ms (build 346 ms)` (natively, a
-  new process: `reloaded in`).
+  first frame: `hxmc dev: swapped in 420 ms (build 346 ms)` (natively
+  without the dev host, a new process: `reloaded in`).
 - The page reconnects to the dev server when it restarts (and swaps in what
   it built), rather than loading again.
 
@@ -232,7 +265,7 @@ page's `/__hxmc/ws`), so editors and other tools can drive the loop:
 
 | To the program | |
 | --- | --- |
-| `{"type":"reload"}` | a new build is ready: snapshot, dispose, hand over. Natively it carries `"snapshot": <file>`: write the snapshot there, answer `saved`, exit. In the browser the page fetches the new module (`/__hxmc/app.wasm?swap`: 409 when the build failed, the running one stays), asks the running module for its snapshot, disposes it and runs the new one in the same page |
+| `{"type":"reload"}` | a new build is ready: snapshot, dispose, hand over. Natively it carries `"snapshot": <file>`: write the snapshot there, answer `saved`, exit (with the dev host, `"library": <file>` too: hand the host's handles over to that library and return from main). In the browser the page fetches the new module (`/__hxmc/app.wasm?swap`: 409 when the build failed, the running one stays), asks the running module for its snapshot, disposes it and runs the new one in the same page |
 | `{"type":"error","message":<text>}` | the build failed (the overlay); the program keeps running |
 | `{"type":"ok"}` | the build compiles again (the overlay goes) |
 | `{"type":"assets", ...}` | reserved: styles and images without a rebuild (step 4) |
@@ -266,8 +299,13 @@ edits, the machine less busy, load 0.8-1.3):
 | Counter, browser (WasmGC) | 0.33 s | 0.43 s | 0.47-0.49 s |
 | Gallery, browser (wasm) | 0.72 s | 0.94 s | 1.07-1.14 s |
 | Gallery, browser (WasmGC) | 0.77 s | 1.09 s | 1.10-1.11 s |
+| Counter, native (Linux, the dev host) | 0.37 s | 0.44-0.45 s | 0.52-0.56 s |
+| Gallery, native (Linux, the dev host) | 0.81 s | 0.89 s | 0.90-0.93 s |
 
-A swap costs no more than the reload did: the reload already overlapped
+Natively the swap after the build is 0.07-0.09 s (the snapshot, the
+dispose, loading the library and its first frame), where the restart was
+0.12-0.14 s (most of it loading Mesa and making the window, which the host
+keeps). A swap costs no more than the reload did: the reload already overlapped
 the page's loading with the build, and the swap overlaps nothing it needs
 (the old build runs on during the build); what is left after the build is
 compiling the module as it arrives, the snapshot, the dispose and the new
@@ -334,7 +372,11 @@ shown later), then `hxmc dev` on ui's Counter in headless Chromium (as wasm
 and as WasmGC) and natively under Xvfb: an edit keeps the count, a changed
 type resets it, a compile error shows in the overlay (the terminal) while
 the last good build keeps running, the fix swaps in with the count kept.
-In the browser, on a WebGPU page and on a second page with `?gfx=webgl2`,
+Natively on Linux, after each swap the window's id and the process (as
+each build prints them, `hxmc.dev: the host's window 0x... (process N)`)
+are the same, no program ended, and the last library is the bytes of a
+fresh build with the host's options. In the browser, on a WebGPU page and
+on a second page with `?gfx=webgl2`,
 after each swap: no reload (a marker set on `window` survives, Playwright
 saw one navigation, the Performance API's navigation entries and
 `timeOrigin` unchanged), the same canvas (the only one), the same
@@ -346,8 +388,9 @@ a fresh build of the same sources, byte for byte
 (`packages/os/test/dev/dev-verify.mjs <compiler> [example] [native|web|web-gc]`).
 ## Not yet
 
-- Seamless swaps natively (step 3): the process restarts (the window
-  closes and opens again). Android and iOS are not driven yet.
+- Seamless swaps natively on macOS and Windows (step 3): the process
+  restarts (the window closes and opens again); they need Mach-O dylibs
+  and DLLs from hxmc. Android and iOS are not driven yet.
 - Styles and assets without a rebuild (step 4).
 - The UI engine's own state (focus, scroll and selection by node key) is
   the UI session's part of step 2; ui's widgets' own signals are keyed
