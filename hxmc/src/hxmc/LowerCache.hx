@@ -690,9 +690,9 @@ class CachedLower extends Lower {
 		return r;
 	}
 
-	// a type with the current classes, enums and abstracts (what ty reads of it)
+	// a type with the current classes, enums and abstracts (what ty reads of it; Null kept, as ty reads it)
 	function tt(t:T):T {
-		return switch core.TFunctions.follow(t) {
+		return switch core.TFunctions.followWithoutNull(t) {
 			case TInst(c, ps):
 				switch c.clKind {
 					case KTypeParameter(_): t;
@@ -711,7 +711,7 @@ class CachedLower extends Lower {
 	function bind(o:{}, n:{}):Bool {
 		var m = map.get(o);
 		if (m != null) {
-			if (m != n) mismatch("an object bound twice");
+			if (m != n) mismatch("an object bound twice" + (Sys.getEnv("HXMC_LOWER_WHY") == "1" ? " (" + Type.getClassName(Type.getClass(o)) + " " + Reflect.field(o, "name") + " " + Reflect.field(o, "key") + ": " + Reflect.field(m, "name") + Reflect.field(m, "key") + " then " + Reflect.field(n, "name") + Reflect.field(n, "key") + ")" : ""));
 			return false;
 		}
 		map.set(o, n);
