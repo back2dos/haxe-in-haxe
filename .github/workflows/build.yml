@@ -592,7 +592,8 @@ jobs:
   # llvmpipe (no GPU), against the golden images (make gfx-check: the test
   # programs in the glibc mode, packages/gfx/test/check.sh), here on Linux
   # x86-64, and on WebGPU and WebGL2 in headless Chromium (make
-  # gfx-web-check); the ARM64 and Windows programs cross-built for gfx-arm64
+  # gfx-web-check), and the module cache across a WasmGC and a native build
+  # on one store (make gfx-cache-check); the ARM64 and Windows programs cross-built for gfx-arm64
   # and gfx-windows. packages/os's audio alongside: ALSA's null and file
   # devices (make audio-check), WebAudio in headless Chromium (make
   # audio-web-check), the ARM64 and Windows AudioTest cross-built
@@ -628,6 +629,8 @@ jobs:
           npm install --no-save --silent playwright@1.56.1
           npx playwright install --with-deps chromium > /dev/null
           make gfx-web-check
+          # (the module cache across WasmGC and native builds on one store)
+          make gfx-cache-check
       - name: audio (WebAudio in Chromium)
         run: make audio-web-check
       - name: view, web, text, ui and theme (Eval, natively; Mesa llvmpipe; Chromium)
