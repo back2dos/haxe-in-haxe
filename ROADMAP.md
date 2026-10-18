@@ -43,6 +43,7 @@ in [docs/plans/](docs/plans/README.md); what is built is in
 - A Canvas ready for documents: paths, gradients, glyph runs, images with their source, host apart from canvas ([document.md](docs/plans/document.md))
 - Native or drawn per widget: native text fields by default, platform views in drawn trees, a DOM renderer for the widgets in the browser ([native-or-drawn.md](docs/plans/native-or-drawn.md))
 - Unstyled widgets and one theme, `@hxmc/theme`, based on shadcn/ui: its tokens, slots, variants and class lists ([theme.md](docs/plans/theme.md))
+- `@hxmc/3d`, a scene layer for 3D games on gfx: math and a scene graph, glTF 2.0, lit PBR materials, input actions, animation, physics, tooling, in that order ([3d.md](docs/plans/3d.md))
 - Graphics programs in the playground ([graphics.md](docs/plans/graphics.md#graphics-in-the-playground))
 
 ## Later
