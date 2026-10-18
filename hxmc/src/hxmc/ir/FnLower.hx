@@ -1562,7 +1562,10 @@ class FnLower {
 				var eq = structEq(a, b, structOf(a.etype), e);
 				return op == OpEq ? eq : ENot(eq);
 			case OpAssignOp(op2):
-				return assign(a, null, e, (cur, curTy) -> arith(op2, cur, curTy, () -> {x: value(b), t: tyOf(b)}, tyOf(a), e));
+				// (the result in the representation of what a holds, curTy, as
+				// assign stores it: a Dynamic array's element typed Float, a
+				// generic field read as Int are references there)
+				return assign(a, null, e, (cur, curTy) -> arith(op2, cur, curTy, () -> {x: value(b), t: tyOf(b)}, curTy, e));
 			case OpBoolAnd | OpBoolOr:
 				var lo = newLocal("c", TBool);
 				out.push(SSet(lo, cond(a)));
@@ -1844,9 +1847,10 @@ class FnLower {
 				if (flag == Prefix) assign(e1, null, e, (cur, t) -> arith(bop, cur, t, one, t, e)) else {
 					var t1 = tyOf(e1);
 					var old = newLocal("old", t1);
+					// (the target may hold another representation, t: a generic field read as Int)
 					assign(e1, null, e, (cur, t) -> {
-						out.push(SSet(old, cur));
-						arith(bop, ELocal(old), t, one, t, e);
+						out.push(SSet(old, coerce(cur, t, t1)));
+						arith(bop, ELocal(old), t1, one, t, e);
 					});
 					coerce(ELocal(old), t1, tyOf(e));
 				}
