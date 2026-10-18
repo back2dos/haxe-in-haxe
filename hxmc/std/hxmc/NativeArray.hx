@@ -58,6 +58,24 @@ package hxmc;
 		`-D hxmc.native-array-outofbounds` says.
 	**/
 	public static inline function blit<T>(src:NativeArray<T>, srcPos:Int, dest:NativeArray<T>, destPos:Int, length:Int):Void {
+		#if !(hxmc.wasm_gc || hxmc.native_array_outofbounds)
+		// (accesses out of bounds not tested: a few elements copied here,
+		// typed, without the test of the range)
+		if (length <= 4) {
+			if (src == dest && srcPos < destPos) {
+				var i = length;
+				while (i > 0) {
+					i--;
+					dest.unsafeSet(destPos + i, src.unsafeGet(srcPos + i));
+				}
+			} else
+				for (i in 0...length) dest.unsafeSet(destPos + i, src.unsafeGet(srcPos + i));
+		} else
+		#end
+		blitRange(src, srcPos, dest, destPos, length);
+	}
+
+	static inline function blitRange<T>(src:NativeArray<T>, srcPos:Int, dest:NativeArray<T>, destPos:Int, length:Int):Void {
 		var inBounds = (srcPos | destPos | length) >= 0 && length <= src.length - srcPos && length <= dest.length - destPos;
 		#if hxmc.wasm_gc
 		// (-D hxmc.wasm-gc: storage of one kind by array.copy, which overlapping ranges take too)
