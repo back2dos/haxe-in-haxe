@@ -193,7 +193,8 @@ help:
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
 ## 3d-check    packages/3d (docs/plans/3d.md): the math, the scene graph, the camera and the fixed-step
 ##             clock, the glTF reader on the sample scene, on Eval, natively and as wasm32-wasi
-##             (packages/3d/test/SceneTest.hx, GltfTest.hx); then the renderer's frames headless against
+##             (packages/3d/test/SceneTest.hx, GltfTest.hx); input actions natively and as wasm32-wasi
+##             (InputTest.hx); then the renderer's frames headless against
 ##             golden images (packages/3d/test/check.sh: RenderTest, Scenes.hx; Linux: Mesa)
 ## 3d-sizes    what each feature of packages/3d adds to a program, natively and as wasm32-wasi
 ##             (packages/3d/test/size)
@@ -690,6 +691,9 @@ SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/
 	$(call hxmc,bin/3d/$(GFX_TARGET)/RenderTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main RenderTest $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/GltfViewer$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main GltfViewer $(HXMC_ARGS) $(GFX_ARGS))
 	$(call hxmc,bin/3d/$(GFX_TARGET)/Orbits$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main Orbits $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)),$(SCENE_CP) -main InputTest $(HXMC_ARGS) $(GFX_ARGS))
+	$(call hxmc,bin/3d/InputTest.wasm,$(SCENE_CP) -main InputTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	bin/3d/$(GFX_TARGET)/InputTest$(call EXE,$(GFX_TARGET)) && $(WASI) bin/3d/InputTest.wasm
 	sh packages/3d/test/check.sh bin/3d/$(GFX_TARGET)
 	@# (Model.of: a name the file does not have is a compile error)
 	ulimit -s unlimited 2>/dev/null || true; ! $(TOOL) bin/3d/ModelTypo $(SCENE_CP) -cp packages/3d/test/reject -main ModelTypo $(HXMC_ARGS) > bin/3d/ModelTypo.log 2>&1
