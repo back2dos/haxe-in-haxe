@@ -628,14 +628,17 @@ that never escape into locals (the IR's counterpart of Mir's `Inline` and
 WasmGC module itself). A reference has the wasm type its IR type proves
 (classes, strings, arrays, enums, closures, Bytes: `GcModule.keyOf`), else
 `eqref` cast where it is used; a local that is only ever cast to one type
-gets it (`FuncGen.refine`, a second emission). All types are in one recursion
+gets it (`FuncGen.refine`, a second emission); one set from a Dynamic
+value (Haxe's unchecked conversions) gets none, as linear memory may hold
+a value of another type there. All types are in one recursion
 group, so the class hierarchy is wasm's subtyping (`instanceof` is
 `ref.test`; leaf classes are final types); methods have their own typed
 signatures, virtual and interface calls go through a funcref table indexed
 by class and selector holding wrappers of the table's signature; closures
 are structs whose first field is a typed function reference (`call_ref`);
 array accesses and structural field accesses test the expected kind or
-layouts inline before falling back to the runtime; Ints of -128...1023 are
+layouts inline before falling back to the runtime (an Array's or a
+String's methods called structurally: `gc_anon_call`); Ints of -128...1023 are
 boxed once; literals of 24 characters and more come from passive data
 segments; exceptions are the legacy try/catch instructions. The natives of
 strings, StringBuf, arrays, Bytes, BytesBuffer and Date are the linear

@@ -139,6 +139,7 @@ JavaScriptCore are unmeasured.
 
 #### A real program: the UI stack
 
+(As of the 17th; both build and run now: "The hybrid module" below.)
 Neither ui-counter nor gfx-cube builds. `HXMC_GC_SURVEY=1` lists what each
 lacks (=2 writes the module, those functions trapping):
 
@@ -177,57 +178,191 @@ measured. Getting there needed four fixes found by this program (a
 structural call to a method of another representation, Vector reads in
 generic code, Std.int out of range, BytesBuffer) and the identity hashes.
 
-#### What making it the browser's default would take
+#### The hybrid module (2026-10-18)
 
-1. **Interop with raw memory.** The packages talk to the browser through
-   C-ABI imports with pointers into linear memory, and keep GPU data in
-   memory (`@:hxmc.struct` values, `Arena`). A WasmGC module may also have
-   a linear memory: the plan would be WasmGC objects for Haxe values and a
-   small linear memory for what crosses the boundary, `hxmc.unsafe`
-   (`Mem`, `Ptr`, `Arena`, struct values) working on it as it does now, an
-   allocator for it (the linear runtime's `malloc`), and imports taking
-   addresses in it. What cannot carry over is `Mem.addr(bytes)`: a GC
-   array has no address and JavaScript cannot see into it, so the call
-   sites that hand a Bytes to the browser (WebGPU's buffer and texture
-   writes, the page's fonts, clipboard and text input) would copy through
-   that memory instead (in wasm, a loop; a frame's vertex data copied
-   once more). Strings: through the same memory as UTF-8, or JS String
-   Builtins where every browser has them.
-2. **Bytes and typed arrays.** Keep Bytes a GC i8 array: Haxe code reads
-   and writes it as fast as linear memory and the collector frees it;
-   only the boundary copies. A Bytes that must live in linear memory
-   (vertex buffers rewritten each frame) would be an `hxmc.unsafe` buffer
-   in the package, not a Bytes.
-3. **One implementation of each thing.** Done (2026-10-18, below): the
-   natives of Str, Arr, Bytes, Date and StringBuf are written once over
-   `hxmc.rt.Repr`, one implementation over `Mem` and one over `W`.
-4. **JavaScript interop.** WasmGC can hand Haxe objects to JavaScript by
-   reference (and hold JavaScript objects as `externref`) where linear
-   memory needs handle tables; worth having for `@hxmc/web`'s islands,
-   not needed to run what exists.
-5. **WASI and everything outside the browser stays linear memory**:
-   node's CLI, wasmtime, the npm compiler module and the playground's
-   compiler (WASI's files and processes, engines without WasmGC or with a
-   slow one). The default would change for browser builds only (the
-   site's examples, `@hxmc/web`'s islands, `@hxmc/os`'s canvas programs).
-6. **Threads**: neither path has them in the browser; linear memory's
-   route (shared memory, workers) exists, WasmGC's waits for
-   shared-everything threads. A program that needs threads would stay
-   on linear memory.
-7. **Engines**: Chrome 119, Firefox 120 and Safari 18.2 have WasmGC; the
-   speeds here are V8's. Before a switch: the site's examples measured in
-   all three (the playground's intermittent WebKit crash, under
-   investigation, is a reason to watch Safari).
+Done, in this order, each with linear memory's output unchanged (every
+corpus program, benchmark case and the tool byte-identical, natively and as
+wasm; the fixpoint and crosshost identical):
 
-**Recommendation.** Speed and memory are no longer the obstacle: WasmGC is
-at parity or faster on HaxeBenchmarks and on the UI engine, with half the
-memory and smaller modules. The obstacle is the packages' boundary with
-the browser. So: not the default yet; next, the hybrid module (a linear
-memory for `hxmc.unsafe` and the imports, copies where a Bytes crosses),
-which makes ui-counter and gfx-cube build; then frame times and sizes of
-the site's examples in Chrome, Firefox and Safari; switch browser builds
-to WasmGC when those hold, with the shared natives (item 3) done first.
-Linear memory stays the WASI target and the fallback.
+1. **One runtime** ("One runtime" below): the natives of strings, arrays,
+   Bytes, Date and StringBuf written once over `hxmc.rt.Repr`.
+2. **One reachability**: `GcGen.Reach` retired for the program-wide
+   `hxmc.ir.Reach` (method-level, by name), run a second time over IrOpt's
+   bodies so a function inlined everywhere is dropped; the runtime's exports
+   live where WasmGC's code calls them. HaxeBenchmarks' modules 0.6-15%
+   smaller (formatter_noio 562992 to 519353 bytes with the name section
+   now written only with `-debug`; json, which now has Arrays' and
+   Strings' methods for structural calls, 34145 to 40173), and Reflect and
+   Dynamic access keep what they reach.
+3. **The hybrid module** (docs/hxmc.md, "WasmGC"): Haxe's values in the
+   engine's collector, a small linear memory for `hxmc.unsafe` (`Mem`,
+   `Ptr`, frame areas, C string literals, malloc's heap, `Arena`,
+   `CString`) and for the imports, which take pointers into it as linear
+   memory's do (wasm32's C ABI); exported as `memory` with the callbacks'
+   table, so `browser.mjs` and the packages' `imports.mjs` run either kind
+   of module. A Bytes stays a GC array: `hxmc.unsafe.BytesPtr` copies it
+   through the memory where it crosses (linear memory: its address, no
+   copy): WebGPU's and GL's buffer, texture and uniform writes and GL's
+   readback, the page's fonts, text from the page (canvas window, ui's
+   drawn and native text). `@:hxmc.struct` classes whose fields are all
+   final (the shaders' Vec2-4, Mat4) are objects. i8-array views of a
+   Bytes are not something JavaScript can make (a GC array is opaque to
+   it), so the copy is a loop in wasm, measured below as part of the
+   frame. The packages' changes are a line at each crossing (os, gfx,
+   text; ui's two `take`s, one line each), so the same Haxe builds both
+   ways. `HXMC_GC_SURVEY`: gfx-cube, ui-counter and ui-gallery 0
+   unsupported constructs. Found on the way: structural calls of an
+   Array's or a String's methods (Iterable<T>), dead code after an if on
+   the target (`IrOpt.live`), a local set from Dynamic (Haxe's unchecked
+   conversions: a String holding a closure), all fixed.
+
+Checked: `make wasmgc-check` (now with `Unsafe.hx`), and the browser tests
+on WasmGC builds (`make gfx-web-check`: 6 scenes on WebGPU and WebGL2,
+headless and in a canvas, resize, text input, wheel, the readback
+checksum, the same pixel differences as linear memory; `make
+ui-web-check`: the todo example on both APIs with pointer, keyboard,
+clipboard, accessibility mirror, input method, wheel and touch, the
+native form, the native text editors).
+
+#### The site's examples, both ways
+
+Built as the site builds them (`-D hxmc.wasm-eh=legacy`, no name
+section), the linear builds with main's startup memory fix (010fa12):
+
+| example | linear KB | gzip -9 | WasmGC KB | gzip -9 | WasmGC / linear |
+| --- | --- | --- | --- | --- | --- |
+| gfx-cube | 193.0 | 53.0 | 100.8 | 37.1 | 0.52 (0.70 gzipped) |
+| ui-counter | 1226.9 | 319.3 | 824.0 | 273.3 | 0.67 (0.86) |
+| ui-gallery | 2275.9 | 530.0 | 1481.0 | 466.5 | 0.65 (0.88) |
+
+(ui-counter's WasmGC module: code 688 KB, string literals as globals 54
+KB, the dispatch table's elements 21 KB, a dense class-by-selector matrix
+linear memory overlays.)
+
+Run in Chromium 141, Firefox 142 (headed, under Xvfb: headless Firefox
+has no WebGL) and WebKit 26.0 by Playwright, 3 runs each, the medians:
+ready (fetch, compile, instantiate and main), the first frame, the frame
+callbacks' time while the cube turns, the counter is clicked 30 times or
+the gallery scrolled 30 times; memory: the linear memory plus, in
+Chromium, the JS heap (which holds WasmGC's objects; the others give no
+such number, so their WasmGC column shows the linear memory only); RSS:
+the browser's own processes above an empty page. WebGPU on SwiftShader in
+Chromium, WebGL2 elsewhere (llvmpipe, Mesa); no GPU, a shared 4-core
+machine:
+
+| browser | example | build | ready ms | first frame ms | frame mean ms | frame p90 ms | memory MB | browser RSS MB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Chromium | gfx-cube | linear | 70 | 80 | 0.43 | 0.9 | 12.6 | 62 |
+| Chromium | gfx-cube | WasmGC | 61 | 81 | 0.36 | 0.7 | 3.6 | 62 |
+| Chromium | ui-counter | linear | 117 | 177 | 0.57 | 2.1 | 23.9 | 88 |
+| Chromium | ui-counter | WasmGC | 147 | 199 | 0.56 | 2.1 | 9.5 | 96 |
+| Chromium | ui-gallery | linear | 161 | 270 | 2.12 | 5.1 | 24.8 | 130 |
+| Chromium | ui-gallery | WasmGC | 237 | 465 | 1.99 | 5.0 | 17.8 | 131 |
+| Firefox | gfx-cube | linear | 121 | 123 | 0.31 | 1.0 | 10.3 | 85 |
+| Firefox | gfx-cube | WasmGC | 173 | 175 | 0.25 | 1.0 | (1.3) | 89 |
+| Firefox | ui-counter | linear | 279 | 316 | 0.59 | 2.0 | 21.6 | 117 |
+| Firefox | ui-counter | WasmGC | 309 | 378 | 0.49 | 2.0 | (2.3) | 125 |
+| Firefox | ui-gallery | linear | 445 | 581 | 3.54 | 12.0 | 21.8 | 144 |
+| Firefox | ui-gallery | WasmGC | 422 | 575 | 3.43 | 9.0 | (3.3) | 164 |
+| WebKit | gfx-cube | linear | 118 | 146 | 2.72 | 3.0 | 10.3 | 53 |
+| WebKit | gfx-cube | WasmGC | 93 | 115 | 2.93 | 4.0 | (1.3) | 55 |
+| WebKit | ui-counter | linear | 198 | 262 | 0.44 | 1.0 | 21.6 | 104 |
+| WebKit | ui-counter | WasmGC | 210 | 263 | 0.40 | 1.0 | (2.3) | 106 |
+| WebKit | ui-gallery | linear | 350 | 540 | 1.63 | 4.0 | 21.8 | 118 |
+| WebKit | ui-gallery | WasmGC | 331 | 664 | 2.64 | 6.0 | (3.3) | 217 |
+
+(Firefox and WebKit time in whole milliseconds.) Before main's startup fix
+the linear builds took 98-106 MB of linear memory at start; against the
+fixed ones the difference in memory is a few MB, and the browsers' RSS
+shows none (WebKit's gallery: WasmGC's larger).
+
+What it says:
+
+- **Size**: the modules are a half to two thirds of linear memory's, but
+  gzip narrows it (0.70-0.88): linear memory's code compresses better.
+  What a visitor downloads shrinks by 16-65 KB per example.
+- **Frame times**: at parity in Chromium and Firefox (the UI engine's
+  layout, text and drawing, and the cube's per-frame work, including
+  the copies of uniforms through the memory); in WebKit the gallery's
+  frames are 60% slower (2.64 against 1.63 ms) and its RSS higher.
+- **Startup**: the cube starts as fast or faster; the UI examples' first
+  frame is slower in Chromium (gallery 465 against 270 ms) and in WebKit
+  (664 against 540): a larger part of a UI program runs before the first
+  frame (styles, layout, text, its strings made from globals at
+  instantiation), and how the engines tier WasmGC code up is not
+  measured here.
+- **Memory**: a few MB less than the fixed linear builds' linear memory,
+  none in the browsers' RSS.
+- **WebKit's trap**: in 108 runs in WebKit 26.0 (54 per build, the three
+  examples), one failed, a WasmGC ui-counter on its first frame:
+  "RuntimeError: Out of bounds array.set" under the callbacks' table's
+  call, not reproduced in the 53 other WasmGC runs nor in Chromium and
+  Firefox; the linear builds had none. It fits the intermittent WebKit
+  trap the playground shows (believed an engine bug), but one in 54 is
+  not enough to tell; it needs its own investigation before WebKit users
+  get WasmGC by default.
+
+HaxeBenchmarks under node 22 after all of the above, median of 5 (`make
+bench`'s targets hxmc, hxmc-wasm, hxmc-wasmgc; every check identical; the
+linear builds with main's startup memory fix):
+
+| case | native s | linear s | WasmGC s | / linear | native MB | linear MB | WasmGC MB | linear KB | WasmGC KB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| alloc | 1.71 | 2.58 | 2.85 | 1.10 | 749 | 1467 | 667 | 42 | 8 |
+| bcrypt | 2.97 | 3.37 | 3.12 | 0.93 | 4 | 58 | 54 | 278 | 131 |
+| binarytrees | 0.74 | 1.10 | 1.15 | 1.04 | 117 | 119 | 85 | 38 | 7 |
+| json | 0.52 | 0.75 | 0.83 | 1.11 | 140 | 245 | 191 | 103 | 39 |
+| mandelbrot | 0.79 | 0.99 | 0.70 | 0.71 | 11 | 64 | 53 | 42 | 8 |
+| mandelbrot_anon | 1.31 | 2.40 | 1.01 | 0.42 | 11 | 64 | 53 | 44 | 8 |
+| nbody | 0.79 | 1.03 | 1.05 | 1.02 | 0 | 52 | 50 | 42 | 10 |
+| sha256 | 0.20 | 0.30 | 0.34 | 1.14 | 21 | 75 | 69 | 250 | 114 |
+| sha512 | 0.03 | 0.11 | 0.08 | 0.70 | 9 | 58 | 56 | 255 | 118 |
+| formatter_noio | 6.55 | 8.22 | 9.39 | 1.14 | 262 | 193 | 101 | 1045 | 507 |
+
+Against the table above: linear memory got faster and smaller (the
+startup fix: sha256 0.35 to 0.30 s, json 0.79 to 0.75 s, peak RSS 58-75 MB
+instead of 150), so the memory lead is now small except where much is
+allocated (alloc, json, formatter_noio), and four cases are 10-14% slower
+than linear memory instead of within 10%. Part of it is WasmGC's own:
+formatter_noio 8.86 to 9.39 s, of which about 3% is the local set from
+Dynamic that is no longer given a type (correctness: a String local may
+hold a closure, as view's text holes do), the rest not yet attributed.
+
+#### What switching the browser builds would take, and the call
+
+What is no longer an obstacle: the packages' boundary (the same code builds
+both ways, every browser test passes on both), the duplicated runtime,
+the reachability. What stays linear memory regardless: WASI (node's CLI,
+wasmtime, the npm compiler and the playground's compiler: files and
+processes), engines without WasmGC, programs that need threads (shared
+memory and workers exist for linear memory; WasmGC waits for
+shared-everything threads).
+
+**Recommendation: not yet (no-go for now), for browser builds only to be
+revisited after the items below.** The hybrid module works and is smaller to
+download, with frame times at parity in Chromium and Firefox, but the
+case for switching rested on memory, which main's startup fix took away
+(the linear builds now start at 10-22 MB), and it is not ahead elsewhere:
+the UI examples' first frame is up to 72% later in Chromium, WebKit's
+gallery frames are 60% slower, and one unexplained trap in WebKit. Next:
+
+1. Startup of large WasmGC modules: string literals made lazily instead
+   of in `_start`'s globals, Meta's tables only when reflection is used,
+   the dispatch table overlaid as linear memory's rows are; then measure
+   the first frame again.
+2. WebKit: profile the gallery's frames (JSC's WasmGC casts and
+   `array.copy`), and reproduce the trap (stress the WasmGC counter's
+   first frame) against the playground's investigation.
+3. Smaller modules where gzip counts: the code's casts and the
+   strings' encoding.
+4. The benchmarks' 10-14% (formatter_noio, sha256, json, alloc): the
+   casts the untyped locals cost now, and what else moved since the
+   previous table.
+
+Switch the site's examples, `@hxmc/web`'s islands and `@hxmc/os`'s canvas
+programs when the first frame and WebKit hold; keep linear memory for
+WASI, the compiler modules and threads, and as the fallback (one define,
+`-D hxmc.wasm-gc`, chooses).
 
 #### One runtime
 
