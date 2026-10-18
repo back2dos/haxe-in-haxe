@@ -32,6 +32,45 @@ class Arr {
 		return r;
 	}
 
+	// haxe.ds.Vector.blit (hxmc/std/haxe/ds/Vector.hx): dest[destPos, destPos +
+	// n) = src[srcPos, srcPos + n), the ranges possibly overlapping (src ==
+	// dest). vectorMove: one move of the elements when both ranges are inside
+	// arrays of one element kind (as typed code makes them), true (nothing
+	// to do for n <= 0); false otherwise, nothing done (a leaf: no frame for
+	// the collector). vectorBlit: then upstream's loop, element by element
+	// through Dynamic (a kind converted on each store, a store past the end
+	// growing the array, as upstream's own code does here).
+	@:hxmc.noGc public static function vectorMove(src:Dynamic, srcPos:Int, dest:Dynamic, destPos:Int, n:Int):Bool {
+		// (one test each: a condition of || would be computed as a value)
+		if (n <= 0) return true;
+		if (kindOf(src) != kindOf(dest)) return false;
+		if (srcPos < 0) return false;
+		if (destPos < 0) return false;
+		if (n > len(src) - srcPos) return false;
+		if (n > len(dest) - destPos) return false;
+		Repr.arrMove(dest, destPos, src, srcPos, n);
+		return true;
+	}
+
+	public static function vectorBlit(src:Dynamic, srcPos:Int, dest:Dynamic, destPos:Int, n:Int):Void {
+		var s:Array<Dynamic> = src, d:Array<Dynamic> = dest;
+		if (Repr.same(src, dest)) {
+			if (srcPos < destPos) {
+				var i = srcPos + n, j = destPos + n;
+				for (k in 0...n) {
+					i--;
+					j--;
+					s[j] = s[i];
+				}
+			} else if (srcPos > destPos) {
+				for (k in 0...n)
+					s[destPos + k] = s[srcPos + k];
+			}
+		} else
+			for (k in 0...n)
+				d[destPos + k] = s[srcPos + k];
+	}
+
 	@:hxmc.host("Array_concat") static function concat(a:Dynamic, b:Dynamic):Dynamic {
 		if (kindOf(a) == kindOf(b)) {
 			// same element kind: one allocation, two copies

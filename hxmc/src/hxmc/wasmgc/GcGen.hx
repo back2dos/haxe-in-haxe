@@ -15,7 +15,7 @@ class GcGen {
 		// (twice: then over the bodies as emitted, without what IrOpt inlined everywhere)
 		var calls:hxmc.ir.Reach.RuntimeCalls = {ex: runtimeCalls, stmt: s -> s.match(SAnonSet(_)) ? "gc_anon_set" : null};
 		hxmc.ir.Reach.run(prog, o.stats, calls);
-		var u = new Uses(prog, o.opt);
+		var u = new Uses(prog, o.opt, o.jobs > 0 ? o.jobs : hxmc.Driver.domains());
 		hxmc.ir.Reach.run(prog, o.stats, calls, f -> u.bodies.get(f).body);
 		u.scan();
 		var survey = Sys.getEnv("HXMC_GC_SURVEY");
@@ -66,13 +66,50 @@ class Uses {
 	// the program works on linear memory (hxmc.unsafe, C functions: GcModule.memory)
 	public var memory = false;
 
-	public function new(prog:Program, optimize:Bool) {
+	public function new(prog:Program, optimize:Bool, jobs:Int) {
 		this.prog = prog;
-		var opt = new IrOpt();
-		for (f in prog.funcs) {
-			var b = opt.run(f, optimize);
-			bodies.set(f, {body: IrOpt.live(b.body), locals: b.locals});
+		// (each function's on its own: on threads, an IrOpt each, as its
+		// memos of the callees are the same for every function)
+		var fs = prog.funcs;
+		var out:Array<{body:Array<Stmt>, locals:Array<Local>}> = [for (_ in fs) null];
+		var next = 0, failure:Null<String> = null;
+		var lock = new sys.thread.Mutex();
+		function work() {
+			var opt = new IrOpt();
+			while (true) {
+				lock.acquire();
+				var k = next;
+				next += 64;
+				lock.release();
+				if (k >= fs.length || failure != null) return;
+				var end = k + 64 < fs.length ? k + 64 : fs.length;
+				try {
+					for (i in k...end) {
+						var b = opt.run(fs[i], optimize);
+						out[i] = {body: IrOpt.live(b.body), locals: b.locals};
+					}
+				} catch (e:Dynamic) {
+					lock.acquire();
+					if (failure == null) failure = Std.string(e);
+					lock.release();
+					return;
+				}
+			}
 		}
+		if (jobs > fs.length >> 6) jobs = (fs.length >> 6) + 1;
+		if (jobs <= 1) work() else {
+			var done = new sys.thread.Lock();
+			for (_ in 0...jobs)
+				sys.thread.Thread.create(() -> {
+					work();
+					done.release();
+				});
+			for (_ in 0...jobs)
+				done.wait();
+		}
+		if (failure != null) throw failure;
+		for (i in 0...fs.length)
+			bodies.set(fs[i], out[i]);
 	}
 
 	// (the functions the program keeps: what they use)

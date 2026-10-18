@@ -246,6 +246,14 @@ class Driver {
 		MirBuild.inlineCands = m;
 	}
 
+	// the processors (asked once: TaskPool runs getconf, 10-15 ms a build of the resident compiler)
+	static var domainCount = 0;
+
+	public static function domains():Int {
+		if (domainCount == 0) domainCount = core.ds.TaskPool.recommendedDomainCount();
+		return domainCount;
+	}
+
 	// resident (the compilation server): the objects of the last builds, by
 	// file, with their keys (a build reuses them without reading the cache)
 	public static var resident = false;
@@ -281,7 +289,7 @@ class Driver {
 		var hits = 0, misses = 0;
 		var tWrite = 0.0;
 		var keep = new Map<String, Bool>();
-		var jobs = o.jobs > 0 ? o.jobs : core.ds.TaskPool.recommendedDomainCount();
+		var jobs = o.jobs > 0 ? o.jobs : domains();
 		// the modules' keys, and the cached objects that match, in parallel
 		// (the threads only read the program); then, in module order, the
 		// string literals they found are registered and the index written
@@ -292,8 +300,9 @@ class Driver {
 		var lits:Array<Array<String>> = [for (_ in 0...nm) null];
 		var objs:Array<Obj> = [for (_ in 0...nm) null];
 		var s0 = haxe.Timer.stamp();
+		var inlined = new Fingerprint.Inlined();
 		parallel(nm, jobs, mi -> {
-			var fp = new Fingerprint(prep);
+			var fp = new Fingerprint(prep, inlined);
 			var text = new StringBuf();
 			text.add(tk);
 			for (f in byModule.get(order[mi]))
