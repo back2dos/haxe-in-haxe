@@ -184,8 +184,10 @@ writes, R8 and RGBA8 textures, blending, scissor) against
 `make 3d-check` (CI's `gfx` job): `@hxmc/3d` ([plans/3d.md](plans/3d.md)): its
 math (quaternions against gfx's rotation matrices, inverses, decomposition,
 bounds), the scene graph's matrices and their cache, the camera and the
-fixed-step clock, on Eval, natively and as wasm32-wasi
-(`packages/3d/test/SceneTest.hx`).
+fixed-step clock, and the glTF reader (the sample scene of
+`packages/3d/test/SampleModel.hx` as .glb and .gltf, its accessors, the
+hierarchy as scene nodes, files it must reject), on Eval, natively and as
+wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`).
 
 ## UI
 

@@ -192,7 +192,8 @@ help:
 ##             GLSL, WGSL, MSL and HLSL against packages/gfx/test/shader/, the programs it must
 ##             reject (packages/gfx/test/ShaderTest.hx; BLESS=1 rewrites the sources)
 ## 3d-check    packages/3d (docs/plans/3d.md): the math, the scene graph, the camera and the fixed-step
-##             clock on Eval, natively and as wasm32-wasi (packages/3d/test/SceneTest.hx)
+##             clock, the glTF reader on the sample scene, on Eval, natively and as wasm32-wasi
+##             (packages/3d/test/SceneTest.hx, GltfTest.hx)
 ## view-check  packages/view on Eval, natively and in JavaScript (the port, node): signals, markup
 ##             (elements, attributes, whitespace, components, text runs, reactive values), the control
 ##             flow components, on two test renderers with boundaries between them, and the programs
@@ -674,11 +675,13 @@ gfx-shader-check: $(TOOL)
 # packages/3d (docs/plans/3d.md) on gfx: the unit tests on Eval, natively and as wasm32-wasi
 SCENE_CP := $(GFX_CP) -cp packages/3d/src -cp packages/3d/examples -cp packages/3d/test
 3d-check: $(TOOL) $(STD) $(HOST_RT)
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SCENE_CP) --run SceneTest
+	@set -e; ulimit -s unlimited 2>/dev/null || true; for t in SceneTest GltfTest; do $(TOOL) $(SCENE_CP) --run $$t; done
 	$(call hxmc,bin/3d/SceneTest,$(SCENE_CP) -main SceneTest $(HXMC_ARGS))
-	bin/3d/SceneTest
+	$(call hxmc,bin/3d/GltfTest,$(SCENE_CP) -main GltfTest $(HXMC_ARGS))
+	bin/3d/SceneTest && bin/3d/GltfTest
 	$(call hxmc,bin/3d/SceneTest.wasm,$(SCENE_CP) -main SceneTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
-	$(WASI) bin/3d/SceneTest.wasm
+	$(call hxmc,bin/3d/GltfTest.wasm,$(SCENE_CP) -main GltfTest $(HXMC_ARGS) -D hxmc.target=wasm32-wasi)
+	$(WASI) bin/3d/SceneTest.wasm && $(WASI) bin/3d/GltfTest.wasm
 
 # (two renderers: TestRenderer, OtherRenderer; JavaScript compiled by the port)
 VIEW_CP := -cp packages/view/src -cp packages/view/test -D hxmc.view.renderer=TestRenderer -D hxmc.view.renderer.other=OtherRenderer
