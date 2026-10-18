@@ -57,9 +57,22 @@ class Prep {
 	public function strSymIfKnown(s:String):Null<String>
 		return e.strNames.get(s);
 
-	// the symbol Facts.str gives a literal (pure: threads may call it)
-	public static function strName(s:String):String
-		return "S_" + haxe.crypto.Md5.encode([for (i in 0...s.length) StringTools.hex(s.charCodeAt(i))].join(",")).substr(0, 16);
+	// the symbol Facts.str gives a literal (pure: threads may call it); kept,
+	// as a resident compiler names the same literals every build
+	public static function strName(s:String):String {
+		strLock.acquire();
+		var n = strNameCache.get(s);
+		strLock.release();
+		if (n != null) return n;
+		n = "S_" + haxe.crypto.Md5.encode([for (i in 0...s.length) StringTools.hex(s.charCodeAt(i))].join(",")).substr(0, 16);
+		strLock.acquire();
+		strNameCache.set(s, n);
+		strLock.release();
+		return n;
+	}
+
+	static var strNameCache = new Map<String, String>();
+	static var strLock = new sys.thread.Mutex();
 
 	// registers a literal named by strName, as Facts.str does
 	public function addStr(s:String, n:String) {

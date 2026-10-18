@@ -18,9 +18,14 @@ class Fingerprint {
 	// the literals without a symbol yet, with the one they get (literal,
 	// symbol, ...): Driver registers them once the threads are done
 	public var newStrings:Array<String> = [];
+	// the text of the callees inlined, by callee and depth, with the literals
+	// it found: shared by the modules of a build (a small function inlined
+	// in many places is written once)
+	var inlined:Null<Inlined>;
 
-	public function new(prep:Prep) {
+	public function new(prep:Prep, ?inlined:Inlined) {
 		this.prep = prep;
+		this.inlined = inlined;
 	}
 
 	// a 64-bit hash of a string (two 32-bit lanes), as 16 hex digits
@@ -178,6 +183,28 @@ class Fingerprint {
 		b.add(")");
 	}
 
+	// a callee's text, at the current depth (written once a build: Inlined)
+	function inlinedText(f:FuncInfo) {
+		var known = inlined == null ? null : inlined.get(f, depth);
+		if (known != null) {
+			b.add(known.text);
+			for (x in known.strings)
+				newStrings.push(x);
+			return;
+		}
+		if (inlined == null) {
+			func(f, b);
+			return;
+		}
+		var outer = b, n = newStrings.length;
+		var text = new StringBuf();
+		func(f, text);
+		b = outer;
+		var t = text.toString();
+		b.add(t);
+		inlined.set(f, depth, t, newStrings.slice(n));
+	}
+
 	function ex(e:Ex) {
 		switch e {
 			case EInt(v):
@@ -306,7 +333,7 @@ class Fingerprint {
 				if (depth < Inline.DEPTH && MirBuild.inlineCands != null && MirBuild.inlineCands.exists(f)) {
 					depth++;
 					b.add("I");
-					func(f, b);
+					inlinedText(f);
 					depth--;
 				}
 			case ECallDispatch(sel, sig, xs):
@@ -383,5 +410,29 @@ class Fingerprint {
 				}
 				args(xs);
 		}
+	}
+}
+
+// Fingerprint's texts of the callees inlined, for one build (threads share it)
+class Inlined {
+	var texts = new haxe.ds.ObjectMap<FuncInfo, Array<{text:String, strings:Array<String>}>>();
+	var lock = new sys.thread.Mutex();
+
+	public function new() {}
+
+	public function get(f:FuncInfo, depth:Int):Null<{text:String, strings:Array<String>}> {
+		lock.acquire();
+		var a = texts.get(f);
+		var r = a == null ? null : a[depth];
+		lock.release();
+		return r;
+	}
+
+	public function set(f:FuncInfo, depth:Int, text:String, strings:Array<String>) {
+		lock.acquire();
+		var a = texts.get(f);
+		if (a == null) texts.set(f, a = []);
+		if (a[depth] == null) a[depth] = {text: text, strings: strings};
+		lock.release();
 	}
 }

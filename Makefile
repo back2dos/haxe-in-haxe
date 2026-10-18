@@ -231,7 +231,8 @@ help:
 ##             view's signals keyed by component instance (packages/view/test/RefreshTest.hx), then
 ##             `hxmc dev` on ui's Counter: in headless Chromium, also as WasmGC (packages/os/test/dev/dev-web.mjs: an edit
 ##             keeps the count, a changed type resets it, a compile error shows in the overlay while the last
-##             good build runs) and natively in a window (dev-native.mjs; Linux: under Xvfb)
+##             good build runs) and natively in a window (dev-native.mjs; Linux: under Xvfb); the compilation
+##             server's builds through edits (one changing a module's API) against fresh ones (dev-verify.mjs)
 ## audio-programs  bin/audio/AUDIO_TARGET/{AudioTest,Tone}[.exe]: packages/os's audio test and example
 ## audio-check  packages/os's audio through each back end without speakers (packages/os/test/audio.sh):
 ##             ALSA's null and file devices (Linux), CoreAudio's generic output (macOS), WASAPI
@@ -810,6 +811,7 @@ dev-check: $(TOOL) $(STD) $(HOST_RT)
 	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web
 	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-web.mjs $(TOOL) bin/dev/web-gc --wasm-gc
 	ulimit -s unlimited 2>/dev/null || true; $(if $(filter linux-%,$(HOST)),xvfb-run -a -s "-screen 0 640x480x24") $(NODE) packages/os/test/dev/dev-native.mjs $(TOOL) bin/dev/native
+	ulimit -s unlimited 2>/dev/null || true; $(NODE) packages/os/test/dev/dev-verify.mjs $(TOOL) Counter web
 
 # (each macro class compiled in a child of bin/jit/haxe; the engine's report in each
 # case's port.log)
