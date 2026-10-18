@@ -152,6 +152,20 @@ class Boxes {
 	}
 
 	@:hxmc.export("hx_arr_new_n") static function arrNewN(kind:Int, len:Int):Dynamic {
+		var ds = ak4(kind) ? (len + 1) >> 1 : len;
+		if (ds < 1) ds = 1;
+		if (ds <= 64) {
+			// small: the array and its data in one allocation (one bump, no
+			// root), split by writing the second header; both are young
+			var a = Mem.alloc(3 + ds, T_ARRAY, K_OBJ);
+			var p = Mem.addr(a);
+			Mem.setI64(p, -8, mkhdr(2, K_OBJ, T_ARRAY));
+			Mem.setI32(p, 0, len);
+			Mem.setI32(p, 4, kind);
+			Mem.setPtr(p, 8, p.add(24));
+			Mem.setI64(p, 16, kind == AK_PTR ? mkhdr(ds, K_PARR, T_ADATA_P) : mkhdr(ds, K_RAW, T_ADATA_RAW));
+			return a;
+		}
 		var d = dataAlloc(kind, len);
 		var a = Mem.alloc(2, T_ARRAY, K_OBJ);
 		Mem.setI32(Mem.addr(a), 0, len);
