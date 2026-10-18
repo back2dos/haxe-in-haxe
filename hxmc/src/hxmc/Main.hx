@@ -105,14 +105,11 @@ class Main {
 	}
 
 	static function generate(com:context.Common.CommonContext, out:String) {
-		var path = com.main.mainPath;
-		var mainClass = null;
-		for (t in com.types)
-			switch t {
-				case TClassDecl(c) if (c.clPath.name == path.name && c.clPath.pack.join(".") == path.pack.join(".")):
-					mainClass = c;
-				case _:
-			}
+		// the class whose static main the program runs, as the other targets
+		// find it (Common.getEntryPoint): the -main module's statics when they
+		// hold main (a module-level `function main()`), else its class of that name
+		if (com.main.mainPath == null) throw "a program needs an entry point: -main <module>";
+		var mainClass = context.Common.getEntryPoint(com).cls;
 		var opts = Options.read(com);
 		var abi = Abi.get(opts.target);
 		abi.setLibc(opts.libc);
