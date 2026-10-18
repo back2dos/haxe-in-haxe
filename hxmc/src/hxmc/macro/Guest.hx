@@ -58,6 +58,7 @@ class Guest {
 		hxmc.ir.Lower.targetOs = abi.osCode();
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
+		hxmc.ir.Lower.targetPlatform = abi.platformCode();
 		entryCalls(com, main);
 		mkPos(com);
 		var l = new hxmc.ir.Lower();

@@ -154,9 +154,26 @@ class Abi {
 		exports = ["ANativeActivity_onCreate"];
 	}
 
+	// iOS (ios-arm64, ios-sim-arm64): Darwin's kernel and libSystem, the
+	// layouts and runtime objects of macos-arm64 (Mem.os() 1, Mem.target()
+	// 3), Mach-O with the iOS or the simulator's platform in its build
+	// version (LinkMachO) and an app bundle (hxmc.ios.Bundle);
+	// Mem.platform() 1 or 2
+	function setIos(simulator:Bool) {
+		platform = simulator ? "ios-simulator" : "ios";
+		rtName = "macos-arm64";
+	}
+
+	public function ios():Bool
+		return platform == "ios" || platform == "ios-simulator";
+
 	// Mem.os(): 0 Linux, 1 macOS, 2 Windows, 3 WASI
 	public function osCode():Int
 		return os == "linux" ? 0 : os == "macos" ? 1 : os == "windows" ? 2 : 3;
+
+	// Mem.platform(): 0 the system's own (macOS where Mem.os() is 1), 1 iOS, 2 the iOS simulator
+	public function platformCode():Int
+		return platform == "ios" ? 1 : platform == "ios-simulator" ? 2 : 0;
 
 	public static function get(target:String):Abi
 		return switch target {
@@ -174,7 +191,12 @@ class Abi {
 				var a = new Abi(target, arm, "linux", arm ? 272 : 104, arm ? 256 : 88, arm ? 264 : 96, 8, "_setjmp", "");
 				a.setAndroid();
 				a;
-			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64, wasm32-wasi, android-arm64, android-x86_64)";
+			// (the device and the simulator on Apple silicon: macos-arm64's ABI)
+			case "ios-arm64" | "ios-sim-arm64":
+				var a = new Abi(target, true, "macos", 208, 192, 200, 8, "_setjmp", "_");
+				a.setIos(target == "ios-sim-arm64");
+				a;
+			case _: throw "hxmc: unknown target " + target + " (linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64, windows-arm64, wasm32-wasi, android-arm64, android-x86_64, ios-arm64, ios-sim-arm64)";
 		}
 }
 
