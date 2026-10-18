@@ -184,6 +184,9 @@ class Lower {
 	public static var targetPlatform = -1; // (Mem.platform: Abi.platformCode)
 	// -D hxmc.wasm-gc (hxmc.wasmgc): the runtime's Haxe implementations are those of @:hxmc.wasmgc classes
 	public static var wasmGc = false;
+	// the program's resources (--resource), haxe.Resource's content: each
+	// one's name and data in base64, in genjs's order (Main.generate)
+	public static var resources:Array<{name:String, data:String}> = [];
 
 	// a condition on the target (Mem.os, Mem.arm, Mem.target compared with
 	// constants) as a constant (EInt), when it is one: FnLower lowers only

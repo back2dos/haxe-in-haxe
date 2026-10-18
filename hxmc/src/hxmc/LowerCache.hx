@@ -58,12 +58,21 @@ class LowerCache {
 	var platform = -1; // (and its Apple platform: Mem.platform)
 	var lines = false; // and whether they have their positions (Lower.lines)
 	var wasmGc = false; // (and the runtime's implementations they call: Lower.wasmGc)
+	var resources:Array<{name:String, data:String}> = []; // (and haxe.Resource's content: Lower.resources)
+
+	static function sameResources(a:Array<{name:String, data:String}>, b:Array<{name:String, data:String}>):Bool {
+		if (a.length != b.length) return false;
+		for (i in 0...a.length)
+			if (a[i].name != b[i].name || a[i].data != b[i].data) return false;
+		return true;
+	}
 
 	public function lower(main:TClass, types:Array<ModuleType>, basic:BasicTypes):Program {
 		hits = misses = keyed = 0;
 		why = null;
 		build++;
-		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines || Lower.wasmGc != wasmGc) {
+		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines || Lower.wasmGc != wasmGc
+			|| !sameResources(Lower.resources, resources)) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
 			byKey = new Map();
@@ -71,6 +80,7 @@ class LowerCache {
 			platform = Lower.targetPlatform;
 			lines = Lower.lines;
 			wasmGc = Lower.wasmGc;
+			resources = Lower.resources;
 		}
 		var l = new CachedLower(this, true, types);
 		var prog = try Lower.program(main, types, basic, l) catch (m:Mismatch) {

@@ -1880,6 +1880,16 @@ class FnLower {
 		switch strip(f).eexpr {
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);
+			case TIdent("__resources__") if (cargs.length == 0):
+				// haxe.Resource's content: an object per resource with its name
+				// and its data in base64 (Lower.resources), as genjs writes it
+				var sh = l.getProgram().shape([{name: "name", ty: TRef(RStr)}, {name: "data", ty: TRef(RStr)}]);
+				var objs:Array<Ex> = [
+					for (r in Lower.resources)
+						temp(TRef(RAnon), ENewAnon(sh, [for (f in sh.fields) EStr(f.name == "name" ? r.name : r.data)]))
+				];
+				var at = TRef(RArr(TRef(RAnon)));
+				return coerce(temp(at, ENewArr(TRef(RAnon), objs)), at, rt);
 			case TField(_, FStatic(c, cf)) if (c.hasClassFlag(CExtern) || cf.cfExpr == null):
 				var s = switch TFunctions.follow(cf.cfType) {
 					case TFun(s): s;
