@@ -210,10 +210,10 @@ const stop = () => {
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 
-// a build: a request to the compilation server (its protocol: the
-// arguments, one per line, then a NUL; the answer's lines: \x01 output,
-// \x02 failure, any other a message), with -D hxmc.dev
-function build() {
+// a request to the compilation server (its protocol: the arguments, one
+// per line, then a NUL; the answer's lines: \x01 output, \x02 failure, any
+// other a message)
+function request(words) {
 	return new Promise((resolve) => {
 		const tryConnect = (n) => {
 			const sock = net.connect(serverPort, '127.0.0.1');
@@ -223,7 +223,7 @@ function build() {
 				else resolve({ ok: false, messages: 'hxmc dev: no compilation server (' + e.message + ')' });
 			});
 			sock.on('connect', () => {
-				sock.write(['--cwd', cwd, ...args, '-D', 'hxmc.dev', ...(hxmcStd ? ['-cp', hxmcStd] : [])].map((a) => a + '\n').join('') + '\0');
+				sock.write(['--cwd', cwd, ...words].map((a) => a + '\n').join('') + '\0');
 			});
 			sock.on('data', (d) => chunks.push(d));
 			sock.on('end', () => {
@@ -239,6 +239,18 @@ function build() {
 		};
 		tryConnect(100);
 	});
+}
+
+// a build, with -D hxmc.dev; the files changed since the last one invalidated
+// first (server/invalidate): the server compares a file's time, which two
+// saves in one second share (and file systems with coarse times)
+const changedFiles = new Set();
+async function build() {
+	const files = [...changedFiles];
+	changedFiles.clear();
+	for (const file of files)
+		if (file.endsWith('.hx')) await request(['--display', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/invalidate', params: { file } })]);
+	return request([...args, '-D', 'hxmc.dev', ...(hxmcStd ? ['-cp', hxmcStd] : [])]);
 }
 
 // --- the program ---
@@ -521,6 +533,7 @@ function changed(file) {
 	if (base.startsWith('.') || base.endsWith('~') || base.endsWith('.swp') || base.endsWith('.tmp') || base.startsWith('#')) return;
 	const full = path.resolve(file);
 	if (full === out || full.startsWith(out + '.')) return;
+	changedFiles.add(full);
 	if (firstSeen === null) firstSeen = performance.now();
 	clearTimeout(pending);
 	pending = setTimeout(() => {
