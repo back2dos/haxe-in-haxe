@@ -202,7 +202,7 @@ help:
 ##             from packages/ui/test/layout-ref.mjs), text wrapping, events and focus (UiTest.hx);
 ##             markup rendered into nodes (MarkupTest.hx); the guide's examples (GuideTest.hx); the
 ##             widgets' examples rendered and their reference complete (WidgetExamplesTest.hx; the
-##             reference written to bin/ui/widgets.json, WidgetDocs.hx)
+##             reference written to bin/ui/widgets.json, tools/WidgetDocs.hx)
 ## theme-check  packages/theme on Eval: Tailwind's classes read as rules, Tw's rules made at compile time,
 ##             shadcn's sheet made, the classes it rejects (packages/theme/test/ThemeTest.hx)
 ## theme-fidelity-check  packages/theme's widgets drawn headless against shadcn's markup in Chromium
@@ -409,7 +409,7 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 # files its pages fetch (Version.hx, Site.asset): a deploy reaches browsers at once.
 mb = awk '{printf "%.1f MB", $$1 / 1048576}'
 SITE_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
-SITE_CP := -cp packages/view/src -cp packages/web/src -cp packages/web/examples -cp site/islands -cp site/src -D hxmc.view.renderer.html=hxmc.web.StaticRenderer
+SITE_CP := -cp packages/view/src -cp packages/web/src -cp packages/web/examples -cp site/islands -cp site/src -cp packages/ui/tools -D hxmc.view.renderer.html=hxmc.web.StaticRenderer
 site: wasm $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN)
 	rm -rf bin/site && mkdir -p bin/site
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(SITE_CP) --run Site --out bin/site --build bin/site-build --tool $(TOOL) --version $(SITE_VERSION) --jobs $(JOBS)
@@ -666,8 +666,8 @@ ui-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test --run UiTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run MarkupTest
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/ui/test -cp packages/ui/examples --run GuideTest
-	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/examples/widgets --run WidgetExamplesTest
-	mkdir -p bin/ui; ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/test --run WidgetDocs packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/ui/examples/widgets bin/ui/widgets.json
+	ulimit -s unlimited 2>/dev/null || true; $(TOOL) $(UI_VIEW) -cp packages/text/src -cp packages/ui/src -cp packages/theme/src -cp packages/ui/test -cp packages/ui/tools -cp packages/ui/examples/widgets --run WidgetExamplesTest
+	mkdir -p bin/ui; ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/tools --run WidgetDocs packages/ui/src/hxmc/ui/widgets/Widgets.hx packages/ui/examples/widgets bin/ui/widgets.json
 
 # random flex trees against Chromium (Playwright): a tool, not a lane
 ui-layout-fuzz: $(TOOL)
@@ -682,7 +682,7 @@ theme-check: $(TOOL)
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src -cp packages/theme/test --run CssTest
 
 # (the theme's CSS on Eval, the DOM's widgets compiled to JavaScript by the port, in Chromium)
-DOM_CP := -cp packages/view/src -cp packages/web/src -cp packages/ui/src -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
+DOM_CP := -cp packages/view/src -cp packages/web/src -cp packages/text/src -cp packages/ui/src -D hxmc.view.renderer.dom=hxmc.web.DomRenderer
 theme-dom-check: $(TOOL) $(PORT_BIN)
 	@mkdir -p bin/theme/dom
 	ulimit -s unlimited 2>/dev/null || true; $(TOOL) -cp packages/ui/src -cp packages/theme/src --run hxmc.theme.Css shadcn.json bin/theme/dom/shadcn.css
