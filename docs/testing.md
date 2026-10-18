@@ -276,8 +276,10 @@ in Firefox and WebKit at a desktop's and a phone's width, rendered with
 its islands hydrated, no errors and no horizontal scrolling; the menu, the
 theme, the examples running, the triangle and the cube against their
 golden images, web's Counter and Lab islands, the tone; the playground's
-compiler with both modules and its fallback to the legacy one in a
-Chromium without exnref), `npm` (the nine packages in fresh projects on each of the six
+compiler with both modules, its fallback to the legacy one in a
+Chromium without exnref, and its worker running a request again after a
+fault of the engine, faked (the WebKit of Safari 26.0 at times faults in
+correct code: `site/client/Worker.hx`)), `npm` (the nine packages in fresh projects on each of the six
 machines: native at once through the platform package, `-lib` from
 node_modules (`hxmc/test/NodeLibs.hx`), `--ignore-scripts`; and on linux-x64,
 or on all six on main, tags and the nightly run, lix with `dist/`, the
