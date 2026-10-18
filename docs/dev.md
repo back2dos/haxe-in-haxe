@@ -222,24 +222,30 @@ build) and reports the first frame.
 
 ## Times
 
-Edit to the new build's first frame, on a 4-core x86-64 Linux machine
-(headless Chromium with SwiftShader; natively under Xvfb with llvmpipe),
-ui's Counter (about 400 modules, 1700 functions) and Gallery (3300
-functions), a one-line edit:
+From the save to the new build's first frame, a one-line edit of the
+program's `main` (`node packages/os/test/dev/dev-latency.mjs <compiler>
+<example> web|web-gc|native`: the medians of six edits), on a 4-core x86-64
+Linux machine, headless Chromium with SwiftShader, natively under Xvfb with
+llvmpipe; ui's Counter (about 400 modules, 1700 functions) and Gallery (about
+3300 functions):
 
-| | build | save to frame |
-| --- | --- | --- |
-| Counter, browser (wasm) | 0.86-0.96 s | 1.00-1.11 s |
-| Counter, browser (WasmGC) | 0.73-0.83 s | 0.89-0.99 s |
-| Counter, native | 0.82-0.98 s | 0.98-1.15 s |
-| Gallery, browser (wasm) | see below | |
+| | build | save to frame | target |
+| --- | --- | --- | --- |
+| Counter, browser (wasm) | 0.92 s | 1.07 s | 0.5 s |
+| Counter, browser (WasmGC) | 0.84 s | 1.01 s | 0.5 s |
+| Counter, native | 0.94 s | 1.12 s | 0.5 s |
+| Gallery, browser (wasm) | 1.49 s | 1.75 s | 1.5 s |
+| Gallery, browser (WasmGC) | 1.31 s | 1.68 s | 1.5 s |
+| Gallery, native | 1.48 s | 1.68 s | 1.5 s |
 
-The build is most of it: in the compilation server, about 0.35 s reads
-the cached modules back from their HXB and caches the build's, 0.18 s
-(Counter) lowers every function again (the lowered bodies are kept only
-for field objects that survive a build, and the HXB cache makes new ones),
-the rest is DCE, the objects and the link. The plan's targets (Counter
-under 0.5 s, Gallery under 1.5 s) need those two first.
+The build is most of it (the reload itself, the page loading again or the
+process starting, is 0.15-0.25 s). Of the Counter's build, in the
+compilation server: about 0.35 s reads every cached module back from its
+HXB and caches the build's again (the server's HXB cache, as upstream's),
+0.18 s lowers every function again, then DCE, the objects and the link;
+the Gallery's edit also types its large module of markup again. Neither
+target is met yet: what would close the gap is in
+[plans/dev-loop.md](plans/dev-loop.md).
 
 ## Tests
 
