@@ -373,28 +373,53 @@ class Program {
 
 	public function new() {}
 
+	var sigKeys = new Map<String, SigInfo>();
+
 	public inline function isLive(f:FuncInfo):Bool
 		return live == null || live.exists(f);
 
 	public function sig(args:Array<Ty>, ret:Ty):SigInfo {
-		var key = [for (a in args) Ir.repr(a)].join("") + "_" + Ir.repr(ret);
-		for (s in sigs)
-			if (s.key == key) return s;
+		var b = new StringBuf();
+		for (a in args)
+			b.add(Ir.repr(a));
+		b.add("_");
+		b.add(Ir.repr(ret));
+		var key = b.toString();
+		var s = sigKeys.get(key);
+		if (s != null) return s;
 		var norm = (t:Ty) -> Ir.isRef(t) ? TRef(RAny) : t;
-		var s = new SigInfo(sigs.length, [for (a in args) norm(a)], norm(ret), key);
+		s = new SigInfo(sigs.length, [for (a in args) norm(a)], norm(ret), key);
 		sigs.push(s);
+		sigKeys.set(key, s);
 		return s;
 	}
 
 	var shapeKeys = new Map<String, ShapeInfo>();
 
 	public function shape(fields:Array<{name:String, ty:Ty}>):ShapeInfo {
-		var fs = fields.copy();
-		fs.sort((a, b) -> a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-		var key = [for (f in fs) f.name + ":" + Ir.repr(f.ty)].join(",");
+		// (by name: sorted when they are not already)
+		var sorted = true;
+		for (i in 1...fields.length)
+			if (!(fields[i - 1].name < fields[i].name)) {
+				sorted = false;
+				break;
+			}
+		var fs = fields;
+		if (!sorted) {
+			fs = fields.copy();
+			fs.sort((a, b) -> a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+		}
+		var b = new StringBuf();
+		for (i in 0...fs.length) {
+			if (i > 0) b.add(",");
+			b.add(fs[i].name);
+			b.add(":");
+			b.add(Ir.repr(fs[i].ty));
+		}
+		var key = b.toString();
 		var s = shapeKeys.get(key);
 		if (s != null) return s;
-		s = new ShapeInfo(shapes.length, fs);
+		s = new ShapeInfo(shapes.length, sorted ? fs.copy() : fs);
 		shapes.push(s);
 		shapeKeys.set(key, s);
 		return s;

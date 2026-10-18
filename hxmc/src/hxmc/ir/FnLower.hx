@@ -401,8 +401,7 @@ class FnLower {
 			case TAnon(an) if (an.aStatus.match(Closed | Const)):
 				// (in the order of the names: a map's order follows its insertions,
 				// which differ for a type read from HXB, and ty numbers the types it meets)
-				var names = [for (k in an.aFields.keys()) k];
-				names.sort(Reflect.compare);
+				var names = l.anonNames(an);
 				var fs = [for (k in names) {name: k, ty: l.boxed(ty(an.aFields.get(k).cfType))}];
 				var sh = l.getProgram().shape(fs);
 				var i = sh.slot(name);
@@ -2199,16 +2198,8 @@ class FnLower {
 			case _: false;
 		}
 
-	// (Null<S> is not a struct value: a reference to its box, Lower.boxed)
-	static function structOf(t:core.TType.T):Null<TClass>
-		return switch TFunctions.followWithoutNull(t) {
-			case TAbstract({aPath: {pack: [], name: "Null"}}, _): null;
-			case _:
-				switch CInterop.ctype(t) {
-					case CStruct(c): c;
-					case _: null;
-				}
-		}
+	inline function structOf(t:core.TType.T):Null<TClass>
+		return l.structOf(t);
 
 	static function structTy(c:TClass):Ty
 		return TStruct(core.Globals.sTypePath(c.clPath), CInterop.layout(c).size);
@@ -2447,7 +2438,8 @@ class FnLower {
 			return coerce(x, TRef(RAny), tyOf(e));
 		}
 		var x = EAnonGet(name, t, value(obj), anonHint(obj.etype, name, t));
-		return t == tyOf(e) ? x : coerce(temp(t, x), t, tyOf(e));
+		// (a reference through a temporary; a number or a Bool as it is)
+		return Ir.isRef(t) ? coerce(temp(t, x), t, tyOf(e)) : x;
 	}
 
 	// ---- closures
@@ -2496,41 +2488,52 @@ class Boxing {
 	public static function analyze(body:TExpr, args:Array<TVar>):Map<Int, Bool> {
 		var captured = new Map<Int, Bool>();
 		var assigned = new Map<Int, Bool>();
-		function walk(e:TExpr, depth:Int, declDepth:Map<Int, Int>) {
+		// (the walk's depth in closures, and the depth each local is declared
+		// at: nothing is captured at depth 0)
+		var depth = 0;
+		var declDepth = new Map<Int, Int>();
+		function walk(e:TExpr) {
 			switch e.eexpr {
 				case TVar(v, init):
 					declDepth.set(v.vId, depth);
-					if (init != null) walk(init, depth, declDepth);
+					if (init != null) walk(init);
 				case TLocal(v):
-					var d = declDepth.get(v.vId);
-					if (d != null && d < depth) captured.set(v.vId, true);
+					if (depth > 0) {
+						var d = declDepth.get(v.vId);
+						if (d != null && d < depth) captured.set(v.vId, true);
+					}
 				case TBinop(OpAssign | OpAssignOp(_), {eexpr: TLocal(v)}, rhs):
 					assigned.set(v.vId, true);
-					var d = declDepth.get(v.vId);
-					if (d != null && d < depth) captured.set(v.vId, true);
-					walk(rhs, depth, declDepth);
+					if (depth > 0) {
+						var d = declDepth.get(v.vId);
+						if (d != null && d < depth) captured.set(v.vId, true);
+					}
+					walk(rhs);
 				case TUnop(Increment | Decrement, _, {eexpr: TLocal(v)}):
 					assigned.set(v.vId, true);
-					var d = declDepth.get(v.vId);
-					if (d != null && d < depth) captured.set(v.vId, true);
+					if (depth > 0) {
+						var d = declDepth.get(v.vId);
+						if (d != null && d < depth) captured.set(v.vId, true);
+					}
 				case TFunction(tf):
 					for (a in tf.tfArgs)
 						declDepth.set(a.variable.vId, depth + 1);
-					walk(tf.tfExpr, depth + 1, declDepth);
+					depth++;
+					walk(tf.tfExpr);
+					depth--;
 				case TTry(b, cs):
-					walk(b, depth, declDepth);
+					walk(b);
 					for (c in cs) {
 						declDepth.set(c.variable.vId, depth);
-						walk(c.expr, depth, declDepth);
+						walk(c.expr);
 					}
 				case _:
-					core.Texpr.iter(x -> walk(x, depth, declDepth), e);
+					core.Texpr.iter(walk, e);
 			}
 		}
-		var decl = new Map<Int, Int>();
 		for (a in args)
-			decl.set(a.vId, 0);
-		walk(body, 0, decl);
+			declDepth.set(a.vId, 0);
+		walk(body);
 		var r = new Map<Int, Bool>();
 		for (id in captured.keys())
 			if (assigned.exists(id)) r.set(id, true);
