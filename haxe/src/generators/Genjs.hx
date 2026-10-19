@@ -2194,6 +2194,10 @@ class Genjs {
 				switch ctx.smap {
 					case null:
 						try sys.FileSystem.deleteFile(com.file + ".map") catch (_:Dynamic) {}
+					case smap if (Gctx.definedValueSafe(com, Define.SourceMap) == "inline"):
+						/* the map inside the output: no .map file, and none left from an earlier build */
+						try sys.FileSystem.deleteFile(com.file + ".map") catch (_:Dynamic) {}
+						print(ctx, "\n//# sourceMappingURL=" + JsSourcemap.mappingsDataUrl(ctx.com, smap, "file:///"));
 					case smap:
 						JsSourcemap.writeMappings(ctx.com, smap, "file:///");
 						var basefile = core.OcamlFilename.basename(com.file);
