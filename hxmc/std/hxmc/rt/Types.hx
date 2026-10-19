@@ -120,7 +120,8 @@ class Types {
 	public static inline function nstatics(ty:Ptr):Int
 		return Mem.getI32(ty, 96);
 
-	// rt_static (24 bytes): int32 fid, char kind, int32 idx, void *ptr
+	// rt_static (24 bytes): int32 fid, char kind, int32 idx, int32 rank (its
+	// place in Type.getClassFields), void *ptr; sorted by fid
 	public static inline function stat(ty:Ptr, i:Int):Ptr
 		return Mem.getPtr(ty, 104).add(24 * i);
 
