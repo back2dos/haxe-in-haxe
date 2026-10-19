@@ -151,6 +151,7 @@ direct malformed-before-error haxe/test/conformance unit.strings.MalformedBefore
 direct malformed-same-chunk haxe/test/conformance unit.strings.MalformedSameChunk
 direct malformed-parse haxe/test/conformance unit.strings.MalformedParse
 hxml malformed-define haxe/test/conformance/strings-define build.hxml
+noeval malformed-define Eval as the host: the port on Eval reads the define with the strings of Eval, which take no such bytes (0xFF: UTF8.next; without it: BadUTF of Pcre2), as the Eval of the reference does not
 hxml string-bounds-in-range haxe/test/conformance/strings-bounds build.hxml -D probe=in-range
 hxml string-bounds-unsafe-end haxe/test/conformance/strings-bounds build.hxml -D probe=unsafe-end
 hxml string-bounds-unsafe-negative haxe/test/conformance/strings-bounds build.hxml -D probe=unsafe-negative
