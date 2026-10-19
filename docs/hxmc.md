@@ -685,8 +685,13 @@ of shadow stack where node's 8 MB stack is full at 2 to 4 MB. Memory
 memory.grow gave is zero, so only what was handed out before and freed is
 zeroed (`Heap.freshFrom`: the highest the regions reached): the nursery, the
 shadow stack and the 64 KB granule table cost address space, not pages,
-until they are used. When memory.grow fails the runtime writes "out of
-memory: linear memory is N MB, growing it by M MB failed" and exits;
+until they are used. Memory grows by an eighth of its size at a time when
+that is more than is needed (else, or when the host refuses it, by what is
+needed): node collects its own heap after a memory.grow (V8 counts the
+grown buffer as new external memory), which in the port's self-compile,
+growing by the old space's 1 MB chunks, made 400 collections. When
+memory.grow fails the runtime writes "out of memory: linear memory is N
+MB, growing it by M MB failed" and exits;
 `packages/os/browser.mjs` turns a RangeError of the browser's (a new
 instance's memory, an ArrayBuffer) into "out of memory: the browser refused
 N MB ...", which the islands' loader shows (`data-error`).
