@@ -152,7 +152,12 @@ class EvalString {
 		return r;
 	}
 
-	static inline function getBOffset(s:Vstring, cLen:Int, bOffset:Int):Int return move(s, bOffset, cLen);
+	// port: get_b_offset; with a negative count it walks on until UTF8.next
+	// reads past the end.
+	static function getBOffset(s:Vstring, cLen:Int, bOffset:Int):Int {
+		if (cLen < 0) return outOfBounds();
+		return move(s, bOffset, cLen);
+	}
 
 	static function rgetBOffset(s:Vstring, cLen:Int, bOffset:Int):Int {
 		while (cLen != 0) {
@@ -165,14 +170,24 @@ class EvalString {
 	// port: native index of the character (code point) at `cIndex`.
 	public static function getOffset(s:Vstring, cIndex:Int):Int return getOffsetEntry(s, cIndex).bOffset;
 
-	// port: UTF8.next and UTF8.prev on native indices: a surrogate pair is one character.
-	static inline function next(s:Vstring, b:Int):Int return s.sbmp ? b + 1 : b + (isHighSurrogateAt(s.sstring, b) ? 2 : 1);
+	// port: UTF8.next and UTF8.prev on native indices: a surrogate pair is one
+	// character. Both read the string where OCaml's s.[i] checks the index.
+	static function next(s:Vstring, b:Int):Int {
+		if (b < 0 || b >= s.sstring.length) outOfBounds();
+		return s.sbmp ? b + 1 : b + (isHighSurrogateAt(s.sstring, b) ? 2 : 1);
+	}
 
 	static function prev(s:Vstring, b:Int):Int {
-		if (s.sbmp || b < 2) return b - 1;
-		var y = StringTools.fastCodeAt(s.sstring, b - 1);
-		return y >= 0xDC00 && y <= 0xDFFF && isHighSurrogateAt(s.sstring, b - 2) ? b - 2 : b - 1;
+		var i = b - 1;
+		if (i < 0) return -1;
+		if (i >= s.sstring.length) outOfBounds();
+		if (s.sbmp || i == 0) return i;
+		var y = StringTools.fastCodeAt(s.sstring, i);
+		return y >= 0xDC00 && y <= 0xDFFF && isHighSurrogateAt(s.sstring, i - 1) ? i - 1 : i;
 	}
+
+	// port: OCaml's s.[i] past either end of the string.
+	static function outOfBounds():Dynamic throw new core.ds.InvalidArgument("index out of bounds");
 
 	static inline function isHighSurrogateAt(s:String, i:Int):Bool {
 		var x = StringTools.fastCodeAt(s, i);
@@ -184,11 +199,21 @@ class EvalString {
 
 	// port: native index `b` moved by `cLength` characters (UTF8.move).
 	public static function move(s:Vstring, b:Int, cLength:Int):Int {
-		if (s.sbmp) return b + cLength;
-		var str = s.sstring;
-		while (cLength > 0 && b < str.length) {
-			b += isHighSurrogateAt(str, b) ? 2 : 1;
-			cLength--;
+		if (cLength >= 0) {
+			if (s.sbmp) {
+				// port: next's reads of b .. b + cLength - 1 at once
+				if (cLength > 0 && (b < 0 || b + cLength > s.sstring.length)) outOfBounds();
+				return b + cLength;
+			}
+			while (cLength > 0) {
+				b = next(s, b);
+				cLength--;
+			}
+			return b;
+		}
+		while (cLength < 0) {
+			b = prev(s, b);
+			cLength++;
 		}
 		return b;
 	}
@@ -198,6 +223,7 @@ class EvalString {
 		var r = getOffsetEntry(s, cIndex);
 		var b = r.bOffset;
 		var str = s.sstring;
+		if (b < 0 || b >= str.length) outOfBounds();
 		var x = StringTools.fastCodeAt(str, b);
 		var diff = 1;
 		if (!s.sbmp && isHighSurrogateAt(str, b)) {

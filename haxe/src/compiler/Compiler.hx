@@ -328,10 +328,12 @@ class Compiler {
 		catch (e:context.display.DisplayJson.JsonCompleted) throw e
 		catch (e:Cancelled) throw e
 		catch (e:Dynamic) {
-			// port: Printexc.to_string: a port exception's is its message (its
-			// toString, which Std.string does not call on a WasmGC host)
+			// port: Printexc.to_string: Invalid_argument's form; another port
+			// exception's is its message (its toString, which Std.string does not
+			// call on a WasmGC host)
 			if (Sys.getEnv("OCAMLRUNPARAM") != "b" && !Helper.isDebugRun) error(com,
-				StdTools.isOfType(e, haxe.Exception) ? (cast e : haxe.Exception).message : StdTools.string(e), nullPos);
+				StdTools.isOfType(e, core.ds.InvalidArgument) ? 'Invalid_argument("${(cast e : haxe.Exception).message}")' : StdTools.isOfType(e,
+					haxe.Exception) ? (cast e : haxe.Exception).message : StdTools.string(e), nullPos);
 			else {
 				Sys.stderr().writeString(haxe.CallStack.toString(@:privateAccess haxe.Exception.caught(e).stack) + "\n");
 				throw e;

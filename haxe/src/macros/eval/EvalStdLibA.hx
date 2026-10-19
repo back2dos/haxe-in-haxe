@@ -1212,8 +1212,10 @@ class StdEReg {
 		var lenDefault = s.length - pos;
 		var len = EvalDecode.defaultInt(len, lenDefault);
 		var len = if (len < 0) lenDefault else len;
-		if (pos < 0) throw new InvalidArgument("Pcre2.exec: illegal offset");
 		if (pos + len > s.length) return VFalse;
+		// port: String.sub s 0 (pos + len), then Pcre2.exec_all ~pos: their checks
+		if (pos + len < 0) throw new InvalidArgument("String.sub / Bytes.sub");
+		if (pos < 0 || len < 0) throw new InvalidArgument("Pcre2.pcre2_match_stub: illegal position");
 		var a = exec(self, s, pos, len);
 		if (a == null) return VFalse;
 		self.rString = s;
