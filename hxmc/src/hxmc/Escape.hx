@@ -85,10 +85,10 @@ class Escape {
 			if (round == 2 || !foldKnown()) break;
 		}
 		var groups = check();
-		if (groups.length == 0) return;
 		var any = false;
 		for (g in groups)
-			if (replace(g)) any = true;
+			if (replace(g)) any = true else escape(g.root, "fields overlap");
+		if (log) report(groups);
 		if (!any) return;
 		sweep();
 		prune();
@@ -114,6 +114,7 @@ class Escape {
 					};
 					if (k > 0) {
 						s = new Site(i, i.block);
+						s.defAt = i;
 						s.box = k;
 						s.key = "box" + k;
 					}
@@ -179,6 +180,18 @@ class Escape {
 			var hc = constOf(hdr.c), tc = constOf(ty.c);
 			if (hc == null || tc == null || hc.sym != null) continue;
 			var s = new Site(p, j);
+			// (its values are defined where it is first used: what the block
+			// computes before, its constructor's arguments, may read the
+			// previous instance of its group)
+			s.defAt = j.term();
+			for (i in j.ins) {
+				if (i.dead || i.op == Phi) continue;
+				if (i.a == p.id || i.b == p.id || i.c == p.id || i.args != null && i.args.indexOf(p.id) >= 0) {
+					s.defAt = i;
+					break;
+				}
+			}
+			if (s.defAt == null) return null;
 			s.head = head;
 			s.fast = fast;
 			s.tls = tls;
@@ -261,6 +274,7 @@ class Escape {
 		findCells();
 		parent = [for (k in 0...sites.length) k];
 		escaped = [for (_ in sites) false];
+		whys = [for (_ in sites) null];
 		// the closure: what may be an alias
 		inClosure = new Vector(vbase);
 		closure = [];
@@ -318,10 +332,10 @@ class Escape {
 		var boxAt = new Map<Int, Int>();
 		for (k in 0...sites.length) {
 			var r = find(k);
-			if (sites[r].key != sites[k].key) escaped[r] = true;
+			if (sites[r].key != sites[k].key) escape(r, "layouts differ");
 			if (sites[k].box > 0) {
 				var o = boxAt.get(sites[k].block.id);
-				if (o != null && find(o) == r) escaped[r] = true;
+				if (o != null && find(o) == r) escape(r, "two boxes in a block");
 				boxAt.set(sites[k].block.id, k);
 			}
 		}
@@ -340,8 +354,36 @@ class Escape {
 		return k;
 	}
 
-	function escape(s:Int)
-		escaped[find(s)] = true;
+	function escape(s:Int, ?why:String) {
+		var r = find(s);
+		escaped[r] = true;
+		if (log && whys[r] == null) whys[r] = why == null ? "?" : why;
+	}
+
+	// (HXMC_ESCAPE_LOG=1) why a group stays, per site
+	static var log = Sys.getEnv("HXMC_ESCAPE_LOG") == "1";
+	var whys:Array<Null<String>> = [];
+	var lastFail:Null<MIns>;
+
+	function report(groups:Array<Group>) {
+		var lines = [];
+		for (k in 0...sites.length) {
+			var r = find(k);
+			var s = sites[k];
+			var what = s.box > 0 ? "box" + s.box : s.key.substr(s.key.indexOf(":") + 1);
+			var w = escaped[r] ? (whys[r] == null ? "?" : whys[r]) : "replaced";
+			lines.push('escape: ${f.name}: $what: $w');
+		}
+		Sys.println(lines.join("\n"));
+	}
+
+	function failWhy(u:Null<MIns>):String {
+		if (u == null) return "use";
+		var s = MFunc.opName(u.op);
+		if (u.op == Call) s += " " + (u.sym == null ? "(indirect)" : u.sym);
+		if (u.op == Store) s += u.c >= 0 && f.vals[u.c] != null && isIn(u.c) ? " (as a value)" : "";
+		return s;
+	}
 
 	// the lattice's join: two groups meeting become one; a group meeting
 	// anything else escapes
@@ -349,21 +391,24 @@ class Escape {
 		if (a == EMPTY) return b;
 		if (b == EMPTY) return a;
 		if (a == TOP || b == TOP) {
-			if (a >= 0) escape(a);
-			if (b >= 0) escape(b);
+			if (a >= 0) escape(a, "merge");
+			if (b >= 0) escape(b, "merge");
 			return TOP;
 		}
 		var ra = find(a), rb = find(b);
 		if (ra == rb) return ra;
 		// (the smaller index the root: deterministic)
 		var e = escaped[ra] || escaped[rb];
+		var w = whys[ra] != null ? whys[ra] : whys[rb];
 		if (ra < rb) {
 			parent[rb] = ra;
 			escaped[ra] = e;
+			whys[ra] = w;
 			return ra;
 		}
 		parent[ra] = rb;
 		escaped[rb] = e;
+		whys[rb] = w;
 		return rb;
 	}
 
@@ -746,14 +791,15 @@ class Escape {
 			if (s < 0 || escaped[s]) continue;
 			var g = group(s);
 			g.aliases.push(x);
-			if (!uses1(g, x, x, 0)) escape(s);
+			lastFail = null;
+			if (!uses1(g, x, x, 0)) escape(s, failWhy(lastFail));
 		}
 		// the instance used is the group's latest
 		for (g in acc) {
 			if (g == null || escaped[g.root]) continue;
 			for (k in 0...g.accesses.length)
 				if (!latest(g, g.bases[k], g.accesses[k])) {
-					escape(g.root);
+					escape(g.root, "not the latest instance");
 					break;
 				}
 		}
@@ -775,6 +821,7 @@ class Escape {
 		var box = sites[g.root].box;
 		for (u in us) {
 			if (u.dead) continue;
+			lastFail = u;
 			switch u.op {
 				case Copy:
 					if (v != x) {
@@ -789,7 +836,7 @@ class Escape {
 					g.access(u, x, off + u.imm);
 				case Store if (u.a == v && u.b != v && u.b < 0 && u.c != v && box == 0):
 					var c = srcOf(u.c);
-					if (c >= 0) escape(c); // (an object stored into one: phase 1 keeps it)
+					if (c >= 0) escape(c, "stored into an object"); // (phase 1 keeps it)
 					g.access(u, x, off + u.imm);
 				case Store if (u.c == v && v == x && u.a != v && u.b != v && cellOf[u.id] >= 0 && cellTracked[cellOf[u.id]]):
 					g.cellStores.push(u);
@@ -858,13 +905,12 @@ class Escape {
 		var cur = NONE;
 		var d = defs.get(b.id);
 		if (d != null) {
-			// (a box is made in the block: before u?)
-			var di = f.vals[d];
-			if (di.op == Phi) cur = d else
-				for (i in b.ins) {
-					if (i == u) break;
-					if (i.id == d) cur = d;
-				}
+			// (the allocation is made in the block: before u?)
+			var at = f.vals[d].op == Phi ? sites[siteAt.get(d)].defAt : f.vals[d];
+			for (i in b.ins) {
+				if (i == at) cur = d;
+				if (i == u) break;
+			}
 		}
 		if (cur == NONE) {
 			var first = vpBlock.length;
@@ -1003,9 +1049,9 @@ class Escape {
 			zeroVars.set(u.id, vs);
 		}
 		// the definitions: each site (zeros, the header; the boxed value) and the stores
-		var siteDef = new Map<Int, Site>(); // site value -> site
+		var siteDef = new Map<Int, Site>(); // the instruction a site's values are defined before -> site
 		for (s in g.sites)
-			siteDef.set(s.v.id, s);
+			siteDef.set(s.defAt.id, s);
 		var nv = vars.length;
 		// the blocks with a definition or a read, in order
 		var blocks:Array<MBlock> = [];
@@ -1050,7 +1096,6 @@ class Escape {
 					if (cur == null) cur = MFunc.ints(nv, NONE);
 					for (v in 0...nv)
 						cur[v] = siteValue(s, v);
-					continue;
 				}
 				if (i.op != Store) continue;
 				var zv = zeroVars.get(i.id);
@@ -1094,11 +1139,9 @@ class Escape {
 			for (i in b.ins.copy()) {
 				if (i.dead) continue;
 				var s = siteDef.get(i.id);
-				if (s != null) {
+				if (s != null)
 					for (v in 0...nv)
 						cur[v] = siteValue(s, v);
-					continue;
-				}
 				if (i.op == Store) {
 					var zv = zeroVars.get(i.id);
 					if (zv != null)
@@ -1299,6 +1342,7 @@ private class Site {
 	public var hdr:MIns; // the header's stores
 	public var ty:MIns;
 	public var nslots = 1;
+	public var defAt:MIns; // the instruction its values are defined before
 
 	public function new(v, block) {
 		this.v = v;
