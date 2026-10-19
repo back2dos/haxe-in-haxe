@@ -180,6 +180,13 @@ class TexprConverter {
 				case _: {kind: SKValue, finiteness: Infinite};
 			};
 		var classified = loop(false, t);
+		// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream (its comment follows).
+		// Array patterns on values which are not arrays but have a length and an array read access (#8012).
+		if ((classified.kind == SKValue || classified.kind == SKEnum) && cases.length > 0 && cases[0].scCon.kind.match(ConArray(_))
+			&& ExprToPattern.getArrayLikeElementType(ctx, t, e.epos) != null) {
+			all = [];
+			classified = {kind: SKLength, finiteness: Infinite};
+		}
 		// port: unguarded enum constructors are removed in one pass at the end (by field identity) rather than one filter per case.
 		var removedEnum:Null<haxe.ds.ObjectMap<core.TType.TEnumField, Bool>> = null;
 		for (sc in cases) {
