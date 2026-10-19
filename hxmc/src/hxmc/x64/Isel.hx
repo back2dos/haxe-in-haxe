@@ -388,8 +388,9 @@ class Isel implements hxmc.Target.Selector {
 					useCount[x]++;
 				if ((i.op == Load || i.op == Store) && i.imm > -0x40000000 && i.imm < 0x40000000) addrUses[i.a]++;
 			}
-		// loads used once by an integer comparison later in their block, with
-		// no store or call between: memory operands of the comparison
+		// loads used once by an integer comparison or operation later in their
+		// block, with no store or call between: memory operands of the
+		// comparison or operation (a sign extension: movsxd from memory)
 		for (b in mf.blocks) {
 			var ins = b.ins;
 			for (k in 0...ins.length) {
@@ -404,6 +405,8 @@ class Isel implements hxmc.Target.Selector {
 					if (immOf(c.a) != null || immOf(c.b) != null) continue;
 					cands = c.op == Sub ? [c.b] : [c.b, c.a];
 					if (c.a == c.b) continue;
+				} else if (c.op == SExt) {
+					cands = [c.a];
 				} else continue;
 				for (x in cands) {
 					var l = mf.vals[x];
@@ -1033,6 +1036,14 @@ class Isel implements hxmc.Target.Selector {
 				x.s1 = use(i.b);
 				x.cond = cc;
 				x.size = sz(i.ty);
+			case SExt if (memFolds.exists(i.a)):
+				var l = m.vals[i.a];
+				var x = emit(LOAD);
+				x.d = reg(i.id);
+				x.size = 4;
+				x.imm2 = 1; // movsxd from memory
+				memOf(x, l.a, l.b, l.imm2, l.imm);
+				x.mem = l.mem;
 			case SExt:
 				var x = emit(MOV);
 				x.d = reg(i.id);

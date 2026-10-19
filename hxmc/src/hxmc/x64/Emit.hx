@@ -410,7 +410,7 @@ class Emit implements hxmc.Target.Emitter {
 				if (isX(i.d)) a.movsdRM(i.d, m) else switch i.size {
 					case 1: if (i.flag) a.movsx8(4, i.d, m) else a.movzx8(i.d, m);
 					case 2: if (i.flag) a.movsx16(4, i.d, m) else a.movzx16(i.d, m);
-					case 4: a.load(4, i.d, m);
+					case 4: if (i.imm2 == 1) a.movsxd(i.d, m) else a.load(4, i.d, m);
 					case _: a.load(8, i.d, m);
 				}
 			case STORE:
