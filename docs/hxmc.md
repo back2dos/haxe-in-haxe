@@ -6,7 +6,7 @@ hxmc turns a typed Haxe program into a native executable with its own code
 generator and linker: no C compiler, assembler or system linker at build time.
 
 ```
-typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Sroa, Opt)-->
+typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Escape, Sroa, Opt)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
 ```
@@ -19,7 +19,7 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | `ir/Reach.hx` | the functions the program can run (Reachability, below): the others are not compiled |
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
 | `UpToDate.hx`, `Fingerprint.hx`, `LowerCache.hx` | rebuilds: the whole build skipped when nothing changed, each module's object reused when its fingerprint is unchanged, lowered bodies reused by the server |
-| `Mir.hx`, `MirBuild.hx`, `Opt.hx`, `Inline.hx`, `Sroa.hx` | the SSA IR, its construction, inlining, scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
+| `Mir.hx`, `MirBuild.hx`, `Opt.hx`, `Inline.hx`, `Escape.hx`, `Sroa.hx` | the SSA IR, its construction, inlining, escape analysis (allocations that stay in their function replaced by their fields: [plans/codegen.md](plans/codegen.md), "Escape analysis"), scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
 | `Lir.hx`, `Regalloc.hx`, `x64/`, `a64/` | instruction selection, linear-scan allocation, encoders (checked against llvm-mc: `EncCheck`), emission |
 | `Unwind.hx`, `Dwarf.hx` | unwind tables from the emitters' frame records (`.eh_frame`, `.pdata`/`.xdata`, `__eh_frame`), `-debug`'s DWARF lines (Debugging, below) |
 | `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (static ELF, `LinkDyn.hx` dynamic ELF against glibc; PE with imports written directly; Mach-O with an ad-hoc signature), the runtime-object builder, the program's data |
@@ -402,7 +402,7 @@ runs without flags and wasmtime not at all; run with
 no threads, sockets or processes). mbedtls 2.28 and libuv 1.48
 (`hxmc/deps/deps.sh`) become `ssl.o` and `uv.o`, linked only into programs that
 use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
-`HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
+`HXMC_INLINE=<flat>,<loop>,<runtime>`, `HXMC_ESCAPE=0` (no escape analysis; `HXMC_ESCAPE_LOG=1`: what happens to each allocation analyzed and why it stays; `HXMC_ESCAPE_NO=<closures,frames,again,boxes,replace>` and `HXMC_ESCAPE_HASH=<lo>-<hi>` to bisect a miscompilation; none of them are in the object cache's key), `HXMC_SYMBOLS=1`, `HXMC_SIZE_STATS=1`,
 `HXMC_DUMP=<function>`, `HXMC_MAP=<file>` (Windows), `HXMC_FRAME_POINTERS=0`,
 `RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_PREFAULT`, `RT_STATS`, `RT_VERIFY`,
 `RT_STACK_MB` (wasm32: the shadow stack and the stack of frame areas; WebAssembly, Memory).
