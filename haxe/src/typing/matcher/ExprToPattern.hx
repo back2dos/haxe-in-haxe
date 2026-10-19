@@ -354,7 +354,7 @@ class ExprToPattern {
 				function collectFields(t:T, filter:Null<Array<String>>):Void switch follow(t) {
 					case TAnon(an):
 						var names = [for (n in an.aFields.keys()) n];
-						names.sort(Reflect.compare);
+						names.sort(core.ds.Key.compareStrings);
 						for (n in names) {
 							var cf = an.aFields.get(n);
 							collectField(cf, cf.cfType, filter);
@@ -415,7 +415,7 @@ class ExprToPattern {
 					{currentLocals: new haxe.ds.StringMap(), orLocals: left.currentLocals});
 				var pat2 = make(right, toplevel, t, e2);
 				var names = [for (n in (left.currentLocals.keys() : Iterator<String>)) n];
-				names.sort(Reflect.compare);
+				names.sort(core.ds.Key.compareStrings);
 				for (n in names) {
 					var entry = left.currentLocals.get(n);
 					if (!right.currentLocals.exists(n) && n != "_") variableError(n, entry.p);

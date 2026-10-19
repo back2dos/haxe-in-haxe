@@ -211,22 +211,7 @@ class EvalString {
 
 	// port: OCaml's String.compare on the UTF-8 encodings: code point order (the
 	// order of a code point host's strings).
-	public static function compareCodePoints(a:String, b:String):Int {
-		if (core.StringHelper.codePointHost) return a < b ? -1 : a > b ? 1 : 0;
-		var n = a.length < b.length ? a.length : b.length;
-		for (i in 0...n) {
-			var x = StringTools.fastCodeAt(a, i),
-				y = StringTools.fastCodeAt(b, i);
-			if (x != y) {
-				// port: surrogates encode code points above every other UTF-16 unit
-				var sx = x >= 0xD800 && x <= 0xDFFF,
-					sy = y >= 0xD800 && y <= 0xDFFF;
-				if (sx != sy) return sx ? 1 : -1;
-				return x < y ? -1 : 1;
-			}
-		}
-		return a.length == b.length ? 0 : a.length < b.length ? -1 : 1;
-	}
+	public static function compareCodePoints(a:String, b:String):Int return core.ds.Key.compareStrings(a, b);
 
 	// port: module VStringBuffer
 

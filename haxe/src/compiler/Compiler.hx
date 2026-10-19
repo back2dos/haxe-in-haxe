@@ -103,7 +103,7 @@ class Compiler {
 	public static function checkDefines(com:CommonContext):Void {
 		if (Common.defined(com, Define.DisableParallelism)) Parallel.enable = false;
 		var keys:Array<String> = [for (k in com.defines.values.keys()) k];
-		keys.sort(Reflect.compare);
+		keys.sort(core.ds.Key.compareStrings);
 		for (k in keys) {
 			var v = com.defines.values.get(k),
 				reason = Define.deprecationLut.get(k);
@@ -521,7 +521,7 @@ class Setup {
 		var buf = new StringBuf();
 		buf.add("Defines: ");
 		var keys:Array<String> = [for (k in com.defines.values.keys()) k];
-		keys.sort(Reflect.compare);
+		keys.sort(core.ds.Key.compareStrings);
 		for (k in keys) {
 			var v = com.defines.values.get(k);
 			buf.add(v == "1" ? k + ";" : k + "=" + v + ";");
