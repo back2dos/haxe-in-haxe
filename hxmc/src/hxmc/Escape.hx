@@ -45,7 +45,7 @@ class Escape {
 
 	// (debugging: HXMC_ESCAPE_HASH=<lo>-<hi>, the functions whose names hash
 	// to lo...hi of 0...1024 only; HXMC_ESCAPE_NO=<parts>, parts off:
-	// closures, frames, again, boxes)
+	// closures, frames, again, boxes, replace, screen)
 	static var hashRange:Null<Array<Int>> = {
 		var e = Sys.getEnv("HXMC_ESCAPE_HASH");
 		e == null ? null : [for (x in e.split("-")) Std.parseInt(x)];
