@@ -276,8 +276,21 @@ class Escape {
 			c.a = -1;
 			r.push({call: c, sym: s});
 		}
-		return r;
+		if (r.length == 0) return r;
+		// (inlined only where the closure may then be replaced: not where it
+		// certainly escapes otherwise, the screen says, but by these calls)
+		e.ignore = [for (x in r) x.call.id => true];
+		e.findSites();
+		var d = e.screenDer, sure = e.screenSure;
+		return [
+			for (x in r)
+				if (!x.call.dead && d != null && d[x.call.args[0]] >= 0 && !sure[d[x.call.args[0]]]) x
+		];
 	}
+
+	var ignore:Null<Map<Int, Bool>>; // (the screen: calls that are no escape)
+	var screenDer:Null<Vector<Int>>; // (what the screen found: the site each value may be, and the sites that escape)
+	var screenSure:Null<Vector<Bool>>;
 
 	// a phi's operands' function when they agree (null: not all known closures of one)
 	function sameSym(fn:Vector<Null<String>>, i:MIns):Null<String> {
@@ -396,7 +409,7 @@ class Escape {
 					case Cmp if ((i.imm == CEq || i.imm == CNe) && (exact[i.a] >= 0 && isConst(i.b, 0) || exact[i.b] >= 0 && isConst(i.a, 0))):
 						nulls.push(i);
 					case _ if (b.cold):
-					case Call:
+					case Call if (ignore == null || !ignore.exists(i.id)):
 						var any = isDer(i.a);
 						if (i.args != null)
 							for (a in i.args)
@@ -440,6 +453,8 @@ class Escape {
 			prune();
 			if (++screenFolds < 3) return findSites();
 		}
+		screenDer = der;
+		screenSure = sure;
 		sites = [];
 		siteOf = MFunc.ints(nv, -1);
 		for (k in 0...all.length)
