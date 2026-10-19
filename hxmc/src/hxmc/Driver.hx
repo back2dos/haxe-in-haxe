@@ -429,6 +429,8 @@ class Driver {
 		dg.stubs(objs, demit);
 		dg.cstrLiterals(objs);
 		dg.emptyArrays(objs);
+		// (-D hxmc.interp: the functions interpreted, by entry stub, for the interpreter's indirect calls)
+		if (interp != null) interp.table(data);
 		if (o.stats) Sys.println('hxmc: data: ' + [for (x in dg.sizes) '${x.part} ${x.bytes} bytes'].join(", "));
 		var t3 = haxe.Timer.stamp();
 		if (abi.wasm) {

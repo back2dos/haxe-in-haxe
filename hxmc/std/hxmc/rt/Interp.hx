@@ -6,14 +6,11 @@ import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
 // The operations of the interpreter's code (hxmc/src/hxmc/interp/InterpGen.hx
-// writes them: the same numbers). Operands are words after the operation:
-// d the register written, a, b, c the registers read.
+// writes them: the same list). Operands are words after the operation: d
+// the register written, a, b, c registers read, t a branch target (a byte
+// offset from the start of its operation).
 enum abstract IOp(Int) from Int to Int {
-	var PARAM = 0; // d i
-	var CONST32; // d v
-	var CONST64; // d lo hi
-	var SYM; // d k: entry k of the symbol table (S + A)
-	var TLSLD; // d t
+	var TLSLD = 0; // d t
 	var TLSST; // a t
 	var TLSST_HCUR; // a prevOff: a try's handler set or popped
 	var SADDR; // d off: a frame slot's address
@@ -45,9 +42,32 @@ enum abstract IOp(Int) from Int to Int {
 	var FNEG; // d a
 	var FSQRT;
 	var FABS;
-	var CMP32; // d a b cond
-	var CMP64;
-	var CMPF;
+	var EQ32; // d a b: Mir's conditions, in its order
+	var NE32;
+	var LT32;
+	var LE32;
+	var GT32;
+	var GE32;
+	var ULT32;
+	var ULE32;
+	var UGT32;
+	var UGE32;
+	var EQ64;
+	var NE64;
+	var LT64;
+	var LE64;
+	var GT64;
+	var GE64;
+	var ULT64;
+	var ULE64;
+	var UGT64;
+	var UGE64;
+	var FEQ;
+	var FNE;
+	var FLT;
+	var FLE;
+	var FGT;
+	var FGE;
 	var SEXT; // d a
 	var ZEXT;
 	var TRUNC;
@@ -56,7 +76,7 @@ enum abstract IOp(Int) from Int to Int {
 	var F2I32;
 	var F2I64;
 	var SELECT; // d a b c
-	var LD1S; // d base index scale disp (index -1: none)
+	var LD1S; // d base disp
 	var LD1U;
 	var LD2S;
 	var LD2U;
@@ -64,18 +84,61 @@ enum abstract IOp(Int) from Int to Int {
 	var LD4U;
 	var LD8;
 	var LDF4;
-	var ST1; // base index scale disp v
+	var LDX1S; // d base index scale disp
+	var LDX1U;
+	var LDX2S;
+	var LDX2U;
+	var LDX4S;
+	var LDX4U;
+	var LDX8;
+	var LDXF4;
+	var ST1; // base disp v
 	var ST2;
 	var ST4;
 	var ST8;
 	var STF4;
+	var STX1; // base index scale disp v
+	var STX2;
+	var STX4;
+	var STX8;
+	var STXF4;
 	var CALLN; // k d n args: the call-out stub of symbol table entry k (d -1: no result)
-	var CALLNI; // k f d n args: the call-out stub k calling the code at f
+	var CALLNI; // k f d n c args: the call-out stub k calling the code at f, entries c and c + 1 its inline cache
 	var CALLI; // k d n args: the interpreted function whose descriptor is entry k
 	var SETJMP; // d h: a try's setjmp on the handler h
-	var JMP; // e: an edge record (target, n, n moves d s)
-	var BR; // a e1 e2
-	var SWITCH; // a n (v e)*n e
+	var JMP; // t
+	var MOVJ1; // d s t: a phi's move, then the jump
+	var MOVJ2; // d s d s t
+	var MOVJN; // n (d s)*n t
+	var BR; // a t1 t2
+	var BEQ32; // a b t1 t2: a compare and its branch, the conditions as above
+	var BNE32;
+	var BLT32;
+	var BLE32;
+	var BGT32;
+	var BGE32;
+	var BULT32;
+	var BULE32;
+	var BUGT32;
+	var BUGE32;
+	var BEQ64;
+	var BNE64;
+	var BLT64;
+	var BLE64;
+	var BGT64;
+	var BGE64;
+	var BULT64;
+	var BULE64;
+	var BUGT64;
+	var BUGE64;
+	var BFEQ;
+	var BFNE;
+	var BFLT;
+	var BFLE;
+	var BFGT;
+	var BFGE;
+	var SWITCH; // a n (v t)*n t
+	var SWITCHT; // a lo n t*n t: a table on a - lo
 	var RET; // a
 	var RETV;
 	var UNREACH;
@@ -91,11 +154,13 @@ enum abstract IOp(Int) from Int to Int {
 // interpreted function calls native code through call-out stubs (one per
 // callee and signature: the arguments from a buffer, the call as the tool
 // compiles it, the result into the buffer), so every ABI detail stays the
-// code generator's.
+// code generator's. An indirect call whose target is an entry stub runs its
+// function directly (lookup, cached per call site).
 //
-// Registers (one per Mir value, 8 bytes) and frame slots are on a stack of
-// this thread's (isp), never in the collector's heap: the interpreter
-// allocates nothing a collection could move, and the code it runs keeps its
+// Registers (8 bytes each: the function's constants first, copied when its
+// frame starts, then its values) and frame slots are on a stack of this
+// thread's (isp), never in the collector's heap: the interpreter allocates
+// nothing a collection could move, and the code it runs keeps its
 // references across GC points in the shadow stack as native code does.
 //
 // A try's setjmp: the interpreted code links its handler h (rt_hcur) and
@@ -109,20 +174,22 @@ enum abstract IOp(Int) from Int to Int {
 @:access(hxmc.rt.Threads)
 class Interp {
 	// a descriptor (InterpGen): magic, registers, frame bytes, code words,
-	// the symbol table's offset; the code from HEADER
+	// the symbol table's offset, constants, their offset, parameters; the
+	// code from HEADER. Registers: the constants, the parameters, the values
 	static inline var HEADER = 32;
 	static inline var MAGIC = 0x31495848; // "HXI1"
 	// a frame (on the interpreter's stack): its code, symbol table,
-	// registers, slots, arguments, end, pc, the tries entered, their handlers
+	// registers, slots, where its result goes, end, where it goes on (a try ended), the
+	// tries entered, their handlers
 	static inline var F_CODE = 0;
 	static inline var F_SYMS = 8;
 	static inline var F_REGS = 16;
 	static inline var F_SLOTS = 24;
-	static inline var F_ARGS = 32;
+	static inline var F_RES = 32;
 	static inline var F_TOP = 40;
-	static inline var F_PC = 48;
-	static inline var F_NTRIES = 52;
-	static inline var F_TRIES = 56;
+	static inline var F_IP = 48;
+	static inline var F_NTRIES = 56;
+	static inline var F_TRIES = 64;
 	static inline var MAX_TRIES = 16;
 	static inline var FRAME = 192;
 	// exec's results: the function returned, a try ended (enterTry goes on),
@@ -139,16 +206,59 @@ class Interp {
 	static inline var T_YRLIM = 6;
 	static inline var T_MUT = 7;
 	static inline var STACK_BYTES = 16 << 20;
+	static inline var MIN32 = 0x80000000;
 
 	@:hxmc.threadLocal("rt_interp_sp") static var isp:Ptr;
 	@:hxmc.threadLocal("rt_interp_end") static var iend:Ptr;
+	// the functions interpreted, by entry stub: (stub, descriptor) pairs,
+	// open addressing (InterpGen.TABLE: made at the first entry, on the main
+	// thread, read only after)
+	static var table:Ptr;
+	static var mask:Int;
 
 	static function initStack() {
 		var n:I64 = STACK_BYTES;
 		var p = LibC.malloc(n);
 		if (p.isNull()) throw "hxmc interp: no memory for the interpreter's stack";
 		isp = p;
-		iend = p.addL(n);
+		// (a frame's check is made once its arguments are written: room for them)
+		iend = p.addL(n - (1 << 20));
+		if (table.isNull()) initTable();
+	}
+
+	static inline function hash(x:I64):Int
+		return ((x >>> 4).toInt() * 0x9E3779B1) >>> 8;
+
+	static function initTable() {
+		var t = Mem.sym("hxmc_interp_fns");
+		var n = Mem.getI64(t, 0).toInt();
+		var size = 16;
+		while (size < 2 * n)
+			size <<= 1;
+		var bytes:I64 = 16 * size;
+		var tab = LibC.malloc(bytes);
+		LibC.memset(tab, 0, bytes);
+		for (k in 0...n) {
+			var key = Mem.getI64(t, 8 + 16 * k);
+			var h = hash(key) & (size - 1);
+			while (Mem.getI64(tab, h << 4) != (0 : I64))
+				h = (h + 1) & (size - 1);
+			Mem.setI64(tab, h << 4, key);
+			Mem.setI64(tab, (h << 4) + 8, Mem.getI64(t, 16 + 16 * k));
+		}
+		mask = size - 1;
+		table = tab;
+	}
+
+	// the entry of the function interpreted whose entry stub is at fn (its descriptor at +8), or null
+	static function lookup(fn:I64):Ptr {
+		var h = hash(fn) & mask;
+		while (true) {
+			var k = Mem.getI64(table, h << 4);
+			if (k == fn) return table.add(h << 4);
+			if (k == (0 : I64)) return Ptr.nil();
+			h = (h + 1) & mask;
+		}
 	}
 
 	// native code calling an interpreted function (its entry stub): the
@@ -157,6 +267,9 @@ class Interp {
 		if (isp.isNull()) initStack();
 		var base = isp;
 		try {
+			var regs = base.add(FRAME), nc = Mem.getI32(desc, 20);
+			for (k in 0...Mem.getI32(desc, 28))
+				Mem.setI64At(regs, 0, nc + k, Mem.getI64At(args, 0, k));
 			run(desc, args);
 		} catch (e:Dynamic) {
 			// (a native handler catches: this entry's frames are given back)
@@ -165,8 +278,8 @@ class Interp {
 		}
 	}
 
-	static function run(desc:Ptr, args:Ptr) {
-		if (Mem.getI32(desc, 0) != MAGIC) throw "hxmc interp: not a function's descriptor";
+	// a frame of the function at isp (its arguments written in its registers), run; its result written at res
+	static function run(desc:Ptr, res:Ptr) {
 		var nregs = Mem.getI32(desc, 4);
 		var fr = isp;
 		var regs = fr.add(FRAME);
@@ -174,20 +287,25 @@ class Interp {
 		var top = slots.add(Mem.getI32(desc, 8));
 		if (!top.ult(iend)) throw "hxmc interp: stack overflow";
 		isp = top;
-		Mem.setPtr(fr, F_CODE, desc.add(HEADER));
+		var code = desc.add(HEADER);
+		Mem.setPtr(fr, F_CODE, code);
 		Mem.setPtr(fr, F_SYMS, desc.add(Mem.getI32(desc, 16)));
 		Mem.setPtr(fr, F_REGS, regs);
 		Mem.setPtr(fr, F_SLOTS, slots);
-		Mem.setPtr(fr, F_ARGS, args);
+		Mem.setPtr(fr, F_RES, res);
 		Mem.setPtr(fr, F_TOP, top);
 		Mem.setI32(fr, F_NTRIES, 0);
-		exec(fr, 0);
+		// the constants
+		var consts = desc.add(Mem.getI32(desc, 24));
+		for (k in 0...Mem.getI32(desc, 20))
+			Mem.setI64At(regs, 0, k, Mem.getI64At(consts, 0, k));
+		exec(fr, code);
 		isp = fr;
 	}
 
 	// the frame's try at the setjmp (level: the tries entered before), the
-	// frame going on after it at pc
-	static function enterTry(fr:Ptr, pc:Int, d:Int, h:Ptr):Int {
+	// frame going on after it at ip
+	static function enterTry(fr:Ptr, ip:Ptr, d:Int, h:Ptr):Int {
 		var level = Mem.getI32(fr, F_NTRIES);
 		if (level == MAX_TRIES) throw "hxmc interp: tries nested too deep";
 		Mem.setPtr(fr, F_TRIES + 8 * level, h);
@@ -198,7 +316,7 @@ class Interp {
 		var hc = Ptr.nil();
 		try {
 			Mem.setI64At(regs, 0, d, 0);
-			st = exec(fr, pc);
+			st = exec(fr, ip);
 			hc = Gc.hcur;
 		} catch (e:Dynamic) {
 			caught = true;
@@ -210,7 +328,7 @@ class Interp {
 		}
 		if (caught) {
 			Mem.setI64At(regs, 0, d, 1);
-			st = exec(fr, pc);
+			st = exec(fr, ip);
 			return st == level ? CONTINUE : st;
 		}
 		// (leaving the native try relinked its handler's previous one, h: as the interpreted code left it)
@@ -218,8 +336,9 @@ class Interp {
 		return st == level ? CONTINUE : st;
 	}
 
-	static inline function w(code:Ptr, pc:Int, k:Int):Int
-		return Mem.getI32At(code, k << 2, pc);
+	// operand k of the operation at ip
+	static inline function o(ip:Ptr, k:Int):Int
+		return Mem.getI32(ip, k << 2);
 
 	static inline function gl(regs:Ptr, r:Int):I64
 		return Mem.getI64At(regs, 0, r);
@@ -228,7 +347,7 @@ class Interp {
 		Mem.setI64At(regs, 0, r, v);
 
 	static inline function gi(regs:Ptr, r:Int):Int
-		return Mem.getI32(regs, r << 3);
+		return Mem.getI64At(regs, 0, r).toInt();
 
 	static inline function si(regs:Ptr, r:Int, v:Int)
 		Mem.setI64At(regs, 0, r, v);
@@ -242,59 +361,15 @@ class Interp {
 	static inline function zext(v:Int):I64
 		return ((v : I64) << 32) >>> 32;
 
-	// the address of a load or store: base + index * scale + disp
-	static inline function addr(code:Ptr, regs:Ptr, pc:Int, k:Int):Ptr {
-		var x = gl(regs, w(code, pc, k));
-		var i = w(code, pc, k + 1);
-		if (i >= 0) x += gl(regs, i) * w(code, pc, k + 2);
-		return Ptr.ofI64(x + w(code, pc, k + 3));
-	}
+	static inline function b2i(b:Bool):Int
+		return b ? 1 : 0;
 
-	// an edge: its moves (a phi's value from this predecessor), then its target
-	static inline function follow(code:Ptr, regs:Ptr, e:Int):Int {
-		var n = w(code, e, 1);
-		for (k in 0...n)
-			sl(regs, w(code, e, 2 + 2 * k), gl(regs, w(code, e, 3 + 2 * k)));
-		return w(code, e, 0);
-	}
+	// the address of a load or store: register k, plus register k + 1 times k + 2
+	static inline function base(regs:Ptr, ip:Ptr, k:Int):Ptr
+		return Ptr.ofI64(gl(regs, o(ip, k)));
 
-	static function cmp32(c:Int, x:Int, y:Int):Bool
-		return switch c {
-			case 0: x == y;
-			case 1: x != y;
-			case 2: x < y;
-			case 3: x <= y;
-			case 4: x > y;
-			case 5: x >= y;
-			case 6: (x ^ 0x80000000) < (y ^ 0x80000000);
-			case 7: (x ^ 0x80000000) <= (y ^ 0x80000000);
-			case 8: (x ^ 0x80000000) > (y ^ 0x80000000);
-			case _: (x ^ 0x80000000) >= (y ^ 0x80000000);
-		}
-
-	static function cmp64(c:Int, x:I64, y:I64):Bool
-		return switch c {
-			case 0: x == y;
-			case 1: x != y;
-			case 2: x < y;
-			case 3: x <= y;
-			case 4: x > y;
-			case 5: x >= y;
-			case 6: Mem.ult(x, y);
-			case 7: !Mem.ult(y, x);
-			case 8: Mem.ult(y, x);
-			case _: !Mem.ult(x, y);
-		}
-
-	static function cmpf(c:Int, x:Float, y:Float):Bool
-		return switch c {
-			case 10: x == y;
-			case 11: x != y;
-			case 12: x < y;
-			case 13: x <= y;
-			case 14: x > y;
-			case _: x >= y;
-		}
+	static inline function indexed(regs:Ptr, ip:Ptr, k:Int):Ptr
+		return Ptr.ofI64(gl(regs, o(ip, k)) + gl(regs, o(ip, k + 1)) * o(ip, k + 2));
 
 	static function tlsGet(t:Int):I64
 		return switch t {
@@ -320,270 +395,451 @@ class Interp {
 			case _: Threads.self = Ptr.ofI64(v);
 		}
 
-	// runs the frame from pc: RETURNED, or the level of the try its code
-	// ended (the frame's pc saved)
-	static function exec(fr:Ptr, pc:Int):Int {
-		var code = Mem.getPtr(fr, F_CODE);
+	// a call of an interpreted function: its arguments from the operands at
+	// ip + 4 * first into its parameters' registers, its result into register d
+	// (none: a word of its frame)
+	static inline function callInterp(regs:Ptr, ip:Ptr, desc:Ptr, d:Int, n:Int, first:Int) {
+		var callee = isp.add(FRAME);
+		var nc = Mem.getI32(desc, 20);
+		for (k in 0...n)
+			Mem.setI64At(callee, 0, nc + k, gl(regs, o(ip, first + k)));
+		run(desc, d >= 0 ? regs.add(d << 3) : isp.add(F_IP));
+	}
+
+	// a call through a call-out stub: buf[0] the function (indirect calls),
+	// the arguments after it, the result into buf[0]
+	static inline function callOut(regs:Ptr, ip:Ptr, stub:Ptr, fn:I64, d:Int, n:Int, first:Int) {
+		var buf = isp;
+		Mem.setI64(buf, 0, fn);
+		for (k in 0...n)
+			Mem.setI64At(buf, 8, k, gl(regs, o(ip, first + k)));
+		isp = buf.add((8 * n + 23) & ~15);
+		Mem.callRef2(stub, null, buf);
+		isp = buf;
+		if (d >= 0) sl(regs, d, Mem.getI64(buf, 0));
+	}
+
+	// runs the frame from ip: RETURNED, or the level of the try its code
+	// ended (where it goes on saved)
+	static function exec(fr:Ptr, ip:Ptr):Int {
 		var syms = Mem.getPtr(fr, F_SYMS);
 		var regs = Mem.getPtr(fr, F_REGS);
-		var slots = Mem.getPtr(fr, F_SLOTS);
-		var args = Mem.getPtr(fr, F_ARGS);
 		while (true) {
-			switch (w(code, pc, 0) : IOp) {
-				case PARAM:
-					sl(regs, w(code, pc, 1), Mem.getI64At(args, 0, w(code, pc, 2)));
-					pc += 3;
-				case CONST32:
-					si(regs, w(code, pc, 1), w(code, pc, 2));
-					pc += 3;
-				case CONST64:
-					sl(regs, w(code, pc, 1), ((w(code, pc, 3) : I64) << 32) | zext(w(code, pc, 2)));
-					pc += 4;
-				case SYM:
-					sl(regs, w(code, pc, 1), Mem.getI64At(syms, 0, w(code, pc, 2)));
-					pc += 3;
+			switch (o(ip, 0) : IOp) {
 				case TLSLD:
-					sl(regs, w(code, pc, 1), tlsGet(w(code, pc, 2)));
-					pc += 3;
+					sl(regs, o(ip, 1), tlsGet(o(ip, 2)));
+					ip = ip.add(12);
 				case TLSST:
-					tlsSet(w(code, pc, 2), gl(regs, w(code, pc, 1)));
-					pc += 3;
+					tlsSet(o(ip, 2), gl(regs, o(ip, 1)));
+					ip = ip.add(12);
 				case TLSST_HCUR:
-					var v = Ptr.ofI64(gl(regs, w(code, pc, 1)));
-					var prevOff = w(code, pc, 2);
+					var v = Ptr.ofI64(gl(regs, o(ip, 1)));
+					var prevOff = o(ip, 2);
 					Gc.hcur = v;
-					pc += 3;
+					ip = ip.add(12);
 					// (a try of this frame's ended: back to its enterTry)
 					var j = Mem.getI32(fr, F_NTRIES) - 1;
 					while (j >= 0 && Mem.getPtr(Mem.getPtr(fr, F_TRIES + 8 * j), prevOff) != v)
 						j--;
 					if (j >= 0) {
 						Mem.setI32(fr, F_NTRIES, j);
-						Mem.setI32(fr, F_PC, pc);
+						Mem.setPtr(fr, F_IP, ip);
 						return j;
 					}
 				case SADDR:
-					sl(regs, w(code, pc, 1), slots.add(w(code, pc, 2)).toI64());
-					pc += 3;
+					sl(regs, o(ip, 1), Mem.getPtr(fr, F_SLOTS).add(o(ip, 2)).toI64());
+					ip = ip.add(12);
 				case MOV:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)));
-					pc += 3;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)));
+					ip = ip.add(12);
 				case ADD:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) + gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) + gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case SUB:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) - gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) - gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case MUL:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) * gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) * gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case AND:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) & gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) & gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case OR:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) | gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) | gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case XOR:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) ^ gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) ^ gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case NEG:
-					sl(regs, w(code, pc, 1), -gl(regs, w(code, pc, 2)));
-					pc += 3;
+					sl(regs, o(ip, 1), -gl(regs, o(ip, 2)));
+					ip = ip.add(12);
 				case NOT:
-					sl(regs, w(code, pc, 1), ~gl(regs, w(code, pc, 2)));
-					pc += 3;
+					sl(regs, o(ip, 1), ~gl(regs, o(ip, 2)));
+					ip = ip.add(12);
 				case SHL32:
-					si(regs, w(code, pc, 1), gi(regs, w(code, pc, 2)) << (gi(regs, w(code, pc, 3)) & 31));
-					pc += 4;
+					si(regs, o(ip, 1), gi(regs, o(ip, 2)) << (gi(regs, o(ip, 3)) & 31));
+					ip = ip.add(16);
 				case SHL64:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) << (gi(regs, w(code, pc, 3)) & 63));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) << (gi(regs, o(ip, 3)) & 63));
+					ip = ip.add(16);
 				case SAR32:
-					si(regs, w(code, pc, 1), gi(regs, w(code, pc, 2)) >> (gi(regs, w(code, pc, 3)) & 31));
-					pc += 4;
+					si(regs, o(ip, 1), gi(regs, o(ip, 2)) >> (gi(regs, o(ip, 3)) & 31));
+					ip = ip.add(16);
 				case SAR64:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) >> (gi(regs, w(code, pc, 3)) & 63));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) >> (gi(regs, o(ip, 3)) & 63));
+					ip = ip.add(16);
 				case SHR32:
-					si(regs, w(code, pc, 1), gi(regs, w(code, pc, 2)) >>> (gi(regs, w(code, pc, 3)) & 31));
-					pc += 4;
+					si(regs, o(ip, 1), gi(regs, o(ip, 2)) >>> (gi(regs, o(ip, 3)) & 31));
+					ip = ip.add(16);
 				case SHR64:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) >>> (gi(regs, w(code, pc, 3)) & 63));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) >>> (gi(regs, o(ip, 3)) & 63));
+					ip = ip.add(16);
 				case DIV32:
-					var x:I64 = gi(regs, w(code, pc, 2)), y:I64 = gi(regs, w(code, pc, 3));
-					si(regs, w(code, pc, 1), (x / y).toInt());
-					pc += 4;
+					var x:I64 = gi(regs, o(ip, 2)), y:I64 = gi(regs, o(ip, 3));
+					si(regs, o(ip, 1), (x / y).toInt());
+					ip = ip.add(16);
 				case DIV64:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) / gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) / gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case REM32:
-					si(regs, w(code, pc, 1), gi(regs, w(code, pc, 2)) % gi(regs, w(code, pc, 3)));
-					pc += 4;
+					si(regs, o(ip, 1), gi(regs, o(ip, 2)) % gi(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case REM64:
-					sl(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)) % gl(regs, w(code, pc, 3)));
-					pc += 4;
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)) % gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case ROTR32:
-					var x = gi(regs, w(code, pc, 2)), k = gi(regs, w(code, pc, 3)) & 31;
-					si(regs, w(code, pc, 1), k == 0 ? x : (x >>> k) | (x << (32 - k)));
-					pc += 4;
+					var x = gi(regs, o(ip, 2)), k = gi(regs, o(ip, 3)) & 31;
+					si(regs, o(ip, 1), k == 0 ? x : (x >>> k) | (x << (32 - k)));
+					ip = ip.add(16);
 				case ROTR64:
-					var x = gl(regs, w(code, pc, 2)), k = gi(regs, w(code, pc, 3)) & 63;
-					sl(regs, w(code, pc, 1), k == 0 ? x : (x >>> k) | (x << (64 - k)));
-					pc += 4;
+					var x = gl(regs, o(ip, 2)), k = gi(regs, o(ip, 3)) & 63;
+					sl(regs, o(ip, 1), k == 0 ? x : (x >>> k) | (x << (64 - k)));
+					ip = ip.add(16);
 				case FADD:
-					sf(regs, w(code, pc, 1), gf(regs, w(code, pc, 2)) + gf(regs, w(code, pc, 3)));
-					pc += 4;
+					sf(regs, o(ip, 1), gf(regs, o(ip, 2)) + gf(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case FSUB:
-					sf(regs, w(code, pc, 1), gf(regs, w(code, pc, 2)) - gf(regs, w(code, pc, 3)));
-					pc += 4;
+					sf(regs, o(ip, 1), gf(regs, o(ip, 2)) - gf(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case FMUL:
-					sf(regs, w(code, pc, 1), gf(regs, w(code, pc, 2)) * gf(regs, w(code, pc, 3)));
-					pc += 4;
+					sf(regs, o(ip, 1), gf(regs, o(ip, 2)) * gf(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case FDIV:
-					sf(regs, w(code, pc, 1), gf(regs, w(code, pc, 2)) / gf(regs, w(code, pc, 3)));
-					pc += 4;
+					sf(regs, o(ip, 1), gf(regs, o(ip, 2)) / gf(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case FNEG:
-					sf(regs, w(code, pc, 1), -gf(regs, w(code, pc, 2)));
-					pc += 3;
+					sf(regs, o(ip, 1), -gf(regs, o(ip, 2)));
+					ip = ip.add(12);
 				case FSQRT:
-					sf(regs, w(code, pc, 1), Math.sqrt(gf(regs, w(code, pc, 2))));
-					pc += 3;
+					sf(regs, o(ip, 1), Math.sqrt(gf(regs, o(ip, 2))));
+					ip = ip.add(12);
 				case FABS:
-					sf(regs, w(code, pc, 1), Math.abs(gf(regs, w(code, pc, 2))));
-					pc += 3;
-				case CMP32:
-					si(regs, w(code, pc, 1), cmp32(w(code, pc, 4), gi(regs, w(code, pc, 2)), gi(regs, w(code, pc, 3))) ? 1 : 0);
-					pc += 5;
-				case CMP64:
-					si(regs, w(code, pc, 1), cmp64(w(code, pc, 4), gl(regs, w(code, pc, 2)), gl(regs, w(code, pc, 3))) ? 1 : 0);
-					pc += 5;
-				case CMPF:
-					si(regs, w(code, pc, 1), cmpf(w(code, pc, 4), gf(regs, w(code, pc, 2)), gf(regs, w(code, pc, 3))) ? 1 : 0);
-					pc += 5;
+					sf(regs, o(ip, 1), Math.abs(gf(regs, o(ip, 2))));
+					ip = ip.add(12);
+				case EQ32:
+					si(regs, o(ip, 1), b2i(gi(regs, o(ip, 2)) == gi(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case NE32:
+					si(regs, o(ip, 1), b2i(gi(regs, o(ip, 2)) != gi(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case LT32:
+					si(regs, o(ip, 1), b2i(gi(regs, o(ip, 2)) < gi(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case LE32:
+					si(regs, o(ip, 1), b2i(gi(regs, o(ip, 2)) <= gi(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case GT32:
+					si(regs, o(ip, 1), b2i(gi(regs, o(ip, 2)) > gi(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case GE32:
+					si(regs, o(ip, 1), b2i(gi(regs, o(ip, 2)) >= gi(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case ULT32:
+					si(regs, o(ip, 1), b2i((gi(regs, o(ip, 2)) ^ MIN32) < (gi(regs, o(ip, 3)) ^ MIN32)));
+					ip = ip.add(16);
+				case ULE32:
+					si(regs, o(ip, 1), b2i((gi(regs, o(ip, 2)) ^ MIN32) <= (gi(regs, o(ip, 3)) ^ MIN32)));
+					ip = ip.add(16);
+				case UGT32:
+					si(regs, o(ip, 1), b2i((gi(regs, o(ip, 2)) ^ MIN32) > (gi(regs, o(ip, 3)) ^ MIN32)));
+					ip = ip.add(16);
+				case UGE32:
+					si(regs, o(ip, 1), b2i((gi(regs, o(ip, 2)) ^ MIN32) >= (gi(regs, o(ip, 3)) ^ MIN32)));
+					ip = ip.add(16);
+				case EQ64:
+					si(regs, o(ip, 1), b2i(gl(regs, o(ip, 2)) == gl(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case NE64:
+					si(regs, o(ip, 1), b2i(gl(regs, o(ip, 2)) != gl(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case LT64:
+					si(regs, o(ip, 1), b2i(gl(regs, o(ip, 2)) < gl(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case LE64:
+					si(regs, o(ip, 1), b2i(gl(regs, o(ip, 2)) <= gl(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case GT64:
+					si(regs, o(ip, 1), b2i(gl(regs, o(ip, 2)) > gl(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case GE64:
+					si(regs, o(ip, 1), b2i(gl(regs, o(ip, 2)) >= gl(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case ULT64:
+					si(regs, o(ip, 1), b2i(Mem.ult(gl(regs, o(ip, 2)), gl(regs, o(ip, 3)))));
+					ip = ip.add(16);
+				case ULE64:
+					si(regs, o(ip, 1), b2i(!Mem.ult(gl(regs, o(ip, 3)), gl(regs, o(ip, 2)))));
+					ip = ip.add(16);
+				case UGT64:
+					si(regs, o(ip, 1), b2i(Mem.ult(gl(regs, o(ip, 3)), gl(regs, o(ip, 2)))));
+					ip = ip.add(16);
+				case UGE64:
+					si(regs, o(ip, 1), b2i(!Mem.ult(gl(regs, o(ip, 2)), gl(regs, o(ip, 3)))));
+					ip = ip.add(16);
+				case FEQ:
+					si(regs, o(ip, 1), b2i(gf(regs, o(ip, 2)) == gf(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case FNE:
+					si(regs, o(ip, 1), b2i(gf(regs, o(ip, 2)) != gf(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case FLT:
+					si(regs, o(ip, 1), b2i(gf(regs, o(ip, 2)) < gf(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case FLE:
+					si(regs, o(ip, 1), b2i(gf(regs, o(ip, 2)) <= gf(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case FGT:
+					si(regs, o(ip, 1), b2i(gf(regs, o(ip, 2)) > gf(regs, o(ip, 3))));
+					ip = ip.add(16);
+				case FGE:
+					si(regs, o(ip, 1), b2i(gf(regs, o(ip, 2)) >= gf(regs, o(ip, 3))));
+					ip = ip.add(16);
 				case SEXT:
-					sl(regs, w(code, pc, 1), (gi(regs, w(code, pc, 2)) : I64));
-					pc += 3;
+					sl(regs, o(ip, 1), (gi(regs, o(ip, 2)) : I64));
+					ip = ip.add(12);
 				case ZEXT:
-					sl(regs, w(code, pc, 1), zext(gi(regs, w(code, pc, 2))));
-					pc += 3;
+					sl(regs, o(ip, 1), zext(gi(regs, o(ip, 2))));
+					ip = ip.add(12);
 				case TRUNC:
-					si(regs, w(code, pc, 1), gl(regs, w(code, pc, 2)).toInt());
-					pc += 3;
+					si(regs, o(ip, 1), gl(regs, o(ip, 2)).toInt());
+					ip = ip.add(12);
 				case I2F32:
-					sf(regs, w(code, pc, 1), gi(regs, w(code, pc, 2)));
-					pc += 3;
+					sf(regs, o(ip, 1), gi(regs, o(ip, 2)));
+					ip = ip.add(12);
 				case I2F64:
-					var f:Float = cast gl(regs, w(code, pc, 2));
-					sf(regs, w(code, pc, 1), f);
-					pc += 3;
+					var f:Float = cast gl(regs, o(ip, 2));
+					sf(regs, o(ip, 1), f);
+					ip = ip.add(12);
 				case F2I32:
-					si(regs, w(code, pc, 1), Std.int(gf(regs, w(code, pc, 2))));
-					pc += 3;
+					si(regs, o(ip, 1), Std.int(gf(regs, o(ip, 2))));
+					ip = ip.add(12);
 				case F2I64:
-					var l:I64 = cast gf(regs, w(code, pc, 2));
-					sl(regs, w(code, pc, 1), l);
-					pc += 3;
+					var l:I64 = cast gf(regs, o(ip, 2));
+					sl(regs, o(ip, 1), l);
+					ip = ip.add(12);
 				case SELECT:
-					sl(regs, w(code, pc, 1), gi(regs, w(code, pc, 2)) != 0 ? gl(regs, w(code, pc, 3)) : gl(regs, w(code, pc, 4)));
-					pc += 5;
+					sl(regs, o(ip, 1), gi(regs, o(ip, 2)) != 0 ? gl(regs, o(ip, 3)) : gl(regs, o(ip, 4)));
+					ip = ip.add(20);
 				case LD1S:
-					si(regs, w(code, pc, 1), Mem.getI8(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					si(regs, o(ip, 1), Mem.getI8(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
 				case LD1U:
-					si(regs, w(code, pc, 1), Mem.getU8(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					si(regs, o(ip, 1), Mem.getU8(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
 				case LD2S:
-					si(regs, w(code, pc, 1), Mem.getI16(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					si(regs, o(ip, 1), Mem.getI16(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
 				case LD2U:
-					si(regs, w(code, pc, 1), Mem.getU16(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					si(regs, o(ip, 1), Mem.getU16(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
 				case LD4S:
-					si(regs, w(code, pc, 1), Mem.getI32(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					si(regs, o(ip, 1), Mem.getI32(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
 				case LD4U:
-					sl(regs, w(code, pc, 1), zext(Mem.getI32(addr(code, regs, pc, 2), 0)));
-					pc += 6;
+					sl(regs, o(ip, 1), zext(Mem.getI32(base(regs, ip, 2), o(ip, 3))));
+					ip = ip.add(16);
 				case LD8:
-					sl(regs, w(code, pc, 1), Mem.getI64(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					sl(regs, o(ip, 1), Mem.getI64(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
 				case LDF4:
-					sf(regs, w(code, pc, 1), Mem.getF32(addr(code, regs, pc, 2), 0));
-					pc += 6;
+					sf(regs, o(ip, 1), Mem.getF32(base(regs, ip, 2), o(ip, 3)));
+					ip = ip.add(16);
+				case LDX1S:
+					si(regs, o(ip, 1), Mem.getI8(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
+				case LDX1U:
+					si(regs, o(ip, 1), Mem.getU8(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
+				case LDX2S:
+					si(regs, o(ip, 1), Mem.getI16(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
+				case LDX2U:
+					si(regs, o(ip, 1), Mem.getU16(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
+				case LDX4S:
+					si(regs, o(ip, 1), Mem.getI32(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
+				case LDX4U:
+					sl(regs, o(ip, 1), zext(Mem.getI32(indexed(regs, ip, 2), o(ip, 5))));
+					ip = ip.add(24);
+				case LDX8:
+					sl(regs, o(ip, 1), Mem.getI64(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
+				case LDXF4:
+					sf(regs, o(ip, 1), Mem.getF32(indexed(regs, ip, 2), o(ip, 5)));
+					ip = ip.add(24);
 				case ST1:
-					Mem.setI8(addr(code, regs, pc, 1), 0, gi(regs, w(code, pc, 5)));
-					pc += 6;
+					Mem.setI8(base(regs, ip, 1), o(ip, 2), gi(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case ST2:
-					Mem.setI16(addr(code, regs, pc, 1), 0, gi(regs, w(code, pc, 5)));
-					pc += 6;
+					Mem.setI16(base(regs, ip, 1), o(ip, 2), gi(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case ST4:
-					Mem.setI32(addr(code, regs, pc, 1), 0, gi(regs, w(code, pc, 5)));
-					pc += 6;
+					Mem.setI32(base(regs, ip, 1), o(ip, 2), gi(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case ST8:
-					Mem.setI64(addr(code, regs, pc, 1), 0, gl(regs, w(code, pc, 5)));
-					pc += 6;
+					Mem.setI64(base(regs, ip, 1), o(ip, 2), gl(regs, o(ip, 3)));
+					ip = ip.add(16);
 				case STF4:
-					Mem.setF32(addr(code, regs, pc, 1), 0, gf(regs, w(code, pc, 5)));
-					pc += 6;
+					Mem.setF32(base(regs, ip, 1), o(ip, 2), gf(regs, o(ip, 3)));
+					ip = ip.add(16);
+				case STX1:
+					Mem.setI8(indexed(regs, ip, 1), o(ip, 4), gi(regs, o(ip, 5)));
+					ip = ip.add(24);
+				case STX2:
+					Mem.setI16(indexed(regs, ip, 1), o(ip, 4), gi(regs, o(ip, 5)));
+					ip = ip.add(24);
+				case STX4:
+					Mem.setI32(indexed(regs, ip, 1), o(ip, 4), gi(regs, o(ip, 5)));
+					ip = ip.add(24);
+				case STX8:
+					Mem.setI64(indexed(regs, ip, 1), o(ip, 4), gl(regs, o(ip, 5)));
+					ip = ip.add(24);
+				case STXF4:
+					Mem.setF32(indexed(regs, ip, 1), o(ip, 4), gf(regs, o(ip, 5)));
+					ip = ip.add(24);
 				case CALLN:
-					var n = w(code, pc, 3);
-					var buf = isp;
-					for (k in 0...n)
-						Mem.setI64At(buf, 8, k, gl(regs, w(code, pc, 4 + k)));
-					isp = buf.add((8 * n + 23) & ~15);
-					Mem.callRef2(Mem.getPtr(syms, w(code, pc, 1) << 3), null, buf);
-					isp = buf;
-					var d = w(code, pc, 2);
-					if (d >= 0) sl(regs, d, Mem.getI64(buf, 0));
-					pc += 4 + n;
+					var n = o(ip, 3);
+					callOut(regs, ip, Mem.getPtr(syms, o(ip, 1) << 3), 0, o(ip, 2), n, 4);
+					ip = ip.add(16 + 4 * n);
 				case CALLNI:
-					var n = w(code, pc, 4);
-					var buf = isp;
-					Mem.setI64(buf, 0, gl(regs, w(code, pc, 2)));
-					for (k in 0...n)
-						Mem.setI64At(buf, 8, k, gl(regs, w(code, pc, 5 + k)));
-					isp = buf.add((8 * n + 23) & ~15);
-					Mem.callRef2(Mem.getPtr(syms, w(code, pc, 1) << 3), null, buf);
-					isp = buf;
-					var d = w(code, pc, 3);
-					if (d >= 0) sl(regs, d, Mem.getI64(buf, 0));
-					pc += 5 + n;
+					var n = o(ip, 4);
+					var fn = gl(regs, o(ip, 2));
+					// (an entry stub: its function run here; the last two entries cached at the call)
+					var ic = syms.add(o(ip, 5) << 3);
+					var e = Mem.getPtr(ic, 0);
+					if (e.isNull() || Mem.getI64(e, 0) != fn) {
+						var e2 = Mem.getPtr(ic, 8);
+						if (!e2.isNull() && Mem.getI64(e2, 0) == fn) e = e2 else {
+							e2 = lookup(fn);
+							if (!e2.isNull()) {
+								Mem.setPtr(ic, 8, e);
+								Mem.setPtr(ic, 0, e2);
+							}
+							e = e2;
+						}
+					}
+					if (!e.isNull()) callInterp(regs, ip, Mem.getPtr(e, 8), o(ip, 3), n, 6) else callOut(regs, ip, Mem.getPtr(syms, o(ip, 1) << 3), fn, o(ip, 3), n, 6);
+					ip = ip.add(24 + 4 * n);
 				case CALLI:
-					var n = w(code, pc, 3);
-					var buf = isp;
-					for (k in 0...n)
-						Mem.setI64At(buf, 0, k, gl(regs, w(code, pc, 4 + k)));
-					isp = buf.add((8 * n + 15) & ~15 | 16);
-					run(Mem.getPtr(syms, w(code, pc, 1) << 3), buf);
-					isp = buf;
-					var d = w(code, pc, 2);
-					if (d >= 0) sl(regs, d, Mem.getI64(buf, 0));
-					pc += 4 + n;
+					var n = o(ip, 3);
+					callInterp(regs, ip, Mem.getPtr(syms, o(ip, 1) << 3), o(ip, 2), n, 4);
+					ip = ip.add(16 + 4 * n);
 				case SETJMP:
-					var r = enterTry(fr, pc + 3, w(code, pc, 1), Ptr.ofI64(gl(regs, w(code, pc, 2))));
+					var r = enterTry(fr, ip.add(12), o(ip, 1), Ptr.ofI64(gl(regs, o(ip, 2))));
 					if (r != CONTINUE) return r;
-					pc = Mem.getI32(fr, F_PC);
+					ip = Mem.getPtr(fr, F_IP);
 				case JMP:
-					pc = follow(code, regs, w(code, pc, 1));
+					ip = ip.add(o(ip, 1));
+				case MOVJ1:
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)));
+					ip = ip.add(o(ip, 3));
+				case MOVJ2:
+					sl(regs, o(ip, 1), gl(regs, o(ip, 2)));
+					sl(regs, o(ip, 3), gl(regs, o(ip, 4)));
+					ip = ip.add(o(ip, 5));
+				case MOVJN:
+					var n = o(ip, 1);
+					var m = ip.add(8);
+					for (_ in 0...n) {
+						sl(regs, o(m, 0), gl(regs, o(m, 1)));
+						m = m.add(8);
+					}
+					ip = ip.add(o(m, 0));
 				case BR:
-					pc = follow(code, regs, gi(regs, w(code, pc, 1)) != 0 ? w(code, pc, 2) : w(code, pc, 3));
+					ip = ip.add(gi(regs, o(ip, 1)) != 0 ? o(ip, 2) : o(ip, 3));
+				case BEQ32:
+					ip = ip.add(gi(regs, o(ip, 1)) == gi(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BNE32:
+					ip = ip.add(gi(regs, o(ip, 1)) != gi(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BLT32:
+					ip = ip.add(gi(regs, o(ip, 1)) < gi(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BLE32:
+					ip = ip.add(gi(regs, o(ip, 1)) <= gi(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BGT32:
+					ip = ip.add(gi(regs, o(ip, 1)) > gi(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BGE32:
+					ip = ip.add(gi(regs, o(ip, 1)) >= gi(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BULT32:
+					ip = ip.add((gi(regs, o(ip, 1)) ^ MIN32) < (gi(regs, o(ip, 2)) ^ MIN32) ? o(ip, 3) : o(ip, 4));
+				case BULE32:
+					ip = ip.add((gi(regs, o(ip, 1)) ^ MIN32) <= (gi(regs, o(ip, 2)) ^ MIN32) ? o(ip, 3) : o(ip, 4));
+				case BUGT32:
+					ip = ip.add((gi(regs, o(ip, 1)) ^ MIN32) > (gi(regs, o(ip, 2)) ^ MIN32) ? o(ip, 3) : o(ip, 4));
+				case BUGE32:
+					ip = ip.add((gi(regs, o(ip, 1)) ^ MIN32) >= (gi(regs, o(ip, 2)) ^ MIN32) ? o(ip, 3) : o(ip, 4));
+				case BEQ64:
+					ip = ip.add(gl(regs, o(ip, 1)) == gl(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BNE64:
+					ip = ip.add(gl(regs, o(ip, 1)) != gl(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BLT64:
+					ip = ip.add(gl(regs, o(ip, 1)) < gl(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BLE64:
+					ip = ip.add(gl(regs, o(ip, 1)) <= gl(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BGT64:
+					ip = ip.add(gl(regs, o(ip, 1)) > gl(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BGE64:
+					ip = ip.add(gl(regs, o(ip, 1)) >= gl(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BULT64:
+					ip = ip.add(Mem.ult(gl(regs, o(ip, 1)), gl(regs, o(ip, 2))) ? o(ip, 3) : o(ip, 4));
+				case BULE64:
+					ip = ip.add(!Mem.ult(gl(regs, o(ip, 2)), gl(regs, o(ip, 1))) ? o(ip, 3) : o(ip, 4));
+				case BUGT64:
+					ip = ip.add(Mem.ult(gl(regs, o(ip, 2)), gl(regs, o(ip, 1))) ? o(ip, 3) : o(ip, 4));
+				case BUGE64:
+					ip = ip.add(!Mem.ult(gl(regs, o(ip, 1)), gl(regs, o(ip, 2))) ? o(ip, 3) : o(ip, 4));
+				case BFEQ:
+					ip = ip.add(gf(regs, o(ip, 1)) == gf(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BFNE:
+					ip = ip.add(gf(regs, o(ip, 1)) != gf(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BFLT:
+					ip = ip.add(gf(regs, o(ip, 1)) < gf(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BFLE:
+					ip = ip.add(gf(regs, o(ip, 1)) <= gf(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BFGT:
+					ip = ip.add(gf(regs, o(ip, 1)) > gf(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
+				case BFGE:
+					ip = ip.add(gf(regs, o(ip, 1)) >= gf(regs, o(ip, 2)) ? o(ip, 3) : o(ip, 4));
 				case SWITCH:
-					var v = gi(regs, w(code, pc, 1));
-					var n = w(code, pc, 2);
-					var e = w(code, pc, 3 + 2 * n);
+					var v = gi(regs, o(ip, 1));
+					var n = o(ip, 2);
+					var t = o(ip, 3 + 2 * n);
 					for (k in 0...n)
-						if (w(code, pc, 3 + 2 * k) == v) {
-							e = w(code, pc, 4 + 2 * k);
+						if (o(ip, 3 + 2 * k) == v) {
+							t = o(ip, 4 + 2 * k);
 							break;
 						}
-					pc = follow(code, regs, e);
+					ip = ip.add(t);
+				case SWITCHT:
+					var v = gi(regs, o(ip, 1)) - o(ip, 2);
+					var n = o(ip, 3);
+					ip = ip.add(v >= 0 && v < n ? o(ip, 4 + v) : o(ip, 4 + n));
 				case RET:
-					Mem.setI64(args, 0, gl(regs, w(code, pc, 1)));
+					Mem.setI64(Mem.getPtr(fr, F_RES), 0, gl(regs, o(ip, 1)));
 					return RETURNED;
 				case RETV:
 					return RETURNED;
-				case UNREACH:
+				case _:
 					throw "hxmc interp: unreachable code reached";
 			}
 		}
