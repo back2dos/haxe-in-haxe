@@ -298,13 +298,15 @@ class InterpGen {
 					case _:
 				}
 		var nc = consts.length;
-		nregs = nc + mf.params.length;
-		for (b in blocks)
-			for (i in b.ins)
-				if (i.op == Param && !i.dead) reg[i.id] = nc + i.imm;
-		for (b in blocks)
-			for (i in b.ins)
-				if (!i.dead && reg[i.id] < 0 && i.ty != Void && !fused.exists(i.id)) reg[i.id] = nregs++;
+		if (coalesce) nregs = allocate(blocks, nc, uses) else {
+			nregs = nc + mf.params.length;
+			for (b in blocks)
+				for (i in b.ins)
+					if (i.op == Param && !i.dead) reg[i.id] = nc + i.imm;
+			for (b in blocks)
+				for (i in b.ins)
+					if (!i.dead && reg[i.id] < 0 && i.ty != Void && !fused.exists(i.id)) reg[i.id] = nregs++;
+		}
 		var pcOf = new Map<Int, Int>();
 		for (b in blocks) {
 			pcOf.set(b.id, code.length);
@@ -350,6 +352,235 @@ class InterpGen {
 		}
 		obj.define(DESC + mf.name, sec, start, b.len - start, true);
 		entryStub();
+	}
+
+	// (HXMC_INTERP_COALESCE=0: a register per value)
+	static var coalesce = Sys.getEnv("HXMC_INTERP_COALESCE") != "0";
+
+	// the registers of the values (after the constants): SSA coloring in
+	// dominator-tree preorder, a value taking a register no value live at its
+	// definition holds (an operand dying at an operation frees its register
+	// for that operation's result: the interpreter reads operands first); a
+	// value feeding a phi prefers the phi's register and a phi its
+	// arguments', so that the edge's move goes. A value live into a try's
+	// handler block keeps a register of its own: a throw resumes the frame
+	// with its registers as they are. Returns the number of registers.
+	function allocate(blocks:Array<MBlock>, nc:Int, uses:haxe.ds.Vector<Int>):Int {
+		var vals = mf.vals;
+		var wid = MFunc.ints(vals.length, -1), ids = [];
+		for (b in blocks)
+			for (i in b.ins)
+				if (!i.dead && i.ty != Void && reg[i.id] < 0 && !fused.exists(i.id)) {
+					wid[i.id] = ids.length;
+					ids.push(i.id);
+				}
+		var n = ids.length;
+		var nb = 0;
+		for (b in mf.blocks)
+			if (b.id >= nb) nb = b.id + 1;
+		var reach = [for (_ in 0...nb) false];
+		for (b in blocks)
+			reach[b.id] = true;
+		// the uses of an operation (a fused compare's at its branch)
+		function eachUse(i:MIns, f:Int->Void) {
+			if (i.op == Phi || fused.exists(i.id)) return;
+			if (i.op == Br && fused.exists(i.a)) {
+				var c = vals[i.a];
+				if (wid[c.a] >= 0) f(c.a);
+				if (wid[c.b] >= 0) f(c.b);
+				return;
+			}
+			if (i.a >= 0 && wid[i.a] >= 0) f(i.a);
+			if (i.b >= 0 && wid[i.b] >= 0) f(i.b);
+			if (i.c >= 0 && wid[i.c] >= 0) f(i.c);
+			if (i.args != null)
+				for (v in i.args)
+					if (wid[v] >= 0) f(v);
+		}
+		// liveness (a phi's argument: live out of its predecessor)
+		var gen = [for (_ in 0...nb) new hxmc.Lir.Bits(n)];
+		var kill = [for (_ in 0...nb) new hxmc.Lir.Bits(n)];
+		var phiUse = [for (_ in 0...nb) new hxmc.Lir.Bits(n)];
+		var liveIn = [for (_ in 0...nb) new hxmc.Lir.Bits(n)];
+		var liveOut = [for (_ in 0...nb) new hxmc.Lir.Bits(n)];
+		for (b in blocks) {
+			var g = gen[b.id], k = kill[b.id];
+			for (i in b.ins) {
+				if (i.dead) continue;
+				if (i.op == Phi) {
+					if (wid[i.id] >= 0) k.set(wid[i.id]);
+					for (pi in 0...b.preds.length) {
+						var p = b.preds[pi], v = i.args[pi];
+						if (reach[p.id] && wid[v] >= 0) phiUse[p.id].set(wid[v]);
+					}
+					continue;
+				}
+				eachUse(i, u -> if (!k.get(wid[u])) g.set(wid[u]));
+				if (wid[i.id] >= 0) k.set(wid[i.id]);
+			}
+		}
+		var post = blocks.copy();
+		post.reverse();
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (b in post) {
+				var out = phiUse[b.id].copy();
+				for (s in b.succs)
+					if (reach[s.id]) out.union(liveIn[s.id]);
+				liveOut[b.id] = out;
+				var inn = liveIn[b.id], g = gen[b.id], k = kill[b.id];
+				for (w in 0...inn.w.length) {
+					var v = g.w[w] | (out.w[w] & ~k.w[w]);
+					if (v != inn.w[w]) {
+						inn.w[w] = v;
+						changed = true;
+					}
+				}
+			}
+		}
+		// dominators (Cooper, Harvey, Kennedy) over a reverse postorder
+		var rpo = [], seen = [for (_ in 0...nb) false];
+		var stack = [mf.entry], idx = [0];
+		seen[mf.entry.id] = true;
+		while (stack.length > 0) {
+			var t = stack.length - 1, b = stack[t];
+			if (idx[t] < b.succs.length) {
+				var s = b.succs[idx[t]++];
+				if (reach[s.id] && !seen[s.id]) {
+					seen[s.id] = true;
+					stack.push(s);
+					idx.push(0);
+				}
+			} else {
+				rpo.push(b);
+				stack.pop();
+				idx.pop();
+			}
+		}
+		rpo.reverse();
+		var num = [for (_ in 0...nb) -1];
+		for (k in 0...rpo.length)
+			num[rpo[k].id] = k;
+		var idom:Array<Null<MBlock>> = [for (_ in 0...nb) null];
+		idom[mf.entry.id] = mf.entry;
+		changed = true;
+		while (changed) {
+			changed = false;
+			for (k in 1...rpo.length) {
+				var b = rpo[k];
+				var d:Null<MBlock> = null;
+				for (p in b.preds) {
+					if (num[p.id] < 0 || idom[p.id] == null) continue;
+					if (d == null) d = p else {
+						var x = p, y = d;
+						while (x != y) {
+							while (num[x.id] > num[y.id])
+								x = idom[x.id];
+							while (num[y.id] > num[x.id])
+								y = idom[y.id];
+						}
+						d = x;
+					}
+				}
+				if (d != idom[b.id]) {
+					idom[b.id] = d;
+					changed = true;
+				}
+			}
+		}
+		var kids = [for (_ in 0...nb) []];
+		for (k in 1...rpo.length)
+			kids[idom[rpo[k].id].id].push(rpo[k]);
+		// the values a try's handler reads: their own registers
+		var pinned = new hxmc.Lir.Bits(n);
+		for (b in blocks)
+			if (b.handler) pinned.union(liveIn[b.id]);
+		// a value feeding a phi: the phi
+		var hint = MFunc.ints(vals.length, -1);
+		for (b in blocks)
+			for (i in b.ins)
+				if (i.op == Phi && !i.dead)
+					for (v in i.args)
+						if (hint[v] < 0) hint[v] = i.id;
+		var maxReg = nc + mf.params.length;
+		var occ:Array<Int> = [for (_ in 0...maxReg) 0];
+		var reserved:Array<Bool> = [for (_ in 0...maxReg) false];
+		var stamp = 0;
+		var last = MFunc.ints(n, -1);
+		function free():Int {
+			var r = nc;
+			while (r < maxReg && (occ[r] == stamp || reserved[r]))
+				r++;
+			if (r == maxReg) {
+				maxReg++;
+				occ.push(0);
+				reserved.push(false);
+			}
+			return r;
+		}
+		function take(v:Int, r:Int) {
+			reg[v] = r;
+			occ[r] = stamp;
+			if (pinned.get(wid[v])) reserved[r] = true;
+		}
+		function pick(v:Int, prefer:Int):Int {
+			if (pinned.get(wid[v])) {
+				// (a register no other value ever takes)
+				maxReg++;
+				occ.push(0);
+				reserved.push(false);
+				return maxReg - 1;
+			}
+			return prefer >= nc && occ[prefer] != stamp && !reserved[prefer] ? prefer : free();
+		}
+		var order = [mf.entry];
+		while (order.length > 0) {
+			var b = order.pop();
+			for (c in kids[b.id])
+				order.push(c);
+			stamp++;
+			var li = liveIn[b.id], lo = liveOut[b.id];
+			for (w in 0...n)
+				if (li.get(w)) occ[reg[ids[w]]] = stamp;
+			for (r in 0...maxReg)
+				if (reserved[r]) occ[r] = stamp;
+			// (the parameters: written by the caller before the entry block runs)
+			if (b == mf.entry)
+				for (i in b.ins)
+					if (i.op == Param && !i.dead && wid[i.id] >= 0) occ[nc + i.imm] = stamp;
+			// the last use of each value in the block
+			for (k in 0...b.ins.length) {
+				var i = b.ins[k];
+				if (!i.dead) eachUse(i, u -> last[wid[u]] = k);
+			}
+			for (k in 0...b.ins.length) {
+				var i = b.ins[k];
+				if (i.dead) continue;
+				if (i.op == Phi) {
+					if (wid[i.id] < 0) continue;
+					var prefer = -1;
+					for (v in i.args)
+						if (reg[v] >= nc && occ[reg[v]] != stamp) prefer = reg[v];
+					take(i.id, pick(i.id, prefer));
+					continue;
+				}
+				eachUse(i, u -> {
+					var w = wid[u];
+					if (last[w] == k && !lo.get(w) && !pinned.get(w)) occ[reg[u]] = 0;
+				});
+				if (wid[i.id] < 0) continue;
+				if (i.op == Param) {
+					take(i.id, nc + i.imm);
+				} else {
+					var h = hint[i.id];
+					take(i.id, pick(i.id, h >= 0 && reg[h] >= 0 ? reg[h] : -1));
+				}
+				// (never read: free again)
+				if (uses[i.id] == 0 && !pinned.get(wid[i.id])) occ[reg[i.id]] = 0;
+			}
+		}
+		return maxReg;
 	}
 
 	// a constant's register: a value (lo, hi), or a symbol's (S + A)
