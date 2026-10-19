@@ -143,6 +143,7 @@ module moduleload-ValueSwitch haxe/test unit.moduleload.ValueSwitch
 direct moduleload-Basic haxe/test/conformance unit.moduleload.Basic
 direct moduleload-HelloWorld haxe/test/conformance unit.moduleload.HelloWorld
 direct string-order haxe/test/conformance unit.strings.StringOrder
+direct string-offsets haxe/test/conformance unit.strings.StringOffsets
 direct malformed haxe/test/conformance unit.strings.Malformed
 direct malformed-source haxe/test/conformance unit.strings.MalformedSource
 direct malformed-parse haxe/test/conformance unit.strings.MalformedParse
