@@ -142,6 +142,8 @@ enum abstract IOp(Int) from Int to Int {
 	var RET; // a
 	var RETV;
 	var UNREACH;
+	var TLSXLD; // d k: thread-local variable k of code loaded at run time (a block per thread)
+	var TLSXST; // a k
 }
 
 // An interpreter of hxmc's Mir inside the running program (-D hxmc.interp):
@@ -210,11 +212,24 @@ class Interp {
 
 	@:hxmc.threadLocal("rt_interp_sp") static var isp:Ptr;
 	@:hxmc.threadLocal("rt_interp_end") static var iend:Ptr;
+	// the thread-local variables of code loaded at run time (TLSXLD: 4096 words, made at the first use)
+	@:hxmc.threadLocal("rt_interp_tls") static var itls:Ptr;
+
+	static function tlsBlock():Ptr {
+		if (itls.isNull()) {
+			var n:I64 = 8 * 4096;
+			itls = LibC.malloc(n);
+			LibC.memset(itls, 0, n);
+		}
+		return itls;
+	}
 	// the functions interpreted, by entry stub: (stub, descriptor) pairs,
-	// open addressing (InterpGen.TABLE: made at the first entry, on the main
+	// open addressing (InterpGen.TABLE, then those registered by code loaded
+	// at run time: made at the first entry or registration, on the main
 	// thread, read only after)
 	static var table:Ptr;
 	static var mask:Int;
+	static var count = 0;
 
 	static function initStack() {
 		var n:I64 = STACK_BYTES;
@@ -232,22 +247,44 @@ class Interp {
 	static function initTable() {
 		var t = Mem.sym("hxmc_interp_fns");
 		var n = Mem.getI64(t, 0).toInt();
+		grow(2 * n);
+		for (k in 0...n)
+			insert(Mem.getI64(t, 8 + 16 * k), Mem.getI64(t, 16 + 16 * k));
+	}
+
+	// (the table with room for n entries, the ones it has moved over)
+	static function grow(n:Int) {
 		var size = 16;
 		while (size < 2 * n)
 			size <<= 1;
 		var bytes:I64 = 16 * size;
 		var tab = LibC.malloc(bytes);
 		LibC.memset(tab, 0, bytes);
-		for (k in 0...n) {
-			var key = Mem.getI64(t, 8 + 16 * k);
-			var h = hash(key) & (size - 1);
-			while (Mem.getI64(tab, h << 4) != (0 : I64))
-				h = (h + 1) & (size - 1);
-			Mem.setI64(tab, h << 4, key);
-			Mem.setI64(tab, (h << 4) + 8, Mem.getI64(t, 16 + 16 * k));
-		}
-		mask = size - 1;
+		var old = table, oldSize = table.isNull() ? 0 : mask + 1;
 		table = tab;
+		mask = size - 1;
+		count = 0;
+		for (k in 0...oldSize) {
+			var key = Mem.getI64(old, k << 4);
+			if (key != (0 : I64)) insert(key, Mem.getI64(old, (k << 4) + 8));
+		}
+		if (!old.isNull()) LibC.free(old);
+	}
+
+	static function insert(key:I64, desc:I64) {
+		var h = hash(key) & mask;
+		while (Mem.getI64(table, h << 4) != (0 : I64))
+			h = (h + 1) & mask;
+		Mem.setI64(table, h << 4, key);
+		Mem.setI64(table, (h << 4) + 8, desc);
+		count++;
+	}
+
+	// a function interpreted that code loaded at run time defines: its entry stub and descriptor
+	public static function register(stub:Ptr, desc:Ptr) {
+		if (table.isNull()) initTable();
+		if (2 * (count + 1) > mask + 1) grow(2 * (count + 1));
+		insert(stub.toI64(), desc.toI64());
 	}
 
 	// the entry of the function interpreted whose entry stub is at fn (its descriptor at +8), or null
@@ -839,6 +876,12 @@ class Interp {
 					return RETURNED;
 				case RETV:
 					return RETURNED;
+				case TLSXLD:
+					sl(regs, o(ip, 1), Mem.getI64At(tlsBlock(), 0, o(ip, 2)));
+					ip = ip.add(12);
+				case TLSXST:
+					Mem.setI64At(tlsBlock(), 0, o(ip, 2), gl(regs, o(ip, 1)));
+					ip = ip.add(12);
 				case _:
 					throw "hxmc interp: unreachable code reached";
 			}

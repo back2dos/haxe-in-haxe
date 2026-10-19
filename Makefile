@@ -119,7 +119,7 @@ endef
 	lix lix-release lix-dist reference bench bench-arrays test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage gfx-programs gfx-check gfx-web-check gfx-cache-check gfx-shader-check 3d-programs 3d-check 3d-web-check 3d-sizes \
 	android-programs android-check android-device-check touch-check shared-check ios-programs ios-check ios-sim-check \
-	audio-programs audio-check audio-web-check native-macros ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
+	audio-programs audio-check audio-web-check native-macros mir-run-check ui-programs view-check web-check text-check ui-check ui-layout-fuzz ui-layout-reduce theme-check theme-fidelity-check theme-dom-check web-widgets ui-draw-check ui-web-check dev-check portcheck measure site-check \
 	quick check full clean distclean wasmgc-check wasmgc-bench wasmgc-port test-wasmgc-port
 
 help:
@@ -260,6 +260,9 @@ help:
 ## native-macros  the native macros prototype (docs/plans/compiler.md, "Native macros"): bin/jit/haxe, the
 ##             npm compiler built with -D hxmc.jit (Linux x86-64), runs the macro cases with
 ##             -D hxmc.macros=verify (MACROS=native: native only, the HXB compared)
+## mir-run-check  --interp and --run on the Mir interpreter inside the compiler (-D hxmc.mir-run,
+##             hxmc/src/hxmc/interp/MirRun.hx): bin/jit/haxe as for native-macros, the corpus run
+##             in it (Corpus --mir-run)
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
@@ -922,6 +925,11 @@ native-macros: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(call hxmc,bin/jit/haxe,$(PKG_ARGS) -D hxmc.jit)
 	export HXMC_STD=$(abspath bin/hxmc/std) HXMC_RT_DIR=$(abspath bin/hxmc/rt) HAXE_REFERENCE=$(abspath $(REFERENCE)) HAXE_IN_HAXE_PORT="$(abspath bin/jit/haxe) -D hxmc.macros=$(MACROS)"; $(SCRIPT) Conformance -j $(JOBS) --cases haxe/test/conformance-macro-cases.txt
 	@cat bin/test/conformance/*/port.log | grep -h "^hxmc.macros: [0-9]* macro calls" | awk '{c+=$$2; n+=$$5; m+=substr($$7,2); mm+=$$9; e+=$$11} END {print "native macros: " c " calls, " n " native (" m " matched, " mm " mismatched), " e " on Eval"}'
+
+# (each case typed, compiled for the Mir interpreter and run in bin/jit/haxe's process)
+mir-run-check: $(TOOL) $(STD) $(HOST_RT)
+	$(call hxmc,bin/jit/haxe,$(PKG_ARGS) -D hxmc.jit)
+	$(SCRIPT) Corpus --mir-run $(CASES)
 
 portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 	$(SCRIPT) Selfcheck --local --small

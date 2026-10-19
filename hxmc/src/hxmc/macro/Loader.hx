@@ -108,10 +108,12 @@ class Loader {
 		return p;
 	}
 
-	public static function load(base:String):Bundle {
+	public static function load(base:String):Bundle
+		return loadObj(ElfReader.read(sys.io.File.getBytes(base + ".o")), haxe.Json.parse(sys.io.File.getContent(base + ".json")));
+
+	// a bundle in memory: its object and its facts (Guest.facts; hxmc.interp.MirRun)
+	public static function loadObj(obj:Obj, facts:Dynamic):Bundle {
 		var h = hostSyms();
-		var obj = ElfReader.read(sys.io.File.getBytes(base + ".o"));
-		var facts:Dynamic = haxe.Json.parse(sys.io.File.getContent(base + ".json"));
 		var b = new Bundle();
 		// ---- program-wide numbers
 		dbg("program-wide numbers");
@@ -202,6 +204,13 @@ class Loader {
 				if (a != null) extra.set(g.sym, ptr(a)) else newScalars.push(g.sym);
 			}
 		}
+		// @:hxmc.bss blocks: the compiler's, else new (in the mapping, zeroed: after the scalars)
+		var bssList:Array<Dynamic> = facts.bss != null ? facts.bss : [];
+		var newBss:Array<{sym:String, size:Int, at:Int}> = [];
+		for (x in bssList) {
+			var a = dataAddr(x.sym, true);
+			if (a != null) extra.set(x.sym, ptr(a)) else newBss.push({sym: x.sym, size: x.size, at: 0});
+		}
 		// type objects (two words: the header, the type index): the new types' in
 		// the spare part of rt_types_objs, where the runtime finds them
 		for (t in types) {
@@ -241,6 +250,11 @@ class Loader {
 		pos = rowsAt + rowBytes * selectors.length;
 		var scalarsAt = (pos + 15) & ~15;
 		pos = scalarsAt + 8 * newScalars.length;
+		for (x in newBss) {
+			pos = (pos + 63) & ~63;
+			x.at = pos;
+			pos += x.size;
+		}
 		var size = (pos + 4095) & ~4095;
 		var region = Vm.mmap(ptr(hint), (size : I64), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		var ra = region.toI64();
@@ -251,6 +265,8 @@ class Loader {
 			addr.set(s, addr.get(s) + base);
 		for (i in 0...newScalars.length)
 			extra.set(newScalars[i], ptr(base + scalarsAt + 8 * i));
+		for (x in newBss)
+			extra.set(x.sym, ptr(base + x.at));
 		for (k in 0...selectors.length)
 			extra.set(selectors[k].sym, ptr(base + rowsAt + rowBytes * k)); // (indexed by type index - T_FIRST: MirBuild)
 		// ---- symbols
@@ -303,6 +319,13 @@ class Loader {
 		}
 		b.codeBytes = textSize;
 		if (Vm.mprotect(region, (textSize : I64), PROT_READ | PROT_EXEC) != 0) throw "mprotect failed";
+		// the functions interpreted (-D hxmc.interp: a descriptor beside each
+		// entry stub): the interpreter runs them directly where code calls their stub
+		for (n => s in defs)
+			if (StringTools.startsWith(n, hxmc.interp.InterpGen.DESC)) {
+				var stub = defs.get(n.substr(hxmc.interp.InterpGen.DESC.length));
+				if (stub != null) hxmc.rt.Interp.register(ptr(value(stub).v), ptr(value(s).v));
+			}
 		inline function symAddr(n:String):Int {
 			var d = defs.get(n);
 			if (d != null) return value(d).v;
@@ -464,6 +487,8 @@ class Loader {
 			if (!StringTools.startsWith(n, "DSP_")) xb.set(n, {k: "d", v: addrOf(p)});
 		for (n => s in defs)
 			if (s.section.kind == Text && StringTools.startsWith(n, "F_")) xb.set(n, {k: "t", v: value(s).v});
+		// (the runtime's walks of the types, Type.resolveClass, reach the new ones)
+		Mem.setI32(Mem.sym("rt_ntypes"), 0, nextType);
 		var entries:Array<Dynamic> = facts.entries;
 		for (en in entries)
 			b.entries.set(en.name, ptr(symAddr(en.sym)));

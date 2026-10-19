@@ -159,7 +159,8 @@ class Guest {
 				sup: supIsSig ? e.sigNames[t.sup] : tyName(t.sup),
 				slots: [for (s in t.slots) kindChar(s)].join(""),
 				fields: [for (f in t.fields) {name: f.name, slot: f.slot, kind: kindChar(f.ty)}],
-				methods: [for (m in t.methods) {name: m.name, fn: m.fn, sig: e.sigNames[m.sig]}],
+				// (a method with default values for numbers or Bools: its entry taking them nullable, as DataGen)
+				methods: [for (m in t.methods) {name: m.name, fn: m.dfn != null ? m.dfn : m.fn, sig: e.sigNames[m.dfn != null ? m.dsig : m.sig]}],
 				ifaces: [for (x in t.ifaces) tyName(x)],
 				tag: t.tag,
 				ctors: [for (x in t.ctors) tyName(x)]
@@ -168,17 +169,20 @@ class Guest {
 		// (statics: what Reflect finds on the class value, as DataGen writes them)
 		function statics(c:ClassInfo):Array<Dynamic> {
 			if (c.statics == null) return [];
+			// (the live ones, as DataGen: hxmc.ir.Reach)
 			return [
 				for (x in c.statics)
-					if (x.clos != null) {name: x.name, kind: "c", ty: tn[x.clos.tindex], fn: e.symbol(x.clos.fn)}
+					if (x.clos != null && !p.isLive(x.clos.fn)) continue else if (x.clos != null) {name: x.name, kind: "c", ty: tn[x.clos.tindex], fn: e.symbol(x.clos.fn)}
 					else if (Ir.isRef(p.globals[x.global].ty)) {name: x.name, kind: "p", global: e.globalNames[x.global]}
 					else {name: x.name, kind: kindChar(p.globals[x.global].ty), sym: e.scalarGlobal(x.global)}
 			];
 		}
 		var classes = [for (c in p.classes) if (c.tindex >= Abi.T_FIRST) {ty: tn[c.tindex], sup: c.sup == null || c.sup.tindex < 0 ? null : tn[c.sup.tindex], span: c.lastDescendant - c.id, statics: statics(c)}];
-		var globals = [];
+		var globals = [], bss = [];
 		for (g in 0...p.globals.length) {
 			var gl = p.globals[g];
+			// (a @:hxmc.bss static: a zeroed block, the compiler's when it has it)
+			if (gl.bss != null) bss.push({sym: gl.sym, size: gl.bss});
 			if (gl.tls != null || gl.bss != null) continue;
 			var ref = Ir.isRef(gl.ty);
 			globals.push({
@@ -202,14 +206,14 @@ class Guest {
 			var rows = [];
 			for (c in p.classes) {
 				var m = c.findMethod(p.selectors[s].name);
-				if (m != null && m.dispatchSel == s && c.tindex >= Abi.T_FIRST) rows.push({ty: tn[c.tindex], fn: e.symbol(m)});
+				if (m != null && m.dispatchSel == s && c.tindex >= Abi.T_FIRST && p.isLive(m)) rows.push({ty: tn[c.tindex], fn: e.symbol(m)});
 			}
 			selectors.push({sym: e.selNames[s], rows: rows});
 		}
 		var entries = [];
 		for (cf in main.clOrderedStatics) {
 			var f = l.funcs.get(cf);
-			if (f != null && cf.cfName != "main") entries.push({name: cf.cfName, sym: e.symbol(f)});
+			if (f != null && cf.cfName != "main" && p.isLive(f)) entries.push({name: cf.cfName, sym: e.symbol(f)});
 		}
 		// the singletons of constructors without arguments (the bridge's enum values)
 		var singletons = [];
@@ -222,6 +226,7 @@ class Guest {
 			fields: [for (n in e.fieldNames) {name: n, sym: e.fidNames.get(n)}],
 			sigs: [for (s in p.sigs) {sym: e.sigNames[s.id], key: s.key, dyn: "DYN" + s.id, bt: "BT" + s.id, bound: tn[e.boundTypes.get(s.id)]}],
 			globals: globals,
+			bss: bss,
 			inits: inits,
 			selectors: selectors,
 			entries: entries,

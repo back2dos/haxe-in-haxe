@@ -23,6 +23,11 @@ class HaxeMain {
 	public static function run(args:Array<String>):Int {
 		Defines.install();
 		if (args[0] == "--dev") return dev(args.slice(1));
+		#if hxmc.jit
+		// (-D hxmc.mir-run: --interp and --run on the Mir interpreter, interp.MirRun)
+		var mir = hxmc.interp.MirRun.rewrite(args);
+		if (mir != null) args = mir;
+		#end
 		var failed = null;
 		// (through links to the binary, as npm's node_modules/.bin/haxe)
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
@@ -68,6 +73,12 @@ class HaxeMain {
 					Sys.println("hxmc dev: generating");
 					Sys.stdout().flush();
 				}
+				#if hxmc.jit
+				if (core.Define.rawDefined(com.defines, hxmc.interp.MirRun.DEFINE)) {
+					hxmc.interp.MirRun.run(com);
+					return;
+				}
+				#end
 				@:privateAccess Main.generate(com, com.file);
 			} catch (e:Dynamic) {
 				// (a compilation server's client gets it as an error: hxmc dev)

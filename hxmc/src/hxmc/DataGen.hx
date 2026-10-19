@@ -384,7 +384,13 @@ class DataGen {
 			if (data.buf.len - at != Abi.TYPE_SIZE) throw "hxmc: rt_type layout";
 		}
 		data.buf.zeros(Abi.TYPE_SIZE * spareTypes);
-		int32Global("rt_ntypes", types.length);
+		if (spareTypes > 0) {
+			// (written by the loader of code at run time: hxmc.macro.Loader)
+			data.buf.align(4);
+			obj.define("rt_ntypes", data, data.buf.len, 4, true);
+			data.buf.u32(types.length);
+		} else
+			int32Global("rt_ntypes", types.length);
 	}
 
 	// the closures capturing nothing (Prep.staticClosures), each an object

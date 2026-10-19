@@ -139,10 +139,12 @@ enum abstract IOp(Int) from Int to Int {
 	var RET;
 	var RETV;
 	var UNREACH;
+	var TLSXLD;
+	var TLSXST;
 }
 
 // The functions -D hxmc.interp interprets: those of the program's modules
-// (not the runtime's, hxmc.rt), or of the modules named (prefixes,
+// (not the runtime's, hxmc.rt and hxmc.unsafe), or of the modules named (prefixes,
 // comma-separated), except the ones C enters with structs by value.
 class InterpSet {
 	final prefixes:Null<Array<String>>;
@@ -156,11 +158,21 @@ class InterpSet {
 	}
 
 	public function wants(f:FuncInfo):Bool {
-		if (f.module == null || StringTools.startsWith(f.module, "hxmc.rt.") || f.cAbi != null) return false;
+		if (f.module == null || StringTools.startsWith(f.module, "hxmc.rt.") || StringTools.startsWith(f.module, "hxmc.unsafe.") || f.cAbi != null) return false;
 		if (prefixes == null) return true;
 		for (p in prefixes)
 			if (StringTools.startsWith(f.module, p)) return true;
 		return false;
+	}
+
+	// an empty table: a program with the interpreter, none of its functions
+	// interpreted (a compiler that loads interpreted code: -D hxmc.jit)
+	public static function emptyTable(obj:Obj) {
+		var sec = obj.section(".data", SecKind.Data, 16);
+		sec.buf.align(16);
+		var start = sec.buf.len;
+		sec.buf.u64(0, 0);
+		obj.define(InterpGen.TABLE, sec, start, 8, true);
 	}
 
 	// the table of the functions interpreted (hxmc.rt.Interp.lookup: an
@@ -352,6 +364,23 @@ class InterpGen {
 		}
 		obj.define(DESC + mf.name, sec, start, b.len - start, true);
 		entryStub();
+	}
+
+	// the program's thread-local variables (@:hxmc.threadLocal statics) when
+	// code is loaded at run time (MirRun: no TLS block of its own): indices
+	// of a block of the interpreter's per thread (TLSXLD, TLSXST)
+	public static var emulatedTls:Null<Map<String, Int>> = null;
+	// (those the running compiler has: its own, through a stub)
+	public static var nativeTls:String->Bool = _ -> false;
+
+	function tlsIndex(sym:String):Int {
+		var k = emulatedTls.get(sym);
+		if (k == null) {
+			k = Lambda.count(emulatedTls);
+			if (k >= 4096) throw new MirBuild.Unsupported("-D hxmc.mir-run: more than 4096 thread-local variables");
+			emulatedTls.set(sym, k);
+		}
+		return k;
 	}
 
 	// (HXMC_INTERP_COALESCE=0: a register per value)
@@ -701,11 +730,11 @@ class InterpGen {
 			case Cmp if (fused.exists(i.id)):
 			case TlsLoad:
 				var t = TLS.get(i.sym);
-				if (t != null) emit([TLSLD, r(i.id), t]) else callOut(tlsStub(i.sym, false), r(i.id), []);
+				if (t != null) emit([TLSLD, r(i.id), t]) else if (emulatedTls != null && !nativeTls(i.sym)) emit([TLSXLD, r(i.id), tlsIndex(i.sym)]) else callOut(tlsStub(i.sym, false), r(i.id), []);
 			case TlsStore:
 				if (i.sym == "rt_hcur") emit([TLSST_HCUR, r(i.a), abi.handlerPrev]) else {
 					var t = TLS.get(i.sym);
-					if (t != null) emit([TLSST, r(i.a), t]) else callOut(tlsStub(i.sym, true), -1, [i.a]);
+					if (t != null) emit([TLSST, r(i.a), t]) else if (emulatedTls != null && !nativeTls(i.sym)) emit([TLSXST, r(i.a), tlsIndex(i.sym)]) else callOut(tlsStub(i.sym, true), -1, [i.a]);
 				}
 			case StackAddr:
 				emit([SADDR, r(i.id), slotOff[i.imm]]);

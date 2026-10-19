@@ -41,7 +41,8 @@ import hxmc.rt.WinRt;
 #if hxmc.census
 import hxmc.rt.Census;
 #end
-#if hxmc.interp
+// (the interpreter: a program interpreted, or a compiler loading interpreted code, -D hxmc.jit)
+#if (hxmc.interp || hxmc.jit)
 import hxmc.rt.Interp;
 #end
 #end
