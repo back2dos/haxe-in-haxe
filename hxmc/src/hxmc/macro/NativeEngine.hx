@@ -21,6 +21,8 @@ import hxmc.macro.Loader.Bundle;
 @:access(hxmc.macro.Bridge)
 class NativeEngine extends macros.MacroEngine.EvalEngine {
 	public var verify = false;
+	// (-D hxmc.macros=mir or mir-verify: interpreted bundles)
+	public var interp = false;
 	var types:Array<ModuleType> = [];
 	var com:Null<context.Common.CommonContext> = null;
 	var compiled = new Map<String, Null<Bundle>>(); // class -> its bundle (null: on Eval)
@@ -49,8 +51,10 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 	override public function create(com:context.Common.CommonContext, api:CompilerApi, isMacro:Bool, args:Array<String>):Context {
 		this.com = com;
 		var m = core.Define.rawDefined(com.defines, "hxmc.macros") ? core.Define.rawDefinedValue(com.defines, "hxmc.macros") : "eval";
-		enabled = m == "native" || m == "verify";
-		verify = m == "verify";
+		// (mir, mir-verify: the macro classes compiled for the Mir interpreter, -D hxmc.interp)
+		enabled = m == "native" || m == "verify" || m == "mir" || m == "mir-verify";
+		verify = m == "verify" || m == "mir-verify";
+		interp = m == "mir" || m == "mir-verify";
 		// (before any macro code runs: Eval may keep the API functions it looked up)
 		if (verify) Bridge.Recorder.install();
 		return super.create(com, api, isMacro, args);
@@ -277,6 +281,7 @@ class NativeEngine extends macros.MacroEngine.EvalEngine {
 		if (com.customExt != null) cargs = cargs.concat(["--custom-extension", com.customExt]);
 		var out = d + "/bundle";
 		cargs = cargs.concat(["-D", "hxmc.target=linux-x86_64", "-D", "disable-parallelism", "-dce", "no", "-main", Guest.ENTRY, mp, "--custom-target", "hxmc=" + out]);
+		if (interp) cargs = cargs.concat(["-D", "hxmc.interp"]);
 		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
 		Sys.putEnv("HXMC_MACRO_GUEST", out);
 		// (through sh, its output to a file: no pipes in this process)

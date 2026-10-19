@@ -19,6 +19,7 @@ import hxmc.ir.Ir;
 @:access(hxmc.DataGen)
 @:access(hxmc.ir.Facts)
 @:access(hxmc.ir.Lower)
+@:access(hxmc.macro.Loader)
 class Guest {
 	public static inline var ENTRY = "HxmcMacroEntry";
 
@@ -53,6 +54,16 @@ class Guest {
 			}
 		if (main == null) throw "no entry class";
 		var o = Options.read(com);
+		// (-D hxmc.interp: the functions for the Mir interpreter; its thread-local
+		// variables, the program's own, emulated as interp.MirRun has them)
+		var host = Loader.hostSyms();
+		if (o.interp != null) {
+			hxmc.interp.InterpGen.emulatedTls = new Map();
+			hxmc.interp.InterpGen.nativeTls = s -> {
+				var h = host.get(s);
+				h != null && h.k == "l";
+			};
+		}
 		var abi = Abi.get(o.target);
 		abi.framePointers = abi.arm || o.framePointers; // (as Driver)
 		hxmc.ir.Lower.targetOs = abi.osCode();
@@ -94,7 +105,10 @@ class Guest {
 		dg.cstrLiterals([]);
 		dg.emptyArrays([]);
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, abi.arm));
-		sys.io.File.saveContent(out + ".json", haxe.Json.stringify(facts(com, prog, e, l, main)));
+		var fs:Dynamic = facts(com, prog, e, l, main);
+		// (interpreted: the types shared as interp.MirRun shares them)
+		if (o.interp != null) hxmc.interp.MirRun.unshare(fs, host, l, e, com);
+		sys.io.File.saveContent(out + ".json", haxe.Json.stringify(fs));
 	}
 
 	static function kindChar(t:Null<Ty>):String

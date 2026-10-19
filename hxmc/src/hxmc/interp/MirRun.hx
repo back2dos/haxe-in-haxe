@@ -250,7 +250,7 @@ class MirRun {
 	// extends, whose supertypes are shared (an instance test is a type index
 	// in a class's span: a new class has no place in the compiler's); a type
 	// not shared has its statics and initializer of its own
-	static function unshare(facts:Dynamic, host:Map<String, {k:String, v:Int}>, l:hxmc.ir.Lower, e:hxmc.ir.Facts, com:context.Common.CommonContext) {
+	public static function unshare(facts:Dynamic, host:Map<String, {k:String, v:Int}>, l:hxmc.ir.Lower, e:hxmc.ir.Facts, com:context.Common.CommonContext) {
 		var types:Array<Dynamic> = facts.types;
 		var fids = new Map<String, Int>();
 		for (f in (facts.fields : Array<Dynamic>)) {
