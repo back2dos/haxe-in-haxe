@@ -200,7 +200,7 @@ class Targets {
 			var r = exec(time.concat([compiler]).concat(args), {cwd: cwd, log: log, env: env});
 			var text = readText(log);
 			if (r.code != 0) {
-				var lines = [for (l in text.split("\n")) if (l.trim() != "" && !l.startsWith("MEASURE ") && !l.startsWith("Command exited with non-zero status")) l.trim()];
+				var lines = [for (l in text.split("\n")) if (l.trim() != "" && l.trim() != "|" && !l.startsWith("MEASURE ") && !l.startsWith("Command exited with non-zero status")) l.trim()];
 				return {row: {status: 'exit ${r.code}: ' + lines.slice(lines.length > 3 ? lines.length - 3 : 0).join(" | ")}, out: null, first: null};
 			}
 			var cpu = 0.0, rss = 0.0;
