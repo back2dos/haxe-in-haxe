@@ -1,11 +1,12 @@
-// Array patterns on values that are not arrays but have an Int `length` and
-// an Int-keyed array read access (HaxeFoundation/haxe#13070, issue #8012;
-// ported ahead of the pinned upstream): haxe.ds.Vector (hxmc's, over
-// hxmc.NativeArray), an abstract with a `length` getter and @:arrayAccess,
-// Null<Vector> subjects with and without `case null`, nesting, an enum
-// argument, or-patterns, extractors and guards; Array alongside, unchanged.
-// The golden file is the --interp output of the OCaml compiler with that
-// change.
+// Array patterns on values that are not arrays but that `for` loops access
+// by index (HaxeFoundation/haxe#13070, issue #8012; ported ahead of the
+// pinned upstream): haxe.ds.Vector (hxmc's, over hxmc.NativeArray), an
+// abstract with a `length` getter and @:arrayAccess, one whose `length` is
+// private (a static get_length returning Int is what counts, as for loops
+// have it), Null<Vector> subjects with and without `case null`, nesting, an
+// enum argument, or-patterns, extractors and guards; Array alongside,
+// unchanged. The golden file is the --interp output of the OCaml compiler
+// with that change.
 import haxe.ds.Vector;
 
 private abstract Pair<T>(Array<T>) {
@@ -18,6 +19,19 @@ private abstract Pair<T>(Array<T>) {
 		return this.length;
 
 	@:arrayAccess inline function get(i:Int):T
+		return this[i];
+}
+
+private abstract Hidden(Array<Int>) {
+	public inline function new(a:Array<Int>)
+		this = a;
+
+	var length(get, never):Int;
+
+	inline function get_length()
+		return this.length;
+
+	@:arrayAccess inline function get(i:Int):Int
 		return this[i];
 }
 
@@ -119,5 +133,14 @@ class ArrayPatterns {
 			case [a]: a;
 			case _: "not one";
 		});
+		var h = new Hidden([6, 7]);
+		Sys.println(switch h {
+			case [a, b]: a * b;
+			case _: -1;
+		});
+		var sum = 0;
+		for (x in h)
+			sum += x;
+		Sys.println(sum);
 	}
 }

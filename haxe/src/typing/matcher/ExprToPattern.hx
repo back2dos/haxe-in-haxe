@@ -93,53 +93,24 @@ class ExprToPattern {
 			throw "assert";
 	};
 
-	// port: HaxeFoundation/haxe#13070 (#8012), ahead of the pinned upstream: catch_errors moved out of make, unchanged,
-	// ... for getArrayLikeElementType.
-	public static function catchErrors(ctx:Typer, p:Pos):Void->Void {
-		var old = ctx.com.errorExt;
-		var restore = Common.disableReportMode(ctx.com);
-		ctx.com.errorExt = function(err) {
-			var ep = err.errPos;
-			// The error might not actually come from here, let's check the position (issue #12098).
-			if (ep.pfile != p.pfile || ep.pmax < p.pmin || ep.pmin > p.pmax) old(err);
-			else throw Exit.raise();
-		};
-		return function() {
-			restore();
-			ctx.com.errorExt = old;
-		};
-	}
-
 	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream (its comment follows).
-	// Array patterns also apply to values which have an Int `length` field and an array read access
-	// with Int keys (#8012). If values of type `t` qualify, this returns the element type, which is the
-	// type of `e[i]`. The matcher switches on `e.length` and reads the elements as `e[i]`, so both are
-	// typed here as they are typed there.
-	public static function getArrayLikeElementType(ctx:Typer, t:T, p:Pos):Null<T> return switch follow(t) {
-		case TInst(_, _) | TAbstract(_, _):
-			var oldUntyped = ctx.f.isUntyped;
-			ctx.f.isUntyped = false;
-			var restoreErrors = catchErrors(ctx, p);
-			function restore() {
-				restoreErrors();
-				ctx.f.isUntyped = oldUntyped;
-			}
-			try {
-				var e = mk(TConst(TNull), t, p);
-				var eLength = typeFieldAccess(ctx, e, "length", true);
-				if (!ExtType.isInt(follow(eLength.etype))) throw Exit.raise();
-				var eIndex = Texpr.Builder.makeInt(ctx.com.basic, 0, p);
-				var eElement = Calls.accGet(ctx, Calls.arrayAccess(ctx, e, eIndex, MGet, p));
-				restore();
-				eElement.etype;
-			} catch (ex:Dynamic) {
-				restore();
-				if (!Std.isOfType(ex, Exit) && !Std.isOfType(ex, NotFound) && !Std.isOfType(ex, TypingError) && !Std.isOfType(ex, WithTypeError)) throw ex;
-				null;
-			}
-		case _:
-			null;
-	};
+	// Array patterns apply to arrays, Dynamic and abstracts with a single `from` type leading to one of those. Other values
+	// can be matched by array patterns if they can be accessed by index like in `for` loops, and their length and elements
+	// are then read the same way (#8012). This returns how to access them, or None for values of the former types and for
+	// values which can't be accessed by index.
+	public static function getArrayAccess(ctx:Typer, t:T, p:Pos):Null<typing.ForLoop.ArrayAccessData> {
+		function isArray(seen:Array<T>, t:T):Bool return switch follow(t) {
+			case TInst({clPath: {pack: [], name: "Array"}}, [_]) | TDynamic(_):
+				true;
+			case ty = TAbstract(a, tl) if (!core.ds.ArrayTools.exists(seen, function(t) return shallowEq(ty, t))):
+				var froms = TyperBase.getAbstractFroms(ctx, a, tl);
+				if (froms.length == 1) isArray([ty].concat(seen), froms[0].type); else false;
+			case _:
+				false;
+		};
+		if (isArray([], t)) return null;
+		return try typing.ForLoop.IterationKind.getArrayAccess(ctx, t, p) catch (ex:NotFound) null;
+	}
 
 	public static function make(pctx:PatternContext, toplevel:Bool, t:T, e:Expr):PatternData {
 		var ctx = pctx.ctx;
@@ -208,10 +179,24 @@ class ExprToPattern {
 			case _: throw Exit.raise();
 		};
 		inline function displayMode():DisplayKind return pctx.isPostfixMatch ? DKMarked : DKPattern(toplevel);
+		inline function catchErrors(p:Pos):Void->Void {
+			var old = ctx.com.errorExt;
+			var restore = Common.disableReportMode(ctx.com);
+			ctx.com.errorExt = function(err) {
+				var ep = err.errPos;
+				// The error might not actually come from here, let's check the position (issue #12098).
+				if (ep.pfile != p.pfile || ep.pmax < p.pmin || ep.pmin > p.pmax) old(err);
+				else throw Exit.raise();
+			};
+			return function() {
+				restore();
+				ctx.com.errorExt = old;
+			};
+		}
 		inline function tryTyping(e:Expr):PatternKind {
 			var old = ctx.f.isUntyped;
 			ctx.f.isUntyped = true;
-			var restore = catchErrors(ctx, e.pos);
+			var restore = catchErrors(e.pos);
 			var typed:TExpr;
 			try {
 				typed = typeExpr(ctx, e, WithTypeTools.withType(t));
@@ -237,7 +222,7 @@ class ExprToPattern {
 			} catch (ex:Dynamic) {
 				if (!Std.isOfType(ex, Exit) && !Std.isOfType(ex, BadPattern)) throw ex;
 			}
-			var restore = catchErrors(ctx, p);
+			var restore = catchErrors(p);
 			try {
 				var mt = moduleTypeOfType(t);
 				var emt = TyperBase.typeModuleType(ctx, mt, p);
@@ -361,13 +346,16 @@ class ExprToPattern {
 				}
 			case EField(_, _, _): try tryTyping(e) catch (ex:Exit) fail() catch (ex:BadPattern) core.Error.raiseTypingError(ex.message, p);
 			case EArrayDecl(el):
-				// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: `pattern` returns null where it failed, then
-				// ... getArrayLikeElementType decides.
+				// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: array_pattern, array_access_pattern.
 				function arrayPattern(t2:T):PatternKind {
 					var ps = el.map(function(e) return make(pctx, false, t2, e));
 					return PatConstructor({kind: ConArray(ps.length), pos: e.pos}, ps);
 				}
-				function pattern(seen:Array<T>, t:T):Null<PatternKind> return switch follow(t) {
+				function arrayAccessPattern():PatternKind {
+					var aa = getArrayAccess(ctx, t, p);
+					return aa != null ? arrayPattern(aa.aaType) : fail();
+				}
+				function pattern(seen:Array<T>, t:T):PatternKind return switch follow(t) {
 					case TFun(s) if (s.ret == fakeTupleType):
 						if (el.length < s.args.length) core.Error.raiseTypingError("Not enough arguments", p);
 						if (el.length > s.args.length) core.Error.raiseTypingError("Too many arguments", el[s.args.length].pos);
@@ -378,14 +366,10 @@ class ExprToPattern {
 						arrayPattern(t2);
 					case ty = TAbstract(a, tl) if (!core.ds.ArrayTools.exists(seen, function(t) return shallowEq(ty, t))):
 						var froms = TyperBase.getAbstractFroms(ctx, a, tl);
-						if (froms.length == 1) pattern([ty].concat(seen), froms[0].type); else null;
-					case _: null;
+						if (froms.length == 1) pattern([ty].concat(seen), froms[0].type); else arrayAccessPattern();
+					case _: arrayAccessPattern();
 				};
-				var pat = pattern([], t);
-				if (pat != null) pat; else {
-					var t2 = getArrayLikeElementType(ctx, t, p);
-					if (t2 != null) arrayPattern(t2); else fail();
-				}
+				pattern([], t);
 			case EObjectDecl(fl):
 				var known:Array<{cf:TClassField, t:T}> = [];
 				inline function collectField(cf:TClassField, t:T, filter:Null<Array<String>>):Void {

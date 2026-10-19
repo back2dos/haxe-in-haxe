@@ -40,7 +40,7 @@ enum IteratorKind {
 	IteratorInt(from:TExpr, to:TExpr);
 	IteratorArrayDecl(el:Array<TExpr>);
 	IteratorArray;
-	IteratorArrayAccess;
+	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: IteratorArrayAccess is gone, the class case is an IteratorCustom.
 	IteratorGenericStack(c:TClass);
 	IteratorIterator;
 	IteratorCustom(get:TExpr->TExpr->T->Pos->TExpr, length:TExpr->Pos->TExpr);
@@ -49,6 +49,12 @@ enum IteratorKind {
 }
 
 typedef IteratorData = {var itKind:IteratorKind; var itType:T; var itExpr:TExpr;}
+
+// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream (its comment follows).
+// How values of a type can be accessed by index: the element type, how to read the element at an index and how
+// to read the length. Array patterns use this as well (#8012).
+typedef ArrayAccessData = {var aaType:T; var aaGet:TExpr->TExpr->T->Pos->TExpr; var aaLength:TExpr->Pos->TExpr;}
+
 typedef IterationIdent = {var name:String; var pos:Pos; var display:Null<DisplayKind>;}
 typedef ForLoopDisplay = (Typer, Expr, DisplayKind, AccessMode, WithTypeValue) -> TExpr;
 
@@ -74,6 +80,19 @@ class IterationKind {
 	}
 
 	public static function getNextArrayElement(arr:TExpr, index:TExpr, t:T, p:Pos):TExpr return mk(TArray(arr, index), t, p);
+
+	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: mk_field and get_array_length moved out of to_texpr.
+	static function mkField(e:TExpr, n:String):TExprDef {
+		var fa;
+		try {
+			fa = quickField(e.etype, n);
+		} catch (ex:NotFound) {
+			return Error.raiseMsg('Could not find field $n on ${core.TPrinting.sTypeKind(e.etype)}', e.epos);
+		}
+		return TField(e, fa);
+	}
+
+	static function getArrayLength(ctx:Typer, arr:TExpr, p:Pos):TExpr return mk(mkField(arr, "length"), ctx.com.basic.tint, p);
 
 	static function isUnificationError(e:Dynamic):Bool return switch e {
 		case(core.ds.ExceptionTools.typing(_) => Some({errMessage: Unify(_)})): true;
@@ -175,7 +194,9 @@ class IterationKind {
 		return cannotIterateOn(ctx.com, e);
 	}
 
-	static function ofTexprByArrayAccess(ctx:Typer, e:TExpr, p:Pos):IteratorData return switch follow(e.etype) {
+	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: of_texpr_by_array_access's checks, on a type, returning
+	// ... how to access its values by index.
+	public static function getArrayAccess(ctx:Typer, t:T, p:Pos):ArrayAccessData return switch follow(t) {
 		case TInst(c = {clArrayAccess: pt}, pl) if (pt != null):
 			var length = c.clFields.get("length");
 			if (length == null || c.clFields.exists("iterator")) throw NotFound.raise();
@@ -183,7 +204,7 @@ class IterationKind {
 				case TAbstract({aPath: {pack: [], name: "Int"}}, []):
 				case _: throw NotFound.raise();
 			}
-			{itKind: IteratorArrayAccess, itExpr: e, itType: applyParams(c.clParams, pl, pt)};
+			{aaType: applyParams(c.clParams, pl, pt), aaGet: getNextArrayElement, aaLength: getArrayLength.bind(ctx)};
 		case TAbstract(a = {aImpl: c}, tl) if (c != null):
 			var length = core.ds.PMap.find("get_length", c.clStatics);
 			function getLength(e:TExpr,
@@ -200,7 +221,7 @@ class IterationKind {
 				var access = context.AbstractCast.findArrayReadAccessRaise(ctx, a, tl, mk(TConst(TNull), ctx.t.tint, p), p);
 				function getNext(base:TExpr, index:TExpr, t:T,
 						p:Pos):TExpr return CallUnification.makeStaticCallBetter(ctx, c, access.field, tl, [base, index], access.ret, p);
-				{itKind: IteratorCustom(getNext, getLength), itExpr: e, itType: access.ret};
+				{aaType: access.ret, aaGet: getNext, aaLength: getLength};
 			} catch (ex:NotFound) {
 				// second try: do we have @:arrayAccess on the abstract itself?
 				if (!core.Meta.has(MetaTag.ArrayAccess, a.aMeta)
@@ -208,10 +229,15 @@ class IterationKind {
 					|| !core.Meta.has(MetaTag.CoreType, a.aMeta)
 					// in which case we assume that a singular type parameter is the element type
 					|| tl.length != 1) throw NotFound.raise();
-				{itKind: IteratorCustom(getNextArrayElement, getLength), itExpr: e, itType: tl[0]};
+				{aaType: tl[0], aaGet: getNextArrayElement, aaLength: getLength};
 			}
 		case _: throw NotFound.raise();
 	};
+
+	static function ofTexprByArrayAccess(ctx:Typer, e:TExpr, p:Pos):IteratorData {
+		var aa = getArrayAccess(ctx, e.etype, p);
+		return {itKind: IteratorCustom(aa.aaGet, aa.aaLength), itExpr: e, itType: aa.aaType};
+	}
 
 	static function mapUnrollParams(ctx:Typer, params:Null<UnrollParameters>, i:Int):Null<UnrollParameters> {
 		if (params == null || params.forceUnroll) return params;
@@ -323,16 +349,6 @@ class IterationKind {
 	public static function toTexpr(ctx:Typer, v:TVar, iterator:IteratorData, e2:TExpr, p:Pos):TExpr {
 		var e1 = iterator.itExpr, pt = iterator.itType;
 		var tv = ctx.t.tvoid, ti = ctx.t.tint;
-		function field(e:TExpr, n:String):TExprDef {
-			var fa;
-			try {
-				fa = quickField(e.etype, n);
-			} catch (ex:NotFound) {
-				return Error.raiseMsg('Could not find field $n on ${core.TPrinting.sTypeKind(e.etype)}', e.epos);
-			}
-			return TField(e, fa);
-		}
-		function length(e:TExpr, p:Pos):TExpr return mk(field(e, "length"), ctx.com.basic.tint, p);
 		inline function genIntIter(e1:TExpr, pt:T, get:TExpr->TExpr->T->Pos->TExpr, len:TExpr->Pos->TExpr):TExpr {
 			var index = genLocal(ctx, ti, v.vPos);
 			index.vMeta.unshift({meta: MetaTag.ForLoopVariable, exprs: [], pos: nullPos});
@@ -415,7 +431,7 @@ class IterationKind {
 			case IteratorArrayDecl(el): mk(TBlock(el.map(function(e) return Texpr.duplicateTvars(function(e) return e,
 					concat(mk(TVar(v, e), tv, e.epos), e2)))), tv,
 					p);
-			case IteratorArray | IteratorArrayAccess: genIntIter(e1, pt, getNextArrayElement, length);
+			case IteratorArray: genIntIter(e1, pt, getNextArrayElement, getArrayLength.bind(ctx));
 			case IteratorCustom(get, len): genIntIter(e1, pt, get, len);
 			case IteratorIterator: try ForLoop.optimizeForLoopIterator(ctx, v, e1, e2,
 					p) catch (ex:Exit) Texpr.forRemap(ctx.t, v, ctx.t.titerator(pt), e1, e2, p);
@@ -425,14 +441,14 @@ class IterationKind {
 				var tcell = head.cfType;
 				var cell = genLocal(ctx, tcell, p);
 				var ce = mk(TLocal(cell), tcell, p);
-				var initVar = mk(TVar(v, mk(field(ce, "elt"), pt, p)), tv, v.vPos);
-				var next = mk(TBinop(OpAssign, ce, mk(field(ce, "next"), tcell, p)), tcell, p);
+				var initVar = mk(TVar(v, mk(mkField(ce, "elt"), pt, p)), tv, v.vPos);
+				var next = mk(TBinop(OpAssign, ce, mk(mkField(ce, "next"), tcell, p)), tcell, p);
 				var block = switch e2.eexpr {
 					case TBlock(el): mk(TBlock([initVar, next].concat(el)), tv, e2.epos);
 					case _: mk(TBlock([initVar, next, e2]), tv, p);
 				};
 				mk(TBlock([
-					mk(TVar(cell, mk(field(e1, "head"), tcell, p)), tv, p),
+					mk(TVar(cell, mk(mkField(e1, "head"), tcell, p)), tv, p),
 					mk(TWhile(mk(TBinop(OpNotEq, ce, mk(TConst(TNull), tcell, p)), ctx.t.tbool, p), block, NormalWhile), tv, p)
 				]), tv, p);
 			case IteratorHasNextNext(tmp, next, hasNext):

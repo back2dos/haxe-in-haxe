@@ -181,9 +181,8 @@ class TexprConverter {
 			};
 		var classified = loop(false, t);
 		// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream (its comment follows).
-		// Array patterns on values which are not arrays but have a length and an array read access (#8012).
-		if ((classified.kind == SKValue || classified.kind == SKEnum) && cases.length > 0 && cases[0].scCon.kind.match(ConArray(_))
-			&& ExprToPattern.getArrayLikeElementType(ctx, t, e.epos) != null) {
+		// Array patterns on values which can be accessed by index (#8012).
+		if (cases.length > 0 && cases[0].scCon.kind.match(ConArray(_)) && ExprToPattern.getArrayAccess(ctx, t, e.epos) != null) {
 			all = [];
 			classified = {kind: SKLength, finiteness: Infinite};
 		}
@@ -308,7 +307,10 @@ class TexprConverter {
 					subject = switch ctors.kind {
 						case SKValue: subject;
 						case SKEnum: mk(TEnumIndex(subject), com.basic.tint, subject.epos);
-						case SKLength: ExprToPattern.typeFieldAccess(ctx, subject, "length");
+						case SKLength:
+							// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream.
+							var aa = ExprToPattern.getArrayAccess(ctx, subject.etype, subject.epos);
+							aa != null ? aa.aaLength(subject, subject.epos) : ExprToPattern.typeFieldAccess(ctx, subject, "length");
 					};
 					if (ecases.length == 1 && edef == null && ctors.finiteness == RunTimeFinite && !nullable)
 						core.ds.Record.withFields(ecases[0].caseExpr,
