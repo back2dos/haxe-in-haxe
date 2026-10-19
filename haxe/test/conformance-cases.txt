@@ -143,6 +143,10 @@ module moduleload-ValueSwitch haxe/test unit.moduleload.ValueSwitch
 direct moduleload-Basic haxe/test/conformance unit.moduleload.Basic
 direct moduleload-HelloWorld haxe/test/conformance unit.moduleload.HelloWorld
 direct string-order haxe/test/conformance unit.strings.StringOrder
+direct malformed haxe/test/conformance unit.strings.Malformed
+direct malformed-source haxe/test/conformance unit.strings.MalformedSource
+direct malformed-parse haxe/test/conformance unit.strings.MalformedParse
+hxml malformed-define haxe/test/conformance/strings-define build.hxml
 
 # The parts of multi-part misc/eval configurations that discovery leaves out
 # (Issue11354/compile.hxml: --cwd proj, then --each over a, b and proj itself;

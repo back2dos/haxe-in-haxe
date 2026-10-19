@@ -2228,28 +2228,10 @@ class StdUtf8 {
 
 	public static final validate = EvalEncode.vfun1(s -> {
 		var s = EvalDecode.decodeString(s);
-		// port: on a code point host the native string holds the UTF-8 bytes
-		// (core.StringHelper.codePointHost)
-		if (core.StringHelper.codePointHost) return core.StringHelper.validUtf8(s).vbool();
-		// port: native strings only fail to be valid with lone surrogates
-		var valid = true;
-		var i = 0;
-		while (i < s.length) {
-			var c = StringTools.fastCodeAt(s, i);
-			if (c >= 0xD800 && c <= 0xDBFF) {
-				var d = i + 1 < s.length ? StringTools.fastCodeAt(s, i + 1) : -1;
-				if (d >= 0xDC00 && d <= 0xDFFF) i++
-				else {
-					valid = false;
-					break;
-				}
-			} else if (c >= 0xDC00 && c <= 0xDFFF) {
-				valid = false;
-				break;
-			}
-			i++;
-		}
-		valid.vbool();
+		// port: UTF8.validate on the native string's UTF-8 bytes (bytes that are
+		// not UTF-8 are lone surrogates on a UTF-16 host:
+		// core.StringHelper.codePointHost)
+		(!core.StringHelper.malformedUtf8(s)).vbool();
 	});
 }
 

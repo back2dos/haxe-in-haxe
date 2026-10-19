@@ -104,8 +104,9 @@ class JsSourcemap {
 	}
 
 	// port: OCaml strings are UTF-8 bytes, so String.length counts bytes; the host strings are UTF-16
-	// (a character past U+FFFF a surrogate pair), or code points on a code point host
-	// (core.StringHelper.codePointHost: such a character is one, of 4 bytes).
+	// (a character past U+FFFF a surrogate pair, a byte that is not UTF-8 a lone U+DC80 to
+	// U+DCFF), or code points on a code point host (core.StringHelper.codePointHost: such a
+	// character is one, of 4 bytes).
 	public static function utf8Length(s:String, from:Int, to:Int):Int {
 		var n = 0, i = from;
 		while (i < to) {
@@ -118,7 +119,8 @@ class JsSourcemap {
 					i++;
 					n += 4;
 				} else n += 3;
-			} else n += core.StringHelper.codePointHost && c >= 0x10000 ? 4 : 3;
+			} else if (!core.StringHelper.codePointHost && c >= 0xDC80 && c < 0xDD00) n++;
+			else n += core.StringHelper.codePointHost && c >= 0x10000 ? 4 : 3;
 		}
 		return n;
 	}

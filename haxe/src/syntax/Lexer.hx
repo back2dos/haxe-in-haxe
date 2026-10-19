@@ -460,15 +460,34 @@ class Lexer {
 		this.source = source;
 		this.file = file;
 		index = 0;
-		if (!core.StringHelper.codePointHost)
-			for (i in 0...source.length) {
-				var c = StringTools.fastCodeAt(source, i);
-				if (c >= 0xD800 && c < 0xDC00) {
-					if (pairs == null) pairs = [];
-					pairs.push(i);
-				}
-			}
+		if (!core.StringHelper.codePointHost && !scanPairs(source)) {
+			// port: a lone surrogate (core.StringHelper.decodedUtf8): where the
+			// bytes are not UTF-8, upstream's refill (lexbuf_from_utf8_string)
+			// raises Sedlexing.MalFormed when it reaches them; here before the
+			// first token.
+			var decoded = core.StringHelper.decodedUtf8(source);
+			if (decoded == null) throw new MalFormed();
+			this.source = decoded;
+			pairs = null;
+			scanPairs(decoded);
+		}
 		idents = new Map();
+	}
+
+	// port: records the surrogate pairs of `s` in `pairs`; false at a lone surrogate.
+	function scanPairs(s:String):Bool {
+		var i = 0, n = s.length;
+		while (i < n) {
+			var c = StringTools.fastCodeAt(s, i);
+			if ((c & 0xF800) == 0xD800) {
+				if (c >= 0xDC00 || i + 1 == n || (StringTools.fastCodeAt(s, i + 1) & 0xFC00) != 0xDC00) return false;
+				if (pairs == null) pairs = [];
+				pairs.push(i);
+				i++;
+			}
+			i++;
+		}
+		return true;
 	}
 
 	// port: the position (code point offset) of the UTF-16 index `i`.
@@ -1391,6 +1410,11 @@ class Lexer {
 
 private class LexExit extends haxe.Exception {
 	public function new() super("Exit");
+}
+
+// port: Sedlexing.MalFormed (the message is Printexc.to_string's)
+class MalFormed extends haxe.Exception {
+	public function new() super("Sedlexing.MalFormed");
 }
 
 class InvalidEscapeSequence extends haxe.Exception {

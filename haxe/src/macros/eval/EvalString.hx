@@ -51,6 +51,10 @@ class EvalString {
 		return n;
 	}
 
+	// port: bytes that are not UTF-8 (lone U+DC80 to U+DCFF on a UTF-16 host:
+	// core.StringHelper.codePointHost) are one character each, where upstream
+	// counts by their first bytes (UTF8.length) or, failing, takes the byte
+	// length; such a string's bytes are kept, its indexing is the port's.
 	public static function createUnknownVstring(s:String):Vstring return createWithLength(s, codePointLength(s));
 
 	public static function createUnknown(s:String):Value return VString(createUnknownVstring(s));
@@ -118,6 +122,10 @@ class EvalString {
 		return x;
 	}
 
+	// port: a lone surrogate is one character, as upstream's; on a UTF-16 host
+	// (core.StringHelper.codePointHost) one from U+DC80 to U+DCFF is written
+	// out as the byte it stands for there (0x80 to 0xFF), where upstream's
+	// string holds its three bytes.
 	public static function stringOfCharCode(i:Int):String {
 		if (i < 0x10000) return String.fromCharCode(i);
 		var u = new StringBuf();
