@@ -550,7 +550,18 @@ class Driver {
 			if (Sys.getEnv("HXMC_NOGC") != "1" && !o.jit) l.collect = rts;
 			if (o.jit) l.hostSyms = new StringBuf();
 			var exe = l.link("_start");
-			if (o.jit) sys.io.File.saveContent(out + ".syms", l.hostSyms.toString());
+			if (o.jit) {
+				sys.io.File.saveContent(out + ".syms", l.hostSyms.toString());
+				// (each function's fingerprint: code loaded at run time calls this
+				// compiler's native function where its own is the same, interp.MirRun)
+				var fps = new StringBuf();
+				for (f in prep.p.funcs) {
+					var fp = new Fingerprint(prep, null);
+					fp.func(f);
+					fps.add(prep.funcSym(f) + " " + fp.key() + "\n");
+				}
+				sys.io.File.saveContent(out + ".fps", fps.toString());
+			}
 			exe;
 		};
 		if (abi.os == "windows" && abi.output != SharedLibrary && !StringTools.endsWith(out, ".exe")) out += ".exe";

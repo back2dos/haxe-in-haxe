@@ -151,7 +151,11 @@ class InterpSet {
 	// the symbols of the functions interpreted (a call of one: CALLI)
 	public final syms = new Map<String, Bool>();
 
-	public function new(spec:String, prep:Prep) {
+	// (exclude: functions whose native code is used, interp.MirRun)
+	final exclude:Null<Map<FuncInfo, Bool>>;
+
+	public function new(spec:String, prep:Prep, ?exclude:Map<FuncInfo, Bool>) {
+		this.exclude = exclude;
 		prefixes = spec == "" || spec == "1" ? null : [for (p in spec.split(",")) if (StringTools.trim(p) != "") StringTools.trim(p)];
 		for (f in prep.p.funcs)
 			if (wants(f)) syms.set(prep.funcSym(f), true);
@@ -159,6 +163,7 @@ class InterpSet {
 
 	public function wants(f:FuncInfo):Bool {
 		if (f.module == null || StringTools.startsWith(f.module, "hxmc.rt.") || StringTools.startsWith(f.module, "hxmc.unsafe.") || f.cAbi != null) return false;
+		if (exclude != null && exclude.exists(f)) return false;
 		if (prefixes == null) return true;
 		for (p in prefixes)
 			if (StringTools.startsWith(f.module, p)) return true;

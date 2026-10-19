@@ -99,6 +99,14 @@ class MirRun {
 				k += 2;
 			}
 		}
+		var facts:Dynamic = hxmc.macro.Guest.facts(com, prog, e, l, mainClass);
+		(facts.entries : Array<Dynamic>).push({name: "main", sym: e.symbol(prog.main)});
+		unshare(facts, host, l, e, com);
+		// the std's functions the compiler has alike: its native code
+		// (HXMC_MIR_HOST=0: all interpreted)
+		var native = Sys.getEnv("HXMC_MIR_HOST") == "0" ? new Map() : hostFunctions(funcs, facts, prep, e, com, ownRuntime);
+		funcs = [for (f in funcs) if (!native.exists(f)) f];
+		d.interp = new InterpGen.InterpSet(o.interp, prep, native);
 		var obj = new Obj();
 		var emit = Target.emitter(abi, obj);
 		var ras = new Regalloc.Scratch(Target.selector(abi));
@@ -114,14 +122,11 @@ class MirRun {
 		dg.stubs([], emit);
 		dg.cstrLiterals([]);
 		dg.emptyArrays([]);
-		var facts:Dynamic = hxmc.macro.Guest.facts(com, prog, e, l, mainClass);
-		(facts.entries : Array<Dynamic>).push({name: "main", sym: e.symbol(prog.main)});
-		unshare(facts, host, l, e, com);
 		var t1 = haxe.Timer.stamp();
 		setArgs();
 		var b = hxmc.macro.Loader.loadObj(obj, facts);
 		if (o.stats)
-			Sys.println('hxmc mir-run: ${funcs.length} functions, compiled ${Std.int((t1 - t0) * 1000)} ms, loaded ${Std.int((haxe.Timer.stamp() - t1) * 1000)} ms');
+			Sys.println('hxmc mir-run: ${funcs.length} functions (${Lambda.count(native)} native), compiled ${Std.int((t1 - t0) * 1000)} ms, loaded ${Std.int((haxe.Timer.stamp() - t1) * 1000)} ms');
 		var main = b.entries.get("main");
 		try {
 			Mem.call0(main);
@@ -130,6 +135,114 @@ class MirRun {
 			hxmc.rt.Gc.uncaught("Uncaught exception: ", e);
 			Sys.exit(1);
 		}
+	}
+
+	// the std's functions whose native code in the compiler is the program's:
+	// from the std's files (no class of the program shadows them), the same
+	// fingerprint (Fingerprint: the IR, layouts and callees by name; the
+	// compiler's in <exe>.fps), every type they touch shared, every selector
+	// they dispatch on implemented by shared types only, every function
+	// they call directly such a function or the compiler's runtime (native
+	// code calls its own)
+	static function hostFunctions(funcs:Array<FuncInfo>, facts:Dynamic, prep:Prep, e:hxmc.ir.Facts, com:context.Common.CommonContext,
+			ownRuntime:Map<String, Bool>):Map<FuncInfo, Bool> {
+		var fps = hostFps();
+		var roots = [];
+		for (cp in com.classPaths.asList())
+			if (cp.path != "" && (cp.scope == Std || sys.FileSystem.exists(haxe.io.Path.addTrailingSlash(cp.path) + "hxmc/rt/Runtime.hx")))
+				roots.push(cp.path);
+		function isStd(file:String):Bool {
+			for (r in roots)
+				if (StringTools.startsWith(file, r)) return true;
+			return false;
+		}
+		var shared = new Map<String, Bool>();
+		for (t in (facts.types : Array<Dynamic>))
+			if (t.share == true) shared.set(t.sym, true);
+		inline function sharedType(tindex:Int):Bool
+			return tindex < Abi.T_FIRST || shared.exists(e.typeNames[tindex]);
+		// (the selectors a type of the program's own implements: the compiler's
+		// dispatch rows lack it, so its code may not dispatch on them)
+		var ownSel = new Map<String, Bool>();
+		for (sel in (facts.selectors : Array<Dynamic>))
+			for (r in (sel.rows : Array<Dynamic>))
+				if (!shared.exists(r.ty)) ownSel.set(sel.sym, true);
+		var bundled = new Map<FuncInfo, Bool>();
+		for (f in funcs)
+			bundled.set(f, true);
+		var cand = new Map<FuncInfo, Bool>();
+		var calls = new Map<FuncInfo, Array<FuncInfo>>();
+		for (f in funcs) {
+			if (hxmc.macro.Guest.runtime(f) || f.pos == null || !isStd(f.pos.pfile)) continue;
+			var h = fps.get(e.symbol(f));
+			if (h == null) continue;
+			var fp = new Fingerprint(prep, null);
+			fp.func(f);
+			if (fp.key() != h) continue;
+			var ok = true, cs = [];
+			function ex(x:Ex) {
+				switch x {
+					case EField(c, _, _) | EFieldAddr(c, _, _) | EInstOf(c, _) | ENewObj(c) | EType(TRClass(c)):
+						if (!sharedType(c.tindex)) ok = false;
+					case EEnumTag(_, en) | EType(TREnum(en)) if (en != null):
+						if (!sharedType(en.tindex)) ok = false;
+					case EEnumParam(ct, _, _) | ENewEnum(ct, _):
+						if (!sharedType(ct.tindex) || !sharedType(ct.en.tindex)) ok = false;
+					case ENewAnon(sh, _):
+						if (!sharedType(sh.tindex)) ok = false;
+					case ECall(g, _):
+						cs.push(g);
+					case ECallDispatch(sel, _, _):
+						if (ownSel.exists(e.selNames[sel])) ok = false;
+					case _:
+				}
+				hxmc.ir.Facts.iterEx(ex, x);
+			}
+			function st(s:Stmt) {
+				switch s {
+					case SSetField(c, _, _, _):
+						if (!sharedType(c.tindex)) ok = false;
+					case STry(_, cats):
+						for (c in cats)
+							if (c.test != null) ex(c.test(ELocal(c.l)));
+					case _:
+				}
+				hxmc.ir.Facts.iterStmt(st, ex, s);
+			}
+			for (s in f.body)
+				st(s);
+			if (!ok) continue;
+			cand.set(f, true);
+			calls.set(f, cs);
+		}
+		// (the runtime's functions it calls: the compiler's, unless the program has its own)
+		var changed = true;
+		while (changed) {
+			changed = false;
+			for (f => _ in cand)
+				for (g in calls.get(f))
+					if (hxmc.macro.Guest.runtime(g) ? ownRuntime.exists(g.module) || (bundled.exists(g) && !cand.exists(g)) : !cand.exists(g)) {
+						cand.remove(f);
+						changed = true;
+						break;
+					}
+		}
+		return cand;
+	}
+
+	static var fpsCache:Null<Map<String, String>> = null;
+
+	// the compiler's functions' fingerprints (<exe>.fps, beside <exe>.syms)
+	static function hostFps():Map<String, String> {
+		if (fpsCache != null) return fpsCache;
+		var exe = try sys.FileSystem.fullPath(Sys.programPath()) catch (_:Dynamic) Sys.programPath();
+		var m = new Map<String, String>();
+		if (sys.FileSystem.exists(exe + ".fps"))
+			for (line in sys.io.File.getContent(exe + ".fps").split("\n")) {
+				var sp = line.indexOf(" ");
+				if (sp > 0) m.set(line.substr(0, sp), line.substr(sp + 1));
+			}
+		return fpsCache = m;
 	}
 
 	// which of the std's types stay the compiler's own (Guest.facts: those the
@@ -164,6 +277,22 @@ class MirRun {
 		var changed = true;
 		while (changed) {
 			changed = false;
+			// (a new class implementing a shared interface: the compiler's code
+			// dispatches on the interface through rows without the new class)
+			// (and a shared class implementing an interface no longer shared: new,
+			// its instance tests read the interfaces of its type entry)
+			for (t in types)
+				if (t.tk == "TK_CLASS")
+					for (i in (t.ifaces : Array<Dynamic>)) {
+						if (i == null || !bySym.exists(i)) continue;
+						if (t.share != true && shared(i)) {
+							bySym.get(i).share = false;
+							changed = true;
+						} else if (t.share == true && !shared(i)) {
+							t.share = false;
+							changed = true;
+						}
+					}
 			for (t in types) {
 				if (t.tk != "TK_CLASS" && t.tk != "TK_INTERFACE" && t.tk != "TK_CTOR") continue;
 				var sup:Null<String> = t.sup;
