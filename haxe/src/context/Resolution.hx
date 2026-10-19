@@ -13,6 +13,9 @@ import core.Texpr;
 import core.Warning;
 import core.WarningList;
 import Type as StdType;
+import core.ds.MlList;
+
+using core.ds.MlList.MlListTools;
 
 enum ResolutionKind {
 	RTypeImport(alias:String, type:ModuleType);
@@ -84,7 +87,7 @@ class Resolution {
 
 class ResolutionList {
 	final id:Array<String>;
-	var list:Array<ResolvedImport> = [];
+	var list:MlList<ResolvedImport> = Nil;
 	var resolvedLazies = true;
 	var cachedTypeImports = true;
 	var typeImportCache:Map<String, {type:ModuleType, pos:Pos}> = [];
@@ -92,14 +95,14 @@ class ResolutionList {
 	public function new(id:Array<String>) this.id = id;
 
 	public function add(res:ResolvedImport):Void {
-		list = [res].concat(list);
+		list = Cons(res, list);
 		// If we import a type, we automatically want to import all its constructors in case of
 		// enums and enum abstracts. We add a RLazy in front of the list so that it takes priority
 		// over the type itself. When resolved, it will insert its fields into the resolution list.
 		switch res.rKind {
 			case RTypeImport(_, mt):
 				var expanded = expandEnumConstructors(mt);
-				if (expanded != null) list = [expanded].concat(list);
+				if (expanded != null) list = Cons(expanded, list);
 				cachedTypeImports = false;
 			case RLazy(_):
 				resolvedLazies = false;
@@ -110,19 +113,21 @@ class ResolutionList {
 	public function resolveLazies():Void {
 		if (resolvedLazies) return;
 		resolvedLazies = true;
-		var pending = list.copy();
-		var acc:Array<ResolvedImport> = [];
-		while (pending.length != 0) {
-			var res = pending.shift();
-			switch res.rKind {
-				case RLazy(f):
-					var next = f();
-					if (next != null) pending.unshift(next);
-				case _:
-					acc.push(res);
-			}
+		var pending = list, acc:MlList<ResolvedImport> = Nil;
+		while (true) switch pending {
+			case Nil:
+				break;
+			case Cons(res, l):
+				switch res.rKind {
+					case RLazy(f):
+						var next = f();
+						pending = next != null ? Cons(next, l) : l;
+					case _:
+						acc = Cons(res, acc);
+						pending = l;
+				}
 		}
-		list = acc;
+		list = acc.rev();
 	}
 
 	public function resolveUnforced(i:String):ResolvedImport {
@@ -174,9 +179,9 @@ class ResolutionList {
 		};
 	}
 
-	public function getList():Array<ResolvedImport> return list;
+	public function getList():Array<ResolvedImport> return list.toArray();
 
-	public function setList(value:Array<ResolvedImport>):Void {
+	public function setList(value:MlList<ResolvedImport>):Void {
 		list = value;
 		cachedTypeImports = false;
 	}
@@ -193,10 +198,8 @@ class ResolutionList {
 		if (cachedTypeImports) return;
 		cachedTypeImports = true;
 		typeImportCache = [];
-		var index = list.length;
 		// loop first to retain correct order
-		while (index > 0) {
-			var res = list[--index];
+		for (res in list.rev()) {
 			switch res.rKind {
 				case RTypeImport(alias, mt):
 					typeImportCache.set(alias, {type: mt, pos: res.rPos});
