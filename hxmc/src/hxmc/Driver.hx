@@ -94,6 +94,8 @@ class Driver {
 	}
 	static var sroa = Sys.getEnv("HXMC_SROA") != "0";
 	var raRounds = 0;
+	var escRemoved = 0;
+	var escFolds = 0;
 	var raInsns = 0;
 	var raFuncs = 0;
 
@@ -140,6 +142,16 @@ class Driver {
 					todo = Inline.run(mf, sites, ic);
 				}
 				mb.icaches = ic.count;
+			}
+			if (o.opt && Escape.on) {
+				var es = new Escape(mf);
+				es.run();
+				if (es.removed + es.folds > 0) {
+					lock.acquire();
+					escRemoved += es.removed;
+					escFolds += es.folds;
+					lock.release();
+				}
 			}
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
@@ -216,6 +228,7 @@ class Driver {
 		Sys.println('hxmc: ${prep.p.funcs.length} functions');
 		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (cpu: mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
+		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded');
 		slow.sort((a, b) -> a.t < b.t ? 1 : -1);
 		for (x in slow.slice(0, 5))
 			Sys.println('  ${ms(x.t)}\t${x.name}');
@@ -247,6 +260,21 @@ class Driver {
 		for (f in prep.p.funcs)
 			if (Inline.candidate(f)) m.set(f, true);
 		MirBuild.inlineCands = m;
+		// (enums whose constructors' type indices less their tags agree, as
+		// EEnumTag subtracts: Escape folds the tag of a known constructor)
+		var tags = new Map<String, {en:Int, tag:Int}>();
+		for (k in 0...prep.p.enums.length) {
+			var en = prep.p.enums[k];
+			if (en.ctors.length == 0) continue;
+			var base = en.ctors[0].tindex - en.ctors[0].tag;
+			var ok = true;
+			for (c in en.ctors)
+				if (c.tindex < 0 || c.tindex - c.tag != base || prep.tySym(c.tindex) == null) ok = false;
+			if (ok)
+				for (c in en.ctors)
+					tags.set(prep.tySym(c.tindex), {en: k, tag: c.tag});
+		}
+		Escape.ctorTags = tags;
 	}
 
 	// the processors (asked once: TaskPool runs getconf, 10-15 ms a build of the resident compiler)
