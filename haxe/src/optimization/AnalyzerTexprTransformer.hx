@@ -31,7 +31,6 @@ import optimization.AnalyzerTypes.BasicBlock.*;
 import optimization.AnalyzerTypes.Graph.*;
 import optimization.AnalyzerTexpr.*;
 import optimization.OptimizerTexpr.*;
-import core.ds.MlList;
 
 private typedef BlockValue = {var bb:BasicBlockData; var value:TExpr;}
 private typedef BlockValues = {var bb:BasicBlockData; var values:Array<TExpr>;}
@@ -684,7 +683,7 @@ private class FunctionGraphBuilder {
 			var tn = block(bt, e1);
 			close();
 			// We always want to keep catch-blocks, so let's add a pseudo CFG edge if it's unreachable.
-			if (bx.bbIncoming.match(Nil)) addCfgEdge(tn == g.gUnreachable ? bt : tn, bx, CFGMaybeThrow);
+			if (bx.bbIncoming.length == 0) addCfgEdge(tn == g.gUnreachable ? bt : tn, bx, CFGMaybeThrow);
 			var reachable = tn != g.gUnreachable;
 			var cs = catches.map(c -> {
 				var bc = createNode(BKCatch(c.variable), c.expr.etype, c.expr.epos);

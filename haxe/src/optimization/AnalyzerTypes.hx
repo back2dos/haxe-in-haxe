@@ -27,9 +27,6 @@ import core.TFunctions.NotFound;
 import core.TPrinting;
 import context.SafeCom;
 import optimization.AnalyzerConfig;
-import core.ds.MlList;
-
-using core.ds.MlList.MlListTools;
 
 /*
 	A BasicBlock represents a node in the control flow. It has expression elements similar to TBlock in the AST,
@@ -138,8 +135,8 @@ enum TerminatorKind {
 	public var bbPhi:Array<TExpr>; // SSA-phi expressions
 	public var bbTerminator:TerminatorKind;
 	// relations
-	public var bbOutgoing:MlList<CfgEdge>; // Outgoing edges
-	public var bbIncoming:MlList<CfgEdge>; // Incoming edges
+	public var bbOutgoing:Array<CfgEdge>; // Outgoing edges
+	public var bbIncoming:Array<CfgEdge>; // Incoming edges
 	public var bbDominator:BasicBlockData; // The block's dominator
 	public var bbDominated:Array<BasicBlockData>; // The dominated blocks
 	public var bbDf:Array<BasicBlockData>; // The dominance frontier
@@ -150,7 +147,7 @@ enum TerminatorKind {
 	public var bbVarWrites:Array<TVar>; // List of assigned variables
 
 	public inline function new(bbId:Int, bbType:T, bbPos:Pos, bbKind:BlockKind, bbClosed:Bool, bbFlags:Int, bbEl:Array<TExpr>,
-			bbPhi:Array<TExpr>, bbTerminator:TerminatorKind, bbOutgoing:MlList<CfgEdge>, bbIncoming:MlList<CfgEdge>,
+			bbPhi:Array<TExpr>, bbTerminator:TerminatorKind, bbOutgoing:Array<CfgEdge>, bbIncoming:Array<CfgEdge>,
 			bbDominator:BasicBlockData, bbDominated:Array<BasicBlockData>, bbDf:Array<BasicBlockData>, bbSyntaxEdge:SyntaxEdge,
 			bbLoopGroups:Array<Int>, bbScopes:Array<Int>, bbVarWrites:Array<TVar>) {
 		this.bbId = bbId;
@@ -242,8 +239,8 @@ class BasicBlock {
 				cfgKind: kind,
 				cfgFlags: []
 			};
-			from.bbOutgoing = Cons(edge, from.bbOutgoing);
-			to.bbIncoming = Cons(edge, to.bbIncoming);
+			from.bbOutgoing.unshift(edge);
+			to.bbIncoming.unshift(edge);
 		}
 	}
 
@@ -258,8 +255,8 @@ class BasicBlock {
 			bbEl: [],
 			bbPhi: [],
 			bbTerminator: TermNone,
-			bbOutgoing: Nil,
-			bbIncoming: Nil,
+			bbOutgoing: [],
+			bbIncoming: [],
 			bbDominator: null,
 			bbDominated: [],
 			bbDf: [],
@@ -529,11 +526,11 @@ class Graph {
 
 	public static function checkIntegrity(g:GraphData):Void for (bb in nodes(g)) {
 		for (edge in bb.bbOutgoing) if (edge.cfgTo == g.gUnreachable) Sys.println('Outgoing edge from ${bb.bbId} to the unreachable block');
-		else if (!edge.cfgTo.bbIncoming.exists(e -> e == edge))
+		else if (!edge.cfgTo.bbIncoming.contains(edge))
 			Sys.println('Outgoing edge ${edge.cfgFrom.bbId} -> ${edge.cfgTo.bbId} has no matching incoming edge');
 		for (edge in bb.bbIncoming) if (edge.cfgFrom == g.gUnreachable)
 			Sys.println('Incoming edge to ${bb.bbId} from the unreachable block');
-		else if (!edge.cfgFrom.bbOutgoing.exists(e -> e == edge))
+		else if (!edge.cfgFrom.bbOutgoing.contains(edge))
 			Sys.println('Incoming edge ${edge.cfgTo.bbId} <- ${edge.cfgFrom.bbId} has no matching outgoing edge');
 	}
 

@@ -1,9 +1,11 @@
 package core.ds;
 
-// port: an immutable OCaml list, for the places where upstream relies on O(1)
-// `x :: l` and on sharing the tail (a saved list restored later, a recursion
-// on the tail) and an Array would copy. The same shape as ml2hx's runtime
-// list (`ml2hx.rt.MlList`), so that the two can become one type.
+// port: an immutable OCaml list. Upstream's lists are Arrays in the port; this
+// is for the hot places where upstream relies on O(1) `x :: l` and on sharing
+// the tail (recursion on the tail, rows built from the rest of a row) and an
+// Array would copy at every step: the matcher's rows (typing/matcher). The same
+// shape as ml2hx's runtime list (`ml2hx.rt.MlList`), so that the two can become
+// one type.
 enum MlList<T> {
 	Nil;
 	Cons(head:T, tail:MlList<T>);
@@ -11,25 +13,6 @@ enum MlList<T> {
 
 // port: the few operations the converted sites use (`using core.ds.MlList.MlListTools`).
 class MlListTools {
-	public static function length<T>(l:MlList<T>):Int {
-		var n = 0;
-		while (true) switch l {
-			case Nil: return n;
-			case Cons(_, t):
-				n++;
-				l = t;
-		}
-	}
-
-	public static function exists<T>(l:MlList<T>, f:T->Bool):Bool {
-		while (true) switch l {
-			case Nil: return false;
-			case Cons(h, t):
-				if (f(h)) return true;
-				l = t;
-		}
-	}
-
 	public static function hd<T>(l:MlList<T>):T return switch l {
 		case Cons(h, _): h;
 		case Nil: throw new Failure("hd");
