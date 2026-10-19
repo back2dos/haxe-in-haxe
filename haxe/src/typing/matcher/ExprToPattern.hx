@@ -98,6 +98,11 @@ class ExprToPattern {
 	// can be matched by array patterns if they can be accessed by index like in `for` loops, and their length and elements
 	// are then read the same way (#8012). This returns how to access them, or None for values of the former types and for
 	// values which can't be accessed by index.
+	//
+	// TODO: this is looked up for each array pattern here, then again for the same subject when compile.ml reads its
+	// elements and twice in texprConverter.ml. The decision tree stores a switch subject as a plain texpr, so what the
+	// subject is and how it is accessed is lost after pattern typing (which can't keep it: patterns are typed against
+	// per-case types). A subject that carries this would avoid the repeated lookups; see the discussion in #13070.
 	public static function getArrayAccess(ctx:Typer, t:T, p:Pos):Null<typing.TyperBase.ArrayAccessData> {
 		function isArray(seen:Array<T>, t:T):Bool return switch follow(t) {
 			case TInst({clPath: {pack: [], name: "Array"}}, [_]) | TDynamic(_):
