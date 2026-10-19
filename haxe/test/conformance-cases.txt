@@ -146,6 +146,9 @@ direct string-order haxe/test/conformance unit.strings.StringOrder
 direct string-offsets haxe/test/conformance unit.strings.StringOffsets
 direct malformed haxe/test/conformance unit.strings.Malformed
 direct malformed-source haxe/test/conformance unit.strings.MalformedSource
+direct malformed-after-error haxe/test/conformance unit.strings.MalformedAfterError
+direct malformed-before-error haxe/test/conformance unit.strings.MalformedBeforeError
+direct malformed-same-chunk haxe/test/conformance unit.strings.MalformedSameChunk
 direct malformed-parse haxe/test/conformance unit.strings.MalformedParse
 hxml malformed-define haxe/test/conformance/strings-define build.hxml
 

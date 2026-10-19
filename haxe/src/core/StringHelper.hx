@@ -173,49 +173,54 @@ class StringHelper {
 
 	// port: `s` as a UTF-8 decoder (sedlex's) reads its bytes: on a UTF-16 host
 	// bytes that are not UTF-8 are lone surrogates (codePointHost), which their
-	// neighbours can make UTF-8 again (pieces joined): the bytes decoded again;
-	// null when they are not UTF-8 (where sedlex raises MalFormed).
-	public static function decodedUtf8(s:String):Null<String> {
-		if (codePointHost) return wellFormedUtf8(haxe.io.Bytes.ofString(s)) ? s : null;
-		if (!hasLoneSurrogate(s)) return s;
-		var d = haxe.io.Bytes.ofString(s).toString();
-		return hasLoneSurrogate(d) ? null : d;
+	// neighbours can make UTF-8 again (pieces joined): the bytes decoded again.
+	// Where they are not UTF-8, utf8Error says.
+	public static function decodedUtf8(s:String):String {
+		if (codePointHost || loneSurrogate(s) < 0) return s;
+		return haxe.io.Bytes.ofString(s).toString();
 	}
 
-	// port: whether `bytes` are well-formed UTF-8 (Unicode's table 3-7), as
-	// OCaml's String.get_utf_8_uchar decodes them.
-	static function wellFormedUtf8(bytes:haxe.io.Bytes):Bool {
-		var i = 0;
+	// port: the index of the first character of `s` (decodedUtf8's) that is not
+	// UTF-8, where sedlex's decoding raises MalFormed (-1: none): a lone
+	// surrogate on a UTF-16 host, on a code point host the first byte that
+	// does not decode (Unicode's table 3-7, as OCaml's String.get_utf_8_uchar).
+	public static function utf8Error(s:String):Int {
+		if (!codePointHost) return loneSurrogate(s);
+		var bytes = haxe.io.Bytes.ofString(s);
+		var i = 0, chars = 0;
 		while (i < bytes.length) {
 			var c = bytes.get(i++);
-			if (c < 0x80) continue;
-			var n = c >= 0xc2 && c <= 0xdf ? 1 : c >= 0xe0 && c <= 0xef ? 2 : c >= 0xf0 && c <= 0xf4 ? 3 : -1;
-			if (n < 0 || i + n > bytes.length) return false;
-			var first = bytes.get(i);
-			if ((c == 0xe0 && first < 0xa0)
-				|| (c == 0xed && first >= 0xa0)
-				|| (c == 0xf0 && first < 0x90)
-				|| (c == 0xf4 && first >= 0x90))
-				return false;
-			for (_ in 0...n) {
-				var next = bytes.get(i++);
-				if (next < 0x80 || next > 0xbf) return false;
+			if (c >= 0x80) {
+				var n = c >= 0xc2 && c <= 0xdf ? 1 : c >= 0xe0 && c <= 0xef ? 2 : c >= 0xf0 && c <= 0xf4 ? 3 : -1;
+				if (n < 0 || i + n > bytes.length) return chars;
+				var first = bytes.get(i);
+				if ((c == 0xe0 && first < 0xa0)
+					|| (c == 0xed && first >= 0xa0)
+					|| (c == 0xf0 && first < 0x90)
+					|| (c == 0xf4 && first >= 0x90))
+					return chars;
+				for (_ in 0...n) {
+					var next = bytes.get(i++);
+					if (next < 0x80 || next > 0xbf) return chars;
+				}
 			}
+			chars++;
 		}
-		return true;
+		return -1;
 	}
 
-	static function hasLoneSurrogate(s:String):Bool {
+	// port: the index of the first lone surrogate of `s` (-1: none).
+	static function loneSurrogate(s:String):Int {
 		var i = 0, n = s.length;
 		while (i < n) {
 			var c = StringTools.fastCodeAt(s, i);
 			if ((c & 0xF800) == 0xD800) {
-				if (c >= 0xDC00 || i + 1 == n || (StringTools.fastCodeAt(s, i + 1) & 0xFC00) != 0xDC00) return true;
+				if (c >= 0xDC00 || i + 1 == n || (StringTools.fastCodeAt(s, i + 1) & 0xFC00) != 0xDC00) return i;
 				i++;
 			}
 			i++;
 		}
-		return false;
+		return -1;
 	}
 
 	// port: to_utf8's Malformed_code branch: the bytes of `s` as ISO-8859-1 characters.
