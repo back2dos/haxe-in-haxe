@@ -174,7 +174,13 @@ class IterationKind {
 
 	static function ofTexprByArrayAccess(ctx:Typer, e:TExpr, p:Pos):IteratorData {
 		var aa = TyperBase.getArrayAccess(ctx, e.etype, p);
-		return {itKind: IteratorCustom(aa.aaGet, aa.aaLength), itExpr: e, itType: aa.aaType};
+		// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the readers from TyperBase.makeArrayGet and makeArrayLength.
+		return {
+			itKind: IteratorCustom(function(eBase:TExpr, eIndex:TExpr, t:T, p:Pos) return TyperBase.makeArrayGet(ctx, aa, eBase, eIndex, p),
+				TyperBase.makeArrayLength.bind(ctx, aa)),
+			itExpr: e,
+			itType: aa.aaType
+		};
 	}
 
 	static function mapUnrollParams(ctx:Typer, params:Null<UnrollParameters>, i:Int):Null<UnrollParameters> {

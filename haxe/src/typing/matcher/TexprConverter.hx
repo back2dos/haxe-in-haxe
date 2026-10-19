@@ -307,8 +307,9 @@ class TexprConverter {
 						case SKValue: subject;
 						case SKEnum: mk(TEnumIndex(subject), com.basic.tint, subject.epos);
 						case SKLength:
+							// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: TyperBase.makeArrayLength.
 							var aa = ExprToPattern.getArrayAccess(ctx, subject.etype, subject.epos);
-							aa != null ? aa.aaLength(subject, subject.epos) : ExprToPattern.typeFieldAccess(ctx, subject, "length");
+							aa != null ? TyperBase.makeArrayLength(ctx, aa, subject, subject.epos) : ExprToPattern.typeFieldAccess(ctx, subject, "length");
 					};
 					if (ecases.length == 1 && edef == null && ctors.finiteness == RunTimeFinite && !nullable)
 						core.ds.Record.withFields(ecases[0].caseExpr,

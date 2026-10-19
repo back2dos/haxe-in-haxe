@@ -73,7 +73,21 @@ enum FromKind {
 // How values of a type can be accessed by index: the element type, how to read the element at an index and how
 // to read the length. For loops and array patterns use this (#8012).
 // port: array_access, renamed: ArrayAccess is Haxe's.
-typedef ArrayAccessData = {var aaType:T; var aaGet:TExpr->TExpr->T->Pos->TExpr; var aaLength:TExpr->Pos->TExpr;}
+// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the element and length readers are data (ArrayGet,
+// ... ArrayLength; makeArrayGet and makeArrayLength build the reads) instead of closures.
+typedef ArrayAccessData = {var aaType:T; var aaGet:ArrayGet; var aaLength:ArrayLength;}
+
+// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream (its comments follow).
+enum ArrayGet {
+	AGIndex; // e[i]
+	AGCall(c:TClass, cf:TClassField, tl:TParams); // a call of the abstract's @:arrayAccess getter
+}
+
+// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream (its comments follow).
+enum ArrayLength {
+	ALField; // the class's length field
+	ALCall(c:TClass, cf:TClassField, tl:TParams); // a call of the abstract's get_length
+}
 
 class MetaConfig {
 	public static function asBool(e:Expr):Bool return switch e.expr {
@@ -401,11 +415,10 @@ class TyperBase {
 				case TAbstract({aPath: {pack: [], name: "Int"}}, []):
 				case _: throw core.ds.NotFound.raise();
 			}
-			{aaType: applyParams(c.clParams, pl, pt), aaGet: getNextArrayElement, aaLength: getArrayLength.bind(ctx)};
+			// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: AGIndex, ALField, and AGCall, ALCall below.
+			{aaType: applyParams(c.clParams, pl, pt), aaGet: AGIndex, aaLength: ALField};
 		case TAbstract(a = {aImpl: c}, tl) if (c != null):
 			var length = core.ds.PMap.find("get_length", c.clStatics);
-			function getLength(e:TExpr,
-					p:Pos):TExpr return CallUnification.makeStaticCallBetter(ctx, c, length, tl, [e], ctx.com.basic.tint, p);
 			switch follow(length.cfType) {
 				case TFun(s): switch follow(s.ret) {
 						case TAbstract({aPath: {pack: [], name: "Int"}}, _):
@@ -416,9 +429,7 @@ class TyperBase {
 			try {
 				// first try: do we have an @:arrayAccess getter field?
 				var access = AbstractCast.findArrayReadAccessRaise(ctx, a, tl, mk(TConst(TNull), ctx.t.tint, p), p);
-				function getNext(base:TExpr, index:TExpr, t:T,
-						p:Pos):TExpr return CallUnification.makeStaticCallBetter(ctx, c, access.field, tl, [base, index], access.ret, p);
-				{aaType: access.ret, aaGet: getNext, aaLength: getLength};
+				{aaType: access.ret, aaGet: AGCall(c, access.field, tl), aaLength: ALCall(c, length, tl)};
 			} catch (ex:core.ds.NotFound) {
 				// second try: do we have @:arrayAccess on the abstract itself?
 				if (!core.Meta.has(MetaTag.ArrayAccess, a.aMeta)
@@ -426,9 +437,22 @@ class TyperBase {
 					|| !core.Meta.has(MetaTag.CoreType, a.aMeta)
 					// in which case we assume that a singular type parameter is the element type
 					|| tl.length != 1) throw core.ds.NotFound.raise();
-				{aaType: tl[0], aaGet: getNextArrayElement, aaLength: getLength};
+				{aaType: tl[0], aaGet: AGIndex, aaLength: ALCall(c, length, tl)};
 			}
 		case _: throw core.ds.NotFound.raise();
+	};
+
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream.
+	public static function makeArrayGet(ctx:TyperContext, aa:ArrayAccessData, eBase:TExpr, eIndex:TExpr,
+			p:Pos):TExpr return switch aa.aaGet {
+		case AGIndex: getNextArrayElement(eBase, eIndex, aa.aaType, p);
+		case AGCall(c, cf, tl): CallUnification.makeStaticCallBetter(ctx, c, cf, tl, [eBase, eIndex], aa.aaType, p);
+	};
+
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream.
+	public static function makeArrayLength(ctx:TyperContext, aa:ArrayAccessData, e:TExpr, p:Pos):TExpr return switch aa.aaLength {
+		case ALField: getArrayLength(ctx, e, p);
+		case ALCall(c, cf, tl): CallUnification.makeStaticCallBetter(ctx, c, cf, tl, [e], ctx.com.basic.tint, p);
 	};
 
 	public static function safeNavBranch(ctx:TyperContext, sn:SafeNavAccess, fThen:Void->TExpr):TExpr {
