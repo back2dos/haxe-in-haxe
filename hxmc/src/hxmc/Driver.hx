@@ -17,6 +17,8 @@ class Driver {
 	var o:Options;
 	var out:String;
 	var dumpSet:Null<Map<String, Bool>>;
+	// -D hxmc.interp: the functions interpreted (hxmc.interp.InterpGen)
+	var interp:Null<hxmc.interp.InterpGen.InterpSet>;
 	var tm = [0.0, 0.0, 0.0, 0.0];
 	var slow:Array<{name:String, t:Float}> = [];
 
@@ -42,6 +44,7 @@ class Driver {
 		for (e in o.exports)
 			if (abi.exports.indexOf(e) < 0) abi.exports.push(e);
 		dumpSet = o.dump == null ? null : [for (n in o.dump.split(",")) n => true];
+		if (o.interp != null) interp = new hxmc.interp.InterpGen.InterpSet(o.interp, prep);
 	}
 
 	// (-D hxmc.jit: every function stays, for the native macros the compiler
@@ -144,6 +147,16 @@ class Driver {
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
+			if (interp != null && interp.wants(fn)) {
+				new hxmc.interp.InterpGen(prep, abi, obj, mf, interp, (m, global) -> compileStub(m, emit, global)).run();
+				if (mb.icaches > 0) {
+					var bss = obj.section(".bss", Bss, 16);
+					bss.bssSize = (bss.bssSize + 15) & ~15;
+					obj.define(mb.icSym, bss, bss.bssSize, Abi.IC_SIZE * mb.icaches, false);
+					bss.bssSize += Abi.IC_SIZE * mb.icaches;
+				}
+				return;
+			}
 			if (abi.wasm) {
 				// WebAssembly: structured code from the Mir, no instruction selection or registers
 				var s1 = haxe.Timer.stamp();
@@ -198,6 +211,15 @@ class Driver {
 		}
 	}
 
+	// an interpreted function's stub (InterpGen) into its module's object
+	function compileStub(mf:MFunc, emit:Target.Emitter, global:Bool) {
+		var isel = Target.selector(abi);
+		var lf = isel.select(mf, Layout.order(mf));
+		var ra = new Regalloc(lf, isel);
+		ra.run();
+		emit.func(lf, ra.usedRegs, global);
+	}
+
 	// a synthetic function (DataGen) into obj
 	function compileMir(mf:MFunc, emit:Target.Emitter, obj:Obj) {
 		if (abi.wasm) {
@@ -237,7 +259,7 @@ class Driver {
 		var p = Sys.programPath();
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
 		return "hxmc|" + abi.rtName + (abi.ios() ? "+" + abi.platform : "") + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "")
-			+ (abi.output == SharedLibrary ? "+shared" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+			+ (abi.output == SharedLibrary ? "+shared" : "") + (o.interp != null ? "+interp=" + o.interp : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)

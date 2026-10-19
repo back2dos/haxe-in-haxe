@@ -6,7 +6,7 @@ using StringTools;
 
 // The hxmc test corpus (docs/testing.md): every program compiled by
 // hxmc, run, and its output compared with its golden file.
-//   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--wasm-eh legacy] [--libc glibc] [--stage DIR] [--bless] [case ...]
+//   bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Corpus [-j N] [-v] [--target T] [--wasm-eh legacy] [--libc glibc] [--interp] [--stage DIR] [--bless] [case ...]
 // The cases are the programs of hxmc/test/cases (<Name>.hx with class <Name>)
 // and the fuzzer programs frozen in hxmc/test/fuzz-1000.zip (extracted to
 // bin/hxmc-fuzz, cases fuzz-<seed>). Each case's HXB archive is written once
@@ -25,9 +25,11 @@ using StringTools;
 // /usr/aarch64-linux-gnu, the cross C library's root, or QEMU_LD_PREFIX;
 // the cases that must be rejected are of the default mode); --stage only
 // builds and copies each executable with
-// its golden file to DIR/<case>/ (Check runs them on the target's machine).
+// its golden file to DIR/<case>/ (Check runs them on the target's machine);
+// --interp builds every case with -D hxmc.interp (the program's functions
+// run by the interpreter in it: hxmc.rt.Interp), in bin/hxmc-t-interp.
 class Corpus {
-	static final OUT = "bin/hxmc-t";
+	static var OUT = "bin/hxmc-t";
 	static final STD = "bin/hxmc/std";
 	static final CASES = "hxmc/test/cases";
 	static final REJECT = "hxmc/test/reject";
@@ -45,6 +47,7 @@ class Corpus {
 	static var wasmEh:Null<String>; // --wasm-eh legacy: -D hxmc.wasm-eh=legacy
 	static var libc:Null<String>; // --libc glibc: -D hxmc.libc=glibc
 	static var bless = false;
+	static var interp = false; // --interp: -D hxmc.interp
 
 	static function main() {
 		var a = parseArgs(Sys.args(), ["-j", "--target", "--stage", "--wasm-eh", "--libc"]);
@@ -54,6 +57,8 @@ class Corpus {
 		wasmEh = a.get("--wasm-eh");
 		libc = a.get("--libc");
 		bless = a.has("--bless");
+		interp = a.has("--interp");
+		if (interp) OUT = "bin/hxmc-t-interp";
 		var verbose = a.has("-v");
 		if (!FileSystem.exists(STD + "/.stamp")) fail("Corpus: bin/hxmc/std is missing (make std)");
 		var cases = caseList(a.rest);
@@ -119,6 +124,7 @@ class Corpus {
 		if (libc != "glibc" && GLIBC_ONLY.exists(c.name)) return {name: c.name, status: "excluded", detail: GLIBC_ONLY[c.name]};
 		var hxb = d + "/" + (wasm ? 'prog-$target.hxb.zip' : "prog.hxb.zip");
 		var defines = caseDefines(c.cps[0] + "/" + c.main + ".hx");
+		if (interp) defines = defines.concat(["-D", "hxmc.interp"]);
 		var t0 = now();
 		// (WebAssembly: the program is typed for it, with its runtime)
 		if (!FileSystem.exists(hxb) || mtime(hxb) < Math.max(newest(c.cps), mtime(STD + "/.stamp"))) {

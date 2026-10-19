@@ -53,6 +53,8 @@ class Options {
 	// type and signature table entries, every runtime function kept, the
 	// symbols written next to the executable (<out>.syms); Linux x86-64, static
 	public var jit = false;
+	// -D hxmc.interp[=<module prefixes>]: the program's functions run by the interpreter in the program (hxmc.interp.InterpGen, hxmc.rt.Interp); null: none
+	public var interp:Null<String> = null;
 
 	public function new() {}
 
@@ -139,6 +141,7 @@ class Options {
 		o.framePointers = fpEnv != null && fpEnv != "" ? fpEnv != "0" : def("hxmc.no_frame_pointers") != null ? false : fp == null || fp != "0";
 		o.debugLines = def("debug") != null || def("hxmc.lines") != null;
 		o.jit = def("hxmc.jit") != null;
+		o.interp = def("hxmc.interp");
 		if (o.jit && (o.target != "linux-x86_64" || o.libc != null)) throw "hxmc: -D hxmc.jit: linux-x86_64 (static) only";
 		var j = def("hxmc.jobs");
 		if (j == null) j = env("HXMC_JOBS");
