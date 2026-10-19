@@ -460,11 +460,13 @@ class Lexer {
 		this.source = source;
 		this.file = file;
 		index = 0;
-		if (!core.StringHelper.codePointHost && !scanPairs(source)) {
-			// port: a lone surrogate (core.StringHelper.decodedUtf8): where the
-			// bytes are not UTF-8, upstream's refill (lexbuf_from_utf8_string)
-			// raises Sedlexing.MalFormed when it reaches them; here before the
-			// first token.
+		// port: where the bytes are not UTF-8 (core.StringHelper.decodedUtf8: on
+		// a UTF-16 host, at a lone surrogate) upstream's refill
+		// (lexbuf_from_utf8_string) raises Sedlexing.MalFormed when it reaches
+		// them; here before the first token.
+		if (core.StringHelper.codePointHost) {
+			if (core.StringHelper.decodedUtf8(source) == null) throw new MalFormed();
+		} else if (!scanPairs(source)) {
 			var decoded = core.StringHelper.decodedUtf8(source);
 			if (decoded == null) throw new MalFormed();
 			this.source = decoded;

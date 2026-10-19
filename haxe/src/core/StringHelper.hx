@@ -176,9 +176,33 @@ class StringHelper {
 	// neighbours can make UTF-8 again (pieces joined): the bytes decoded again;
 	// null when they are not UTF-8 (where sedlex raises MalFormed).
 	public static function decodedUtf8(s:String):Null<String> {
-		if (codePointHost || !hasLoneSurrogate(s)) return s;
+		if (codePointHost) return wellFormedUtf8(haxe.io.Bytes.ofString(s)) ? s : null;
+		if (!hasLoneSurrogate(s)) return s;
 		var d = haxe.io.Bytes.ofString(s).toString();
 		return hasLoneSurrogate(d) ? null : d;
+	}
+
+	// port: whether `bytes` are well-formed UTF-8 (Unicode's table 3-7), as
+	// OCaml's String.get_utf_8_uchar decodes them.
+	static function wellFormedUtf8(bytes:haxe.io.Bytes):Bool {
+		var i = 0;
+		while (i < bytes.length) {
+			var c = bytes.get(i++);
+			if (c < 0x80) continue;
+			var n = c >= 0xc2 && c <= 0xdf ? 1 : c >= 0xe0 && c <= 0xef ? 2 : c >= 0xf0 && c <= 0xf4 ? 3 : -1;
+			if (n < 0 || i + n > bytes.length) return false;
+			var first = bytes.get(i);
+			if ((c == 0xe0 && first < 0xa0)
+				|| (c == 0xed && first >= 0xa0)
+				|| (c == 0xf0 && first < 0x90)
+				|| (c == 0xf4 && first >= 0x90))
+				return false;
+			for (_ in 0...n) {
+				var next = bytes.get(i++);
+				if (next < 0x80 || next > 0xbf) return false;
+			}
+		}
+		return true;
 	}
 
 	static function hasLoneSurrogate(s:String):Bool {
