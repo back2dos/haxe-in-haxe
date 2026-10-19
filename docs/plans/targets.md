@@ -431,9 +431,10 @@ Nothing in `haxe/src` changed. What it lacked, all in hxmc:
   `Lambda` over an Array), calling a non-function as an error rather than
   a trap.
 
-Measured with node 24 (2026-10-19, medians of 5 interleaved runs), the
-self-compile to HXB (`-cp haxe/src -main haxe.Main --interp --no-output
---hxb`), the same archive from all three:
+Measured with node 24 (2026-10-19, medians of 5 interleaved runs on an
+Intel Xeon E-2356G at 3.2 GHz, 6 cores / 12 threads, 62 GB, Linux 6.1),
+the self-compile to HXB (`-cp haxe/src -main haxe.Main --interp
+--no-output --hxb`), the same archive from all three:
 
 | | native | linear | WasmGC |
 | --- | --- | --- | --- |
