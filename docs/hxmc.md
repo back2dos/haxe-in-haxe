@@ -668,10 +668,14 @@ its index in the exported `__indirect_function_table` (corpus case
 A wasm32 module's linear memory only grows, and browsers (phones above all,
 and several islands on one page) refuse it early, so the runtime
 (`hxmc/std/hxmc/rt/wasm/Heap.hx`, `Gc.hx`) takes only what it uses: the
-nursery's region is as large as the nursery (4 MB, then doubled by the
-adaptive sizing up to 32 MB: grown in place when it is the last region,
-else moved to a new one right after a minor collection, when it is empty;
-it stays as it is when memory cannot grow); the old space is chunks of 1 MB
+nursery's region is as large as the nursery (4 MB, then sized as the
+native one with one thread: doubled after a minor collection that promoted
+more than a 16th of what was allocated since the previous one, halved after
+8 that promoted less than a 64th, up to 32 MB, which the port's
+self-compile keeps: 6% less time than at 4 MB, three major collections
+instead of six, 18% less peak memory; grown in place when it is the last region, else
+moved to a new one right after a minor collection, when it is empty; it
+stays as it is when memory cannot grow); the old space is chunks of 1 MB
 taken as objects are promoted (`RT_OLD_MB`, 32, is when the first major
 collection comes, not a reservation); the shadow stack is `RT_STACK_MB`
 (4 MB; `wasi.mjs` sets it from node's `--stack-size`, as deep as node's
