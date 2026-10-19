@@ -17,7 +17,8 @@
 # by the cases' measured durations (run 39110201629, seconds with the checks:
 # formatter_noio 525, mandelbrot_anon 344, mandelbrot 293, bcrypt 166, alloc
 # 124, binarytrees 120, nbody 78, json 61, sha256 40, sha512 28), the longest
-# alone: about 12 minutes in all instead of 30. A dispatch whose args name the
+# alone: about 10 minutes in all instead of 30 (the shards may land on
+# different CPU types: `machines` in the results says which case ran where). A dispatch whose args name the
 # cases (-c) runs them in one shard.
 #
 # Results: the job summaries and an artifact (bench-results); from main (or
@@ -168,7 +169,7 @@ jobs:
         run: |
           set -ex
           ulimit -s unlimited
-          make bench BENCH_ARGS="-n ${{ inputs.runs || '5' }} --out bin/bench/results-${{ matrix.index }}.json $ARGS ${CASES:+-c $CASES}"
+          make bench BENCH_ARGS="-n ${{ inputs.runs || '5' }} --out bin/bench/results-${{ matrix.index }}.json --shard ${{ matrix.index }} $ARGS ${CASES:+-c $CASES}"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

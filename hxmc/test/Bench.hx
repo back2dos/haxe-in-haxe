@@ -105,7 +105,7 @@ class Bench {
 	static var log:Array<String> = [];
 
 	static function main() {
-		var a = parseArgs(Sys.args(), ["-n", "-t", "-c", "--out", "--source", "--history", "--summary", "--merge"]);
+		var a = parseArgs(Sys.args(), ["-n", "-t", "-c", "--out", "--source", "--history", "--summary", "--merge", "--shard"]);
 		if (a.has("--history")) {
 			history(a.get("--history"));
 			return;
@@ -146,6 +146,8 @@ class Bench {
 			results: {},
 			checks: {},
 		};
+		// (one shard of a sharded run: its index, for --merge)
+		if (a.has("--shard")) doc.shard = a.int("--shard", 0);
 		var results:DynamicAccess<DynamicAccess<Dynamic>> = doc.results;
 		var checks:DynamicAccess<Dynamic> = doc.checks;
 		for (c in cases) {
@@ -534,10 +536,11 @@ class Bench {
 	/**
 		The results of the shards of one run (each a run of some cases, every
 		target, on its own machine) as one results file in the format of an
-		unsharded run: the cases in their order, the first shard's facts, the
-		earliest date, the slowest shard's seconds, and `machines`: per case the
-		machine it ran on (with `shard`, the index of its shard: a row's targets
-		always share one machine).
+		unsharded run: the cases in their order, the first shard's facts (its
+		machine's CPU: the shards' CPUs, where they differ), the earliest date,
+		the slowest shard's seconds, and `machines`: per case the machine it ran
+		on (with `shard`, its shard's --shard: a row's targets always share one
+		machine).
 	**/
 	static function merge(out:String, files:Array<String>, summaryPath:Null<String>) {
 		if (files.length == 0) fail("--merge: no results to merge");
@@ -573,11 +576,17 @@ class Bench {
 				results[c] = pr[c];
 				if (pc.exists(c)) checks[c] = pc[c];
 				var m:DynamicAccess<Dynamic> = p.machine != null ? Reflect.copy(p.machine) : {};
-				m["shard"] = i;
+				m["shard"] = p.shard ?? i;
 				machines[c] = m;
 			}
 		}
 		cases.sort((x, y) -> rank(x) - rank(y));
+		// the machine: the first shard's, its CPU the shards' CPUs where they differ
+		var machine:Null<DynamicAccess<Dynamic>> = base.machine != null ? Reflect.copy(base.machine) : null;
+		var cpus:Array<String> = [];
+		for (p in parts) if (p.machine != null && p.machine.cpu != null && !cpus.contains(p.machine.cpu)) cpus.push(p.machine.cpu);
+		if (machine != null && cpus.length > 1) machine["cpu"] = cpus.join(" / ");
+		if (machine != null && parts.length > 1) machine.remove("host");
 		// (the fields in the order of an unsharded run's, then machines)
 		var doc:Dynamic = {
 			schema: base.schema,
@@ -587,7 +596,7 @@ class Bench {
 			short: base.short,
 			ref: base.ref,
 			run_url: base.run_url,
-			machine: base.machine,
+			machine: machine,
 			versions: base.versions,
 			runs: base.runs,
 			method: base.method,
