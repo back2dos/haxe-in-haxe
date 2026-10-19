@@ -313,12 +313,14 @@ class Escape {
 					case Phi:
 						s = objectSite(i);
 						if (s == null) {
-							var e = NONE;
-							for (a in i.args) {
-								if (der[a] >= 0) der[i.id] = der[a];
-								if (a != i.id) e = e == NONE || e == exact[a] ? exact[a] : -1;
-							}
+							var e = NONE, d = NONE;
+							for (a in i.args)
+								if (a != i.id) {
+									e = e == NONE || e == exact[a] ? exact[a] : -1;
+									d = d == NONE || d == der[a] ? der[a] : -1;
+								}
 							if (e >= 0) exact[i.id] = e;
+							if (d >= 0) der[i.id] = d;
 						}
 					case Copy:
 						der[i.id] = der[i.a];
@@ -357,7 +359,7 @@ class Escape {
 				if (slots == null) slots = new Map();
 				var o = slots.get(k), d = der[i.c];
 				if (o == null) slots.set(k, d) else if (o >= 0 && o != d) {
-					slots.set(k, -10 - multi.length);
+					slots.set(k, -2); // (several sites: the loads are none of them)
 					multi.push([o, d]);
 				} else if (o <= -10 && multi[-10 - o].indexOf(d) < 0) multi[-10 - o].push(d);
 			}
@@ -367,7 +369,7 @@ class Escape {
 					if (i.dead) continue;
 					if (i.op == Load && i.ty == I64 && der[i.id] == -1) {
 						var k = slotKey(i);
-						if (k >= 0 && slots.exists(k)) der[i.id] = slots.get(k);
+						if (k >= 0 && slots.exists(k) && slots.get(k) >= 0) der[i.id] = slots.get(k);
 					} else if (i.op == Copy && der[i.id] == -1) der[i.id] = der[i.a];
 				}
 		var sure = new Vector<Bool>(all.length);
@@ -383,8 +385,10 @@ class Escape {
 				if (i.dead) continue;
 				switch i.op {
 					case Phi if (der[i.id] == -1):
+						var d = NONE;
 						for (a in i.args)
-							if (der[a] != -1) der[i.id] = der[a];
+							if (a != i.id) d = d == NONE || d == der[a] ? der[a] : -1;
+						if (d >= 0) der[i.id] = d;
 					case Copy if (der[i.id] == -1):
 						der[i.id] = der[i.a];
 					case Load if (i.imm == Abi.HDR_TINDEX && i.size == 2 && i.b < 0 && exact[i.a] >= 0):
@@ -412,6 +416,7 @@ class Escape {
 		// the allocations that certainly escape: their tests fold here (on
 		// their exact aliases), the analysis is for the others
 		var n = 0;
+		if (!part("screen")) sure = new Vector<Bool>(all.length); // (debugging: everything analyzed)
 		for (i in tindex)
 			if (sure[exact[i.a]]) {
 				var tc = constOf(all[exact[i.a]].ty.c);
