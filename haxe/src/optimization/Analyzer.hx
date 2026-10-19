@@ -38,6 +38,9 @@ import optimization.AnalyzerTexpr;
 import optimization.AnalyzerTexpr.*;
 import optimization.AnalyzerConfig;
 import optimization.OptimizerTexpr.*;
+import core.ds.MlList;
+
+using core.ds.MlList.MlListTools;
 
 /* File organization:
 	* analyzer.ml: The controlling file with all graph-based optimizations
@@ -72,7 +75,7 @@ class Ssa {
 	public static function addPhi(g:GraphData, bb:BasicBlockData, v:TVar):Void {
 		var p = bb.bbPos;
 		var ev = mk(TLocal(v), v.vType, p);
-		var el = bb.bbIncoming.map(_ -> ev);
+		var el = [for (_ in bb.bbIncoming) ev];
 		var phi = mk(TConst(TString("phi")), tDynamic, p);
 		var call = mk(TCall(phi, el), tDynamic, p);
 		bb.bbPhi.push(mk(TBinop(OpAssign, ev, call), tDynamic, p));
@@ -121,11 +124,17 @@ class Ssa {
 		var bb = edge.cfgTo;
 		function loop(i:Int, e:TExpr):TExpr return switch e.eexpr {
 			case TBinop(OpAssign, e1 = {eexpr: TLocal(v0)}, ecall = {eexpr: TCall(ephi = {eexpr: TConst(TString("phi"))}, el)}):
-				if (el.length != bb.bbIncoming.length) throw "Invalid_argument: List.map2";
+				if (el.length != bb.bbIncoming.length()) throw "Invalid_argument: List.map2";
+				var incoming = bb.bbIncoming;
 				var values = [
 					for (j in 0...el.length) {
 						var e = el[j];
-						var pred = bb.bbIncoming[j].cfgFrom;
+						var pred = switch incoming {
+							case Cons(edge, rest):
+								incoming = rest;
+								edge.cfgFrom;
+							case Nil: throw "Invalid_argument: List.map2";
+						};
 						if (pred != edge.cfgFrom) e; else switch e.eexpr {
 							case TLocal(v):
 								var replacement = local(ctx, e, v, edge.cfgFrom);
@@ -237,26 +246,32 @@ class DataFlow<L, C> {
 
 	public function run(actx:AnalyzerContext, ctx:C):Void {
 		var g = actx.graph;
-		var ssaWork:Array<TExprLookup> = [];
-		var cfgWork = g.gRoot.bbOutgoing.copy();
-		inline function addCfg(edge:CfgEdge):Void cfgWork.unshift(edge);
+		var ssaWork:MlList<TExprLookup> = Nil;
+		var cfgWork = g.gRoot.bbOutgoing;
+		inline function addCfg(edge:CfgEdge):Void cfgWork = Cons(edge, cfgWork);
 		inline function visitPhi(bb:BasicBlockData, v:TVar, el:Array<TExpr>):L {
-			if (el.length != bb.bbIncoming.length) throw "Invalid_argument: List.fold_left2";
+			if (el.length != bb.bbIncoming.length()) throw "Invalid_argument: List.fold_left2";
 			var expressions = [];
-			for (i in 0...el.length) if (BasicBlock.hasFlag(bb.bbIncoming[i], api.flag)) expressions.unshift(el[i]);
+			var incoming = bb.bbIncoming;
+			for (i in 0...el.length) switch incoming {
+				case Cons(edge, rest):
+					if (BasicBlock.hasFlag(edge, api.flag)) expressions.unshift(el[i]);
+					incoming = rest;
+				case Nil:
+			}
 			var values = expressions.map(e -> api.transfer(actx, ctx, bb, e));
 			return values.length > 0 && all(e -> api.equals(values[0], e), values.slice(1)) ? values[0] : api.bottom;
 		}
 		inline function setCell(v:TVar, e:L):Void {
 			var old = api.getCell(ctx, v.vId);
 			api.setCell(ctx, v.vId, e);
-			if (!api.equals(e, old)) for (edge in getSsaEdgesFrom(g, v)) ssaWork.unshift(edge);
+			if (!api.equals(e, old)) for (edge in getSsaEdgesFrom(g, v)) ssaWork = Cons(edge, ssaWork);
 		}
 		inline function visitAssignment(bb:BasicBlockData, v:TVar, e:TExpr):Void switch e.eexpr {
 			case TCall({eexpr: TConst(TString("phi"))}, el):
 				setCell(v, visitPhi(bb, v, el));
 			case _:
-				if (exists(edge -> BasicBlock.hasFlag(edge, api.flag), bb.bbIncoming)) setCell(v, api.transfer(actx, ctx, bb, e));
+				if (bb.bbIncoming.exists(edge -> BasicBlock.hasFlag(edge, api.flag))) setCell(v, api.transfer(actx, ctx, bb, e));
 		}
 		inline function visitExpression(bb:BasicBlockData, condBranch:Bool, e:TExpr):Bool return switch e.eexpr {
 			case TBinop(OpAssign, {eexpr: TLocal(v)}, e2) | TVar(v, e2) if (e2 != null):
@@ -264,18 +279,18 @@ class DataFlow<L, C> {
 				false;
 			case _ if (api.conditional && condBranch):
 				var value = api.transfer(actx, ctx, bb, e);
-				var edges:Array<CfgEdge>;
+				var edges:MlList<CfgEdge>;
 				if (value == api.bottom || value == api.top) edges = bb.bbOutgoing;
 				else {
-					var yes = [];
-					var maybe = [];
-					var also = [];
+					var yes = Nil;
+					var maybe = Nil;
+					var also = Nil;
 					for (edge in bb.bbOutgoing) switch edge.cfgKind {
-						case CFGCondBranch(e): if (api.equals(api.transfer(actx, ctx, bb, e), value)) yes.unshift(edge);
-						case CFGCondElse: maybe.unshift(edge);
-						case CFGGoto | CFGFunction | CFGMaybeThrow: also.unshift(edge);
+						case CFGCondBranch(e): if (api.equals(api.transfer(actx, ctx, bb, e), value)) yes = Cons(edge, yes);
+						case CFGCondElse: maybe = Cons(edge, maybe);
+						case CFGGoto | CFGFunction | CFGMaybeThrow: also = Cons(edge, also);
 					}
-					edges = yes.length == 0 ? (maybe.length == 0 ? bb.bbOutgoing : maybe.concat(also)) : yes.concat(also);
+					edges = yes.match(Nil) ? (maybe.match(Nil) ? bb.bbOutgoing : maybe.append(also)) : yes.append(also);
 				}
 				for (edge in edges) addCfg(edge);
 				true;
@@ -297,21 +312,25 @@ class DataFlow<L, C> {
 			case _:
 				throw "Analyzer.DataFlow.visitPhis";
 		}
-		while (cfgWork.length > 0 || ssaWork.length > 0) {
-			if (cfgWork.length > 0) {
-				var edge = cfgWork.shift();
+		while (true) switch [cfgWork, ssaWork] {
+			case [Cons(edge, edges), _]:
+				cfgWork = edges;
 				if (!BasicBlock.hasFlag(edge, api.flag)) {
 					edge.cfgFlags.unshift(api.flag);
 					visitPhis(edge.cfgTo);
 					var count = 0;
 					for (incoming in edge.cfgTo.bbIncoming) if (BasicBlock.hasFlag(incoming, api.flag)) count++;
 					if (count == 1 || edge.cfgTo == g.gRoot) visitExpressions(edge.cfgTo);
-					if (edge.cfgTo.bbOutgoing.length == 1) addCfg(edge.cfgTo.bbOutgoing[0]);
+					switch edge.cfgTo.bbOutgoing {
+						case Cons(edge, Nil): addCfg(edge);
+						case _:
+					}
 				}
-			} else {
-				var edge = ssaWork.shift();
+			case [Nil, Cons(edge, edges)]:
+				ssaWork = edges;
 				visitExpression(edge.bb, edge.target == LUTerm, getTexpr(edge.bb, edge.target));
-			}
+			case [Nil, Nil]:
+				break;
 		}
 	}
 
@@ -484,7 +503,7 @@ class ConstPropagationImpl implements DataFlowApi<ConstLattice, haxe.ds.IntMap<C
 			case _: mapExpr(commit, e);
 		};
 		Graph.iterDomTree(actx.graph, function(bb) {
-			if (!exists(edge -> BasicBlock.hasFlag(edge, FlagExecutable), bb.bbIncoming)) bb.bbDominator = actx.graph.gUnreachable;
+			if (!bb.bbIncoming.exists(edge -> BasicBlock.hasFlag(edge, FlagExecutable))) bb.bbDominator = actx.graph.gUnreachable;
 			dynarrayMap(commit, bb.bbEl);
 			bb.bbTerminator = terminatorMap(commit, bb.bbTerminator);
 		});
