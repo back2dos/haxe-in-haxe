@@ -358,7 +358,10 @@ sizes and compile times (`haxe_s`: the Haxe compiler, hxmc's whole build for
 its targets; `cc_s`: the C++ or C compiler for C++ and HL/C; `build_s`: their
 sum), with each case's check program compared across the
 targets. `.github/workflows/bench.yml` runs it nightly on main (skipped when
-the commit is measured already) and on demand, apart from `build.yml`; from
+the commit is measured already) and on demand, apart from `build.yml`,
+sharded by case (groups of cases on runners of their own, every target of a
+case on the same one; `Bench --merge` joins the shards' results, recording
+each case's machine under `machines`); from
 main it appends `results/<date>-<commit>.json` to the `bench-data` branch and
 regenerates `history.json` (per run, case and target: median, min, max,
 peak RSS and the compile times) and `latest.json` there (`Bench --history`),
