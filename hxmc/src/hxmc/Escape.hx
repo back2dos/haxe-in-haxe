@@ -318,6 +318,35 @@ class Escape {
 		// roughly, a screen; exact: copies, and phis of one site only)
 		var all = [];
 		var der = MFunc.ints(nv, -1), exact = MFunc.ints(nv, -1);
+		// (sites meeting at a phi go together: one escapes, all do)
+		var uf:Array<Int> = [], mergeOut:Array<MIns> = [];
+		function root(k:Int):Int {
+			while (uf[k] != k)
+				k = uf[k] = uf[uf[k]];
+			return k;
+		}
+		// a phi of sites only: their group
+		function phiDer(i:MIns):Int {
+			var d = NONE;
+			for (a in i.args)
+				if (a != i.id) {
+					var x = der[a];
+					if (x < 0) {
+						// (with a constant, a parameter or a call's result: those sites escape)
+						var op = f.vals[a].op;
+						if (op == Const || op == Param || op == Call && der[a] == -1) mergeOut.push(i);
+						return -1;
+					}
+					x = root(x);
+					if (d == NONE) d = x else if (d != x) {
+						if (x < d) {
+							uf[d] = x;
+							d = x;
+						} else uf[x] = d;
+					}
+				}
+			return d == NONE ? -1 : d;
+		}
 		for (b in f.blocks)
 			for (i in b.ins) {
 				if (i.dead) continue;
@@ -326,14 +355,11 @@ class Escape {
 					case Phi:
 						s = objectSite(i);
 						if (s == null) {
-							var e = NONE, d = NONE;
+							var e = NONE;
 							for (a in i.args)
-								if (a != i.id) {
-									e = e == NONE || e == exact[a] ? exact[a] : -1;
-									d = d == NONE || d == der[a] ? der[a] : -1;
-								}
+								if (a != i.id) e = e == NONE || e == exact[a] ? exact[a] : -1;
 							if (e >= 0) exact[i.id] = e;
-							if (d >= 0) der[i.id] = d;
+							der[i.id] = phiDer(i);
 						}
 					case Copy:
 						der[i.id] = der[i.a];
@@ -355,6 +381,7 @@ class Escape {
 				}
 				if (s != null) {
 					der[i.id] = exact[i.id] = all.length;
+					uf.push(all.length);
 					all.push(s);
 				}
 			}
@@ -370,7 +397,7 @@ class Escape {
 				var k = slotKey(i);
 				if (k < 0) continue;
 				if (slots == null) slots = new Map();
-				var o = slots.get(k), d = der[i.c];
+				var o = slots.get(k), d = root(der[i.c]);
 				if (o == null) slots.set(k, d) else if (o >= 0 && o != d) {
 					slots.set(k, -2); // (several sites: the loads are none of them)
 					multi.push([o, d]);
@@ -390,7 +417,7 @@ class Escape {
 			return v >= 0 && der[v] != -1;
 		function markSure(v:Int) {
 			var d = der[v];
-			if (d >= 0) sure[d] = true else if (d <= -10) for (s in multi[-10 - d]) sure[s] = true;
+			if (d >= 0) sure[root(d)] = true;
 		}
 		var tindex:Array<MIns> = [], nulls:Array<MIns> = [];
 		for (b in f.blocks)
@@ -398,10 +425,7 @@ class Escape {
 				if (i.dead) continue;
 				switch i.op {
 					case Phi if (der[i.id] == -1):
-						var d = NONE;
-						for (a in i.args)
-							if (a != i.id) d = d == NONE || d == der[a] ? der[a] : -1;
-						if (d >= 0) der[i.id] = d;
+						der[i.id] = phiDer(i);
 					case Copy if (der[i.id] == -1):
 						der[i.id] = der[i.a];
 					case Load if (i.imm == Abi.HDR_TINDEX && i.size == 2 && i.b < 0 && exact[i.a] >= 0):
@@ -428,10 +452,13 @@ class Escape {
 			}
 		// the allocations that certainly escape: their tests fold here (on
 		// their exact aliases), the analysis is for the others
+		for (i in mergeOut)
+			for (a in i.args)
+				if (a != i.id && der[a] >= 0) sure[root(der[a])] = true;
 		var n = 0;
 		if (!part("screen")) sure = new Vector<Bool>(all.length); // (debugging: everything analyzed)
 		for (i in tindex)
-			if (sure[exact[i.a]]) {
+			if (sure[root(exact[i.a])]) {
 				var tc = constOf(all[exact[i.a]].ty.c);
 				i.op = Const;
 				i.a = -1;
@@ -443,7 +470,7 @@ class Escape {
 				n++;
 			}
 		for (i in nulls)
-			if (exact[i.a] >= 0 && sure[exact[i.a]] || exact[i.b] >= 0 && sure[exact[i.b]]) {
+			if (exact[i.a] >= 0 && sure[root(exact[i.a])] || exact[i.b] >= 0 && sure[root(exact[i.b])]) {
 				toConst(i, i.imm == CEq ? 0 : 1);
 				n++;
 			}
@@ -453,6 +480,8 @@ class Escape {
 			prune();
 			if (++screenFolds < 3) return findSites();
 		}
+		for (k in 0...all.length)
+			if (sure[root(k)]) sure[k] = true;
 		screenDer = der;
 		screenSure = sure;
 		sites = [];
