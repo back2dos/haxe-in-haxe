@@ -96,6 +96,8 @@ class Driver {
 	var raRounds = 0;
 	var escRemoved = 0;
 	var escFolds = 0;
+	var escTime = 0.0;
+	var escSlow:Array<{name:String, t:Float}> = [];
 	var raInsns = 0;
 	var raFuncs = 0;
 
@@ -145,13 +147,15 @@ class Driver {
 			}
 			if (o.opt && Escape.on) {
 				var es = new Escape(mf);
+				var te = haxe.Timer.stamp();
 				es.run();
-				if (es.removed + es.folds > 0) {
-					lock.acquire();
-					escRemoved += es.removed;
-					escFolds += es.folds;
-					lock.release();
-				}
+				te = haxe.Timer.stamp() - te;
+				lock.acquire();
+				escRemoved += es.removed;
+				escFolds += es.folds;
+				escTime += te;
+				if (o.stats && te > 0.005) escSlow.push({name: name + " (" + mf.vals.length + " values)", t: te});
+				lock.release();
 			}
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
@@ -228,7 +232,10 @@ class Driver {
 		Sys.println('hxmc: ${prep.p.funcs.length} functions');
 		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (cpu: mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
-		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded');
+		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded (cpu ${ms(escTime)})');
+		escSlow.sort((a, b) -> a.t < b.t ? 1 : -1);
+		for (x in escSlow.slice(0, 8))
+			Sys.println('  escape ${ms(x.t)}\t${x.name}');
 		slow.sort((a, b) -> a.t < b.t ? 1 : -1);
 		for (x in slow.slice(0, 5))
 			Sys.println('  ${ms(x.t)}\t${x.name}');
