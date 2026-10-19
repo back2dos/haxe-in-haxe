@@ -109,10 +109,67 @@ class StringHelper {
 
 	/* UTF8 */
 
-	// port: returns (u8, ccount). Haxe strings are always valid Unicode, so the
-	// Malformed_code branch (ISO to utf8) cannot occur.
+	// port: whether the host's strings index code points: a character past U+FFFF
+	// is one character, and the strings are UTF-8 bytes underneath, which may be
+	// malformed (Bytes.getString copies them), as OCaml's (Eval, hxmc with -D
+	// hxmc.strings=utf8). Else (utf16) they index UTF-16 code units: such a
+	// character is a surrogate pair, and the strings are always valid Unicode
+	// but for lone surrogates. A constant: the other host's code is dropped.
+	public static inline final codePointHost:Bool = #if utf16 false #else true #end;
+
+	// port: extlib's UTF8.validate, on the UTF-8 bytes of `s`.
+	public static function validUtf8(s:String):Bool {
+		var b = haxe.io.Bytes.ofString(s);
+		var len = b.length;
+		function trail(c:Int, i:Int, a:Int):Int {
+			while (c > 0) {
+				if (i >= len) return -1;
+				var n = b.get(i);
+				if (n < 0x80 || n >= 0xc0) return -1;
+				a = (a << 6) | (n - 0x80);
+				c--;
+				i++;
+			}
+			return a;
+		}
+		var i = 0;
+		while (i < len) {
+			var n = b.get(i);
+			if (n < 0x80) i += 1 else if (n < 0xc2) return false else if (n <= 0xdf) {
+				if (trail(1, i + 1, n - 0xc0) < 0x80) return false;
+				i += 2;
+			} else if (n <= 0xef) {
+				if (trail(2, i + 1, n - 0xe0) < 0x800) return false;
+				i += 3;
+			} else if (n <= 0xf7) {
+				if (trail(3, i + 1, n - 0xf0) < 0x10000) return false;
+				i += 4;
+			} else if (n <= 0xfb) {
+				if (trail(4, i + 1, n - 0xf8) < 0x200000) return false;
+				i += 5;
+			} else if (n <= 0xfd) {
+				var t = trail(5, i + 1, n - 0xfc);
+				if (t < 0 || (t >>> 16) < 0x400) return false;
+				i += 6;
+			} else
+				return false;
+		}
+		return true;
+	}
+
+	// port: to_utf8's Malformed_code branch: the bytes of `s` as ISO-8859-1 characters.
+	public static function isoToUtf8(s:String):String {
+		var b = haxe.io.Bytes.ofString(s);
+		var buf = new StringBuf();
+		for (i in 0...b.length) buf.addChar(b.get(i));
+		return buf.toString();
+	}
+
+	// port: returns (u8, ccount). On UTF-16 hosts the strings are always valid
+	// Unicode, so the Malformed_code branch (ISO to utf8) cannot occur; on code
+	// point hosts it can (codePointHost).
 	public static function toUtf8(str:String, p:core.Globals.Pos):{value:String, utf16Length:Int} {
-		var u8 = str;
+		var u8 = codePointHost && !validUtf8(str) ? isoToUtf8(str) : str;
 		var ccount = 0;
 		for (c in new haxe.iterators.StringIteratorUnicode(u8)) {
 			if ((c >= 0xD800 && c <= 0xDFFF) || c >= 0x110000) throw new Failure("Invalid unicode char");

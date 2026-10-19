@@ -1189,7 +1189,7 @@ class StdEReg {
 	public static final matchedPos = EvalEncode.vifun0(vthis -> {
 		var self = thisValue(vthis);
 		// port: upstream converts byte offsets to character offsets; here native offsets to code points
-		function charOffset(s:String, i:Int):Int return EvalString.codePointLength(s.substring(0, i));
+		function charOffset(s:String, i:Int):Int return core.StringHelper.codePointHost ? i : EvalString.codePointLength(s.substring(0, i));
 		return maybeRun(self, 0, (first, last, _) -> {
 			var first = charOffset(self.rString, first);
 			var last = charOffset(self.rString, last);

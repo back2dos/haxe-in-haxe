@@ -24,7 +24,9 @@ import macros.eval.EvalValue;
 // port: upstream strings are UTF-8 with character (code point) indices and cached
 // byte offsets. Here a string is native; "byte offsets" are native string
 // indices, and character indices are code points. Strings without surrogate
-// pairs (`sbmp`) need no offset computation.
+// pairs (`sbmp`) need no offset computation. On a code point host
+// (core.StringHelper.codePointHost: Eval's own semantics, the host caching the
+// offsets) every string is such a string: native lengths are code points.
 class EvalString {
 	public static inline function vstring(s:Vstring):Value return VString(s);
 
@@ -37,6 +39,7 @@ class EvalString {
 	public static final vEmptyString:Value = VString(emptyString);
 
 	public static function codePointLength(s:String):Int {
+		if (core.StringHelper.codePointHost) return s.length;
 		var n = s.length;
 		for (i in 0...s.length) {
 			var c = StringTools.fastCodeAt(s, i);
@@ -122,7 +125,7 @@ class EvalString {
 		return u.toString();
 	}
 
-	public static function fromCharCode(i:Int):Vstring return new Vstring(stringOfCharCode(i), 1, i < 0x10000);
+	public static function fromCharCode(i:Int):Vstring return new Vstring(stringOfCharCode(i), 1, core.StringHelper.codePointHost || i < 0x10000);
 
 	// port: the returned search function yields the character index and the start
 	// and end native indices instead of upstream's tuple.
@@ -137,6 +140,17 @@ class EvalString {
 			if (b < 0 || b + blSub > blThis) return false;
 			for (k in 0...blSub) if (StringTools.fastCodeAt(sThis, b + k) != StringTools.fastCodeAt(sSub, k)) return false;
 			return true;
+		}
+		// port: a code point host (core.StringHelper.codePointHost) searches its
+		// strings itself (native indices are character indices there): the
+		// first hit from bIndex on, the last from bIndex down
+		if (core.StringHelper.codePointHost && blSub > 0) {
+			return function(cIndex, bIndex) {
+				if (cIndex > clThis - clSub || (reverse && bIndex < 0)) throw core.ds.NotFound.raise();
+				var b = reverse ? sThis.lastIndexOf(sSub, bIndex) : sThis.indexOf(sSub, bIndex < 0 ? 0 : bIndex);
+				if (b < 0) throw core.ds.NotFound.raise();
+				return {c: cIndex + (b - bIndex), b: b, e: b + blSub};
+			}
 		}
 		if (!reverse) {
 			return function(cIndex, bIndex) {
@@ -195,8 +209,10 @@ class EvalString {
 		return new Vstring(self.sstring.substring(b1, b2), cLength, self.sbmp);
 	}
 
-	// port: OCaml's String.compare on the UTF-8 encodings: code point order.
+	// port: OCaml's String.compare on the UTF-8 encodings: code point order (the
+	// order of a code point host's strings).
 	public static function compareCodePoints(a:String, b:String):Int {
+		if (core.StringHelper.codePointHost) return a < b ? -1 : a > b ? 1 : 0;
 		var n = a.length < b.length ? a.length : b.length;
 		for (i in 0...n) {
 			var x = StringTools.fastCodeAt(a, i),

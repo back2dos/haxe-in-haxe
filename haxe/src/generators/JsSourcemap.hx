@@ -103,7 +103,9 @@ class JsSourcemap {
 		return smap == null ? noop : addMappingPos(smap, e.epos);
 	}
 
-	// port: OCaml strings are UTF-8 bytes, so String.length counts bytes; the host strings are UTF-16.
+	// port: OCaml strings are UTF-8 bytes, so String.length counts bytes; the host strings are UTF-16
+	// (a character past U+FFFF a surrogate pair), or code points on a code point host
+	// (core.StringHelper.codePointHost: such a character is one, of 4 bytes).
 	public static function utf8Length(s:String, from:Int, to:Int):Int {
 		var n = 0, i = from;
 		while (i < to) {
@@ -116,7 +118,7 @@ class JsSourcemap {
 					i++;
 					n += 4;
 				} else n += 3;
-			} else n += 3;
+			} else n += core.StringHelper.codePointHost && c >= 0x10000 ? 4 : 3;
 		}
 		return n;
 	}

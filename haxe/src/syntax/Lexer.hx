@@ -452,20 +452,22 @@ class Lexer {
 	var idents:Map<String, String>;
 
 	// port: UTF-16 indices of the surrogate pairs of `source` (null without any): sedlex
-	// positions count code points, so a pair is one position (see `cp`).
+	// positions count code points, so a pair is one position (see `cp`). A code
+	// point host's strings have none (core.StringHelper.codePointHost).
 	var pairs:Null<Array<Int>>;
 
 	public function new(source:String, ?file = "?") {
 		this.source = source;
 		this.file = file;
 		index = 0;
-		for (i in 0...source.length) {
-			var c = StringTools.fastCodeAt(source, i);
-			if (c >= 0xD800 && c < 0xDC00) {
-				if (pairs == null) pairs = [];
-				pairs.push(i);
+		if (!core.StringHelper.codePointHost)
+			for (i in 0...source.length) {
+				var c = StringTools.fastCodeAt(source, i);
+				if (c >= 0xD800 && c < 0xDC00) {
+					if (pairs == null) pairs = [];
+					pairs.push(i);
+				}
 			}
-		}
 		idents = new Map();
 	}
 

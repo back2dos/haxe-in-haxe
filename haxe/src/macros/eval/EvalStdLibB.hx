@@ -2228,6 +2228,9 @@ class StdUtf8 {
 
 	public static final validate = EvalEncode.vfun1(s -> {
 		var s = EvalDecode.decodeString(s);
+		// port: on a code point host the native string holds the UTF-8 bytes
+		// (core.StringHelper.codePointHost)
+		if (core.StringHelper.codePointHost) return core.StringHelper.validUtf8(s).vbool();
 		// port: native strings only fail to be valid with lone surrogates
 		var valid = true;
 		var i = 0;
