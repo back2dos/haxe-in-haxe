@@ -30,10 +30,38 @@ patterns. Its weak points and the ideas that address them:
   approaches a configured cap.
 - Nursery sizing, still open: the port at 32 MB types itself 8% slower
   than at 16 MB (so the single-thread ceiling stays 16 MB) while its
-  parallel HXB phase likes 32 MB; per-thread nurseries (TLABs sized per
-  thread, not a 16th of the shared nursery) were not needed so far. A
-  fixed 16 MB nursery hurt programs whose objects die young (cache misses),
-  which is why it grows only on promotion.
+  parallel phases like more: the ceiling is 16 MB per allocating thread (up
+  to 256 MB) and TLABs at most 64 KB (the tool's cold self-build 11% faster
+  and 21% less peak memory than at a shared 32 MB with 2 MB TLABs). A fixed
+  16 MB nursery hurt programs whose objects die young (cache misses), which
+  is why it grows only on promotion. The tool's front end at 32 MB promotes
+  less (its self-build -5% peak memory, same time): a single-thread ceiling
+  per program, or an aging survivor space (above), would get that.
+
+### Frames and pauses
+
+For UI and graphics programs the collector should know about frames, and
+the items above that bound pauses come forward:
+
+- An idle-time hook: after a frame is presented and before the next is
+  due, the collector runs a minor collection or a slice of major work.
+- Incremental or concurrent marking of the old generation (above), so
+  major pauses stop growing with the heap.
+- The aging survivor space (above), so medium-lived objects stop filling
+  the old generation.
+- Escape analysis ([codegen.md](codegen.md#escape-analysis)), cutting
+  allocation at the source.
+- The longest pause as a CI metric with a budget (say under 4 ms) on the
+  frame benchmarks (the showcase examples,
+  [ui-next.md](ui-next.md#showcase-examples)).
+
+## Background work
+
+- Images decoded and long text shaped off the main thread, results
+  delivered through signals.
+- An isolate-style API: run a function elsewhere and await its result,
+  on threads natively and web workers in the browser; WebAssembly threads
+  ([targets.md](targets.md#webassembly)) come forward if it needs them.
 
 ## Stack maps instead of the shadow stack (tried, reverted)
 

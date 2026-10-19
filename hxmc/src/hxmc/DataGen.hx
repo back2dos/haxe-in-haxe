@@ -502,6 +502,25 @@ class DataGen {
 		}
 	}
 
+	// the empty NativeArrays the program refers to (MirBuild.EMPTY_ARRAY), in
+	// .data as string literals are: MKHDR(1, K_RAW, T_NATIVE_ARRAY), length 0,
+	// the kind
+	public function emptyArrays(objs:Array<Obj>) {
+		var names = new Map<String, Bool>();
+		for (o in objs.concat([obj]))
+			for (s in o.symbols)
+				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MirBuild.EMPTY_ARRAY)) names.set(s.name, true);
+		var list = [for (n in names.keys()) n];
+		list.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+		for (n in list) {
+			data.buf.align(8);
+			obj.define(n, data, data.buf.len, 16, true);
+			data.buf.u64(1 | (Abi.K_RAW << 28), Abi.T_NATIVE_ARRAY);
+			data.buf.u32(0);
+			data.buf.u32(Std.parseInt(n.substr(MirBuild.EMPTY_ARRAY.length)));
+		}
+	}
+
 	// the runtime's machine-code stubs the program refers to (MirBuild.STUB_*)
 	public function stubs(objs:Array<Obj>, emit:Target.Emitter) {
 		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO, MirBuild.STUB_FRAME]) {
@@ -531,6 +550,13 @@ class DataGen {
 		if (abi.wasm) {
 			compile(MirBuild.synthetic(prep, abi, "_start", [], Void, (b, ps) -> {
 				b.call("rt_init", [b.iconst(p.globals.length), b.iconst(0), b.lconst(0, 0)], Void);
+				// the stack of frame slots: the runtime's from here on (wasm/Gc.hx;
+				// set here, in a function without a frame of its own, whose
+				// return would restore the linker's stack pointer)
+				var lo = b.call("rt_cstack_lo", [], I64);
+				var top = b.call("rt_cstack_top", [], I64);
+				b.tlsStore(hxmc.wasm.WasmGen.SP, top);
+				b.tlsStore(hxmc.wasm.WasmGen.STACK_LO, lo);
 				b.call("hx_main_body", [], Void);
 				b.call("rt_main_done", [], Void);
 				b.ret(-1);
