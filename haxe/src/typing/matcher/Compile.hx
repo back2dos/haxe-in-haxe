@@ -22,6 +22,7 @@ import typing.matcher.DecisionTree;
 import typing.matcher.DecisionTree.*;
 import typing.matcher.Case;
 import typing.matcher.Bind;
+import typing.matcher.Subject;
 import typing.matcher.MatcherGlobals.*;
 import typing.matcher.MatcherGlobals;
 import core.TUnification.typeIseq;
@@ -70,8 +71,9 @@ class Compile {
 
 	static function fail(m:MatcherContext, p:Pos):DecisionTreeData return hashcons(m, Fail, p);
 
-	static function switchTree(m:MatcherContext, e:TExpr, cases:Array<DecisionSwitchCase>,
-			def:DecisionTreeData):DecisionTreeData return hashcons(m, Switch(e, cases, def), e.epos);
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the subject is a Subject.t.
+	static function switchTree(m:MatcherContext, subject:SubjectData, cases:Array<DecisionSwitchCase>,
+			def:DecisionTreeData):DecisionTreeData return hashcons(m, Switch(subject, cases, def), subject.sExpr.epos);
 
 	static function bind(m:MatcherContext, bl:Array<Bind>, dt:DecisionTreeData):DecisionTreeData return hashcons(m, Bind(bl, dt), dt.dtPos);
 
@@ -81,7 +83,8 @@ class Compile {
 	static function guardNull(m:MatcherContext, e:TExpr, a:DecisionTreeData,
 			b:DecisionTreeData):DecisionTreeData return hashcons(m, GuardNull(e, a, b), punion(a.dtPos, b.dtPos));
 
-	static function getSubSubjects(m:MatcherContext, e:TExpr, con:ConstructorData,
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the subject `s`, whose index access reads the elements.
+	static function getSubSubjects(m:MatcherContext, s:Subject, e:TExpr, con:ConstructorData,
 			positions:Array<Pos>):Array<{name:String, e:TExpr}> return switch con.kind {
 			case ConEnum(en, ef):
 				var tl = Monomorph.spawnConstrainedMonos(function(t) return t, en.eParams);
@@ -104,10 +107,11 @@ class Compile {
 			case ConFields(sl): sl.map(function(s) return {name: s, e: ExprToPattern.typeFieldAccess(m.ctx, e, s)});
 			case ConArray(0): [];
 			case ConArray(i):
-				var aa = ExprToPattern.getArrayAccess(m.ctx, e.etype, e.epos);
-				// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: TyperBase.makeArrayGet.
-				function get(ei:TExpr):TExpr return aa != null ? TyperBase.makeArrayGet(m.ctx, aa, e, ei,
-					e.epos) : Calls.accGet(m.ctx, Calls.arrayAccess(m.ctx, e, ei, MGet, e.epos));
+				// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: TyperBase.makeArrayGet, the subject's index access.
+				var get:TExpr->TExpr = switch s.getIndexAccess(m.ctx) {
+					case IndexAccess(aa): function(ei) return TyperBase.makeArrayGet(m.ctx, aa, e, ei, e.epos);
+					case IndexArray: function(ei) return Calls.accGet(m.ctx, Calls.arrayAccess(m.ctx, e, ei, MGet, e.epos));
+				};
 				[
 					for (i in 0...i) {
 						var ei = Texpr.Builder.makeInt(m.ctx.com.basic, i, e.epos);
@@ -336,7 +340,8 @@ class Compile {
 		if (m.matchDebug)
 			Sys.println('compile_switch:\n\tsubject: ${sExprPretty(subject)}\n\ttsubjects: ${sSubjects(subjects)}\n\tcases: ${sCases(cases)}');
 		var switchCases = sigma.map(function(s) {
-			var sub = getSubSubjects(m, subject, s.con, s.positions);
+			// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the subject object too.
+			var sub = getSubSubjects(m, first, subject, s.con, s.positions);
 			var bs = [], ss = [];
 			for (sub in sub) {
 				var v = addLocal(m.ctx, VGenerated, genLocalPrefix + sub.name, sub.e.etype, sub.e.epos);
@@ -354,14 +359,17 @@ class Compile {
 		var subjectNull = subject,
 			subjectSwitch = subject,
 			subjectDefault = subject;
-		if (nullRows.length > 0 || isExplicitNullOrAbstractOverThat(subject.etype)) subjectNull = scoped.expr;
+		// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: Subject.isNullable here and below.
+		if (nullRows.length > 0 || first.isNullable()) subjectNull = scoped.expr;
 		else if (switchCases.length == 0) subjectDefault = scoped.expr;
 		else subjectSwitch = scoped.expr;
 		var defaults = defaultRows(subjectDefault, cases);
 		var switchDefault = compileRows(m, subjects, defaults);
-		var dt = switchCases.length == 0 ? switchDefault : switchTree(m, subjectSwitch, switchCases, switchDefault);
+		// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the node's Subject.t.
+		var dt = switchCases.length == 0 ? switchDefault : switchTree(m,
+			Subject.make(m.ctx, first, subjectSwitch, [for (sc in switchCases) sc.scCon]), switchCases, switchDefault);
 		if (nullRows.length == 0) {
-			if (isExplicitNullOrAbstractOverThat(subject.etype)) dt = guardNull(m, subjectNull, switchDefault, dt);
+			if (first.isNullable()) dt = guardNull(m, subjectNull, switchDefault, dt);
 		} else dt = guardNull(m, subjectNull, compileRows(m, subjects, nullRows.concat(defaults)), dt);
 		scoped.reset();
 		return dt;
@@ -481,7 +489,8 @@ class Compile {
 		}
 		if (cases.length == 0 && subjects.length > 0) {
 			var dt = fail(m, subjects[0].getPos());
-			return switchTree(m, subjects[0].getExpr(), [], dt);
+			// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the node's Subject.t.
+			return switchTree(m, Subject.make(ctx, subjects[0], subjects[0].getExpr(), []), [], dt);
 		}
 		var dt = compileRows(m, subjects.ofArray(), cases);
 		Useless.check(ctx, cases);

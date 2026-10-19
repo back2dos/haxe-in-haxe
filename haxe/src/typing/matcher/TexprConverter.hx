@@ -19,16 +19,13 @@ import core.WithType;
 import context.Typecore.*;
 import context.Typecore;
 import typing.matcher.DecisionTree;
+import typing.matcher.Subject;
 import typing.matcher.Constructor;
 import typing.matcher.Case;
 import typing.matcher.Bind;
 import typing.matcher.MatcherGlobals.*;
 
-enum MatchKind {
-	SKValue;
-	SKEnum;
-	SKLength;
-}
+// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: match_kind moved to Subject.
 
 enum DtRecursion {
 	Toplevel;
@@ -65,11 +62,7 @@ class TexprConverter {
 		return loop(true, s, e);
 	}
 
-	public static function sMatchKind(k:MatchKind):String return switch k {
-		case SKValue: "value";
-		case SKEnum: "enum";
-		case SKLength: "length";
-	};
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: s_match_kind moved to Subject.
 
 	static function unifyConstructor(ctx:Typer, params:Array<T>, t:T,
 			con:ConstructorData):Null<{con:ConstructorData, params:Array<T>}> return switch con.kind {
@@ -97,103 +90,24 @@ class TexprConverter {
 			case _: {con: con, params: params};
 		};
 
-	static function extractCtor(e:TExpr):Null<ConstructorKind> return switch e.eexpr {
-		case TConst(ct): ConConst(ct);
-		case TField(_, FEnum(en, ef)): ConEnum(en, ef);
-		case TCast(e1, null): extractCtor(e1);
-		case _: null;
-	};
-
-	static function allCtors(ctx:Typer, e:TExpr, cases:Array<DecisionSwitchCase>):{
-		e:TExpr,
-		unmatched:Array<ConstructorData>,
-		kind:MatchKind,
-		finiteness:TypeFiniteness
-	} {
-		var t = e.etype;
-		switch follow(t) {
-			case TDynamic(_) | TMono(_):
-				if (cases.length > 0) t = switch cases[0].scCon.kind {
-					case ConEnum(en, _): TEnum(en, extractParamTypes(en.eParams));
-					case ConArray(_): ctx.t.tarray(tDynamic);
-					case ConConst(ct): switch ct {
-							case TString(_): ctx.t.tstring;
-							case TInt(_): ctx.t.tint;
-							case TFloat(_): ctx.t.tfloat;
-							case TBool(_): ctx.t.tbool;
-							case _: tDynamic;
-						}
-					case ConStatic({clKind: KAbstractImpl(a)}, _): TAbstract(a, extractParamTypes(a.aParams));
-					case ConTypeExpr(mt): ExprToPattern.getGeneralModuleType(ctx, mt, e.epos);
-					case ConFields(_) | ConStatic(_, _):
-						// error "Could not determine switch kind, make sure the type is known" e.epos;
-						tDynamic;
-				};
-			case _:
-		}
-		var all:Array<ConstructorData> = [];
-		function add(kind:ConstructorKind):Void {
-			var con = ({kind: kind, pos: nullPos} : typing.matcher.Constructor.ConstructorData);
-			for (i in 0...all.length) if (Constructor.equal(all[i], con)) {
-				all[i] = con;
-				return;
-			}
-			all.push(con);
-		}
-		function loop(deep:Bool, t:T):{kind:MatchKind, finiteness:TypeFiniteness}
-			return switch follow(t) {
-				case TAbstract({aPath: {pack: [], name: "Bool"}}, _):
-					if (!deep) {
-						add(ConConst(TBool(true)));
-						add(ConConst(TBool(false)));
-					}
-					{kind: SKValue, finiteness: RunTimeFinite};
-				case TAbstract(a = {aImpl: c}, pl) if (c != null && a.aEnum):
-					if (!deep) for (cf in c.clOrderedStatics) {
-						follow(cf.cfType);
-						if (hasClassFieldFlag(cf, CfImpl) && hasClassFieldFlag(cf, CfEnum)) {
-							var ctor = cf.cfExpr == null ? null : extractCtor(cf.cfExpr);
-							switch ctor {
-								case ConConst(TNull):
-								case null: add(ConStatic(c, cf));
-								case ctor: add(ctor);
-							}
-						}
-					}
-					var real = loop(true, core.Abstract.getUnderlyingType(a, pl));
-					{kind: real.kind, finiteness: CompileTimeFinite};
-				case TAbstract(a, pl) if (!core.Meta.has(MetaTag.CoreType, a.aMeta)): loop(deep, core.Abstract.getUnderlyingType(a, pl));
-				case TInst({clPath: {pack: [], name: "String"}},
-					_) | TInst({clKind: KTypeParameter(_)}, _): {kind: SKValue, finiteness: Infinite};
-				case TInst({clPath: {pack: [], name: "Array"}}, _): {kind: SKLength, finiteness: Infinite};
-				// port: `all` is still empty here and the constructors are distinct, so they are pushed without add's linear search.
-				case TEnum(en, _):
-					if (!deep) {
-						var names = [for (n in en.eConstrs.keys()) n];
-						names.sort(Reflect.compare);
-						for (n in names) all.push(({
-							kind: ConEnum(en, en.eConstrs.get(n)),
-							pos: nullPos
-						} : typing.matcher.Constructor.ConstructorData));
-					}
-					{kind: SKEnum, finiteness: RunTimeFinite};
-				case _: {kind: SKValue, finiteness: Infinite};
-			};
-		var classified = loop(false, t);
-		// Array patterns on values which can be accessed by index (#8012).
-		if (cases.length > 0 && cases[0].scCon.kind.match(ConArray(_)) && ExprToPattern.getArrayAccess(ctx, t, e.epos) != null) {
-			all = [];
-			classified = {kind: SKLength, finiteness: Infinite};
-		}
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: extract_ctor and all_ctors's type analysis moved to Subject
+	// ... (its comment follows).
+	// The constructors of the subject's type which the cases leave unmatched.
+	static function unmatchedCtors(subject:SubjectData, cases:Array<DecisionSwitchCase>):Array<ConstructorData> {
+		// port: Subject.make adds the constructors distinct already, as the ConTable makes them here.
+		var all = subject.sConstructors.copy();
+		function compatibleKind(con:ConstructorData):Bool return switch [con.kind, subject.sKind] {
+			case [ConEnum(_, _), SKEnum]: true;
+			case [ConEnum(_, _), _]: false;
+			case [ConArray(_), SKLength(_)]: true;
+			case [ConArray(_), _]: false;
+			case [_, SKValue]: true;
+			case _: false;
+		};
 		// port: unguarded enum constructors are removed in one pass at the end (by field identity) rather than one filter per case.
 		var removedEnum:Null<haxe.ds.ObjectMap<core.TType.TEnumField, Bool>> = null;
 		for (sc in cases) {
-			var compatible = switch sc.scCon.kind {
-				case ConEnum(_, _): classified.kind == SKEnum;
-				case ConArray(_): classified.kind == SKLength;
-				case _: classified.kind == SKValue;
-			};
-			if (!compatible) Error.raiseTypingError("Incompatible pattern", sc.scDt.dtPos);
+			if (!compatibleKind(sc.scCon)) Error.raiseTypingError("Incompatible pattern", sc.scDt.dtPos);
 			if (sc.scUnguarded) switch sc.scCon.kind {
 				case ConEnum(_, ef):
 					if (removedEnum == null) removedEnum = new haxe.ds.ObjectMap();
@@ -209,12 +123,7 @@ class TexprConverter {
 				case _: true;
 			});
 		}
-		return {
-			e: e,
-			unmatched: all,
-			kind: classified.kind,
-			finiteness: classified.finiteness
-		};
+		return all;
 	}
 
 	static function reportNotExhaustive(lookup:Map<Int, TExpr>, e:TExpr, unmatched:Array<{con:ConstructorData, params:Array<T>}>):Dynamic {
@@ -225,7 +134,7 @@ class TexprConverter {
 						case ConConst(_) | ConEnum(_, _):
 							var found = null;
 							for (cf in c.clOrderedStatics) if (cf.cfExpr != null) {
-								var ctor = extractCtor(cf.cfExpr);
+								var ctor = Subject.extractCtor(cf.cfExpr);
 								if (ctor != null && Constructor.equal({kind: ctor, pos: nullPos}, con)) {
 									found = cf;
 									break;
@@ -253,22 +162,26 @@ class TexprConverter {
 				case Leaf(c): c.caseExpr == null ? mk(TBlock([]), ctx.t.tvoid, c.casePos) : c.caseExpr;
 				case Switch(subject, [sc = {scCon: {kind: ConFields(_)}}], _): // TODO: Can we improve this by making it more general?
 					var e = loop(rec, params, sc.scDt);
-					e == null ? null : core.TFunctions.concat(subject, e);
-				case Switch(subject, cases, def):
+					// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the subject's expression.
+					e == null ? null : core.TFunctions.concat(subject.sExpr, e);
+				case Switch(s, cases, def):
 					var nextRec = rec == Toplevel ? AfterSwitch : Deep;
 					var top = rec == Toplevel;
-					var ctors = allCtors(ctx, subject, cases);
-					subject = ctors.e;
+					// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the subject's expression, its unmatched
+					// ... constructors and finiteness.
+					var subject = s.sExpr;
+					var unmatchedCons = unmatchedCtors(s, cases);
+					var finiteness = s.sFiniteness;
 					var unmatched = [];
-					for (con in ctors.unmatched) {
+					for (con in unmatchedCons) {
 						var u = unifyConstructor(ctx, params, subject.etype, con);
 						if (u != null) unmatched.push(u);
 					}
 					inline function descend(params:Array<T>, dt:DecisionTreeData):Null<TExpr> {
 						var e = loop(nextRec, params, dt);
 						if (e != null) return e;
-						if (withType == NoValue && ctors.finiteness == Infinite && top) return null;
-						if (ctors.finiteness == CompileTimeFinite && unmatched.length == 0) return null;
+						if (withType == NoValue && finiteness == Infinite && top) return null;
+						if (finiteness == CompileTimeFinite && unmatched.length == 0) return null;
 						if (Common.ignoreError(com)) return null;
 						return reportNotExhaustive(lookup, subject, unmatched);
 					}
@@ -290,7 +203,7 @@ class TexprConverter {
 					}
 					groups.sort(function(a,
 							b) return a.cons.length > 0 && b.cons.length > 0 ? Constructor.compare(a.cons[0], b.cons[0]) : -1);
-					var edef = unmatched.length == 0 && ctors.finiteness == RunTimeFinite ? null : descend(params, def);
+					var edef = unmatched.length == 0 && finiteness == RunTimeFinite ? null : descend(params, def);
 					var ecases = [];
 					for (g in groups) {
 						var e = descend(g.params, g.dt);
@@ -302,16 +215,15 @@ class TexprConverter {
 							} : core.TType.TSwitchCase));
 						}
 					}
-					var nullable = isExplicitNullOrAbstractOverThat(subject.etype);
-					subject = switch ctors.kind {
+					// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: nullability and kind from the subject.
+					var nullable = s.sNullable;
+					subject = switch s.sKind {
 						case SKValue: subject;
 						case SKEnum: mk(TEnumIndex(subject), com.basic.tint, subject.epos);
-						case SKLength:
-							// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: TyperBase.makeArrayLength.
-							var aa = ExprToPattern.getArrayAccess(ctx, subject.etype, subject.epos);
-							aa != null ? TyperBase.makeArrayLength(ctx, aa, subject, subject.epos) : ExprToPattern.typeFieldAccess(ctx, subject, "length");
+						case SKLength(IndexArray): ExprToPattern.typeFieldAccess(ctx, subject, "length");
+						case SKLength(IndexAccess(aa)): TyperBase.makeArrayLength(ctx, aa, subject, subject.epos);
 					};
-					if (ecases.length == 1 && edef == null && ctors.finiteness == RunTimeFinite && !nullable)
+					if (ecases.length == 1 && edef == null && finiteness == RunTimeFinite && !nullable)
 						core.ds.Record.withFields(ecases[0].caseExpr,
 						{
 							etype: tSwitch
@@ -331,7 +243,7 @@ class TexprConverter {
 							case _: false;
 					})) mk(TIf(subject, ecases[1].caseExpr, ecases[0].caseExpr), tSwitch,
 							dt.dtPos); else mk(TSwitch(Texpr.mkSwitch(subject, ecases,
-						edef, edef != null || ctors.finiteness == RunTimeFinite || ctors.finiteness == CompileTimeFinite)),
+						edef, edef != null || finiteness == RunTimeFinite || finiteness == CompileTimeFinite)),
 						tSwitch, dt.dtPos);
 				case Guard(cond, a, b):
 					// Normal guards are considered toplevel if we're in the toplevel switch.

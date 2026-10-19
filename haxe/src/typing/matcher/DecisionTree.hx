@@ -7,16 +7,14 @@ import core.TPrinting;
 import typing.matcher.Bind;
 import typing.matcher.Case;
 import typing.matcher.Constructor;
+import typing.matcher.Subject;
 
-enum TypeFiniteness {
-	Infinite; // type has inifite constructors (e.g. Int, String)
-	CompileTimeFinite; // type is considered finite only at compile-time but has inifite possible run-time values (enum abstracts)
-	RunTimeFinite; // type is truly finite (Bool, enums)
-}
+// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: type_finiteness moved to Subject.
 
 enum DecisionTreeKind {
 	Leaf(caseData:CaseData);
-	Switch(subject:TExpr, cases:Array<DecisionSwitchCase>, defaultTree:DecisionTreeData);
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the subject is a Subject.t (SubjectData).
+	Switch(subject:SubjectData, cases:Array<DecisionSwitchCase>, defaultTree:DecisionTreeData);
 	Bind(bindings:Array<Bind>, tree:DecisionTreeData);
 	Guard(expr:TExpr, thenTree:DecisionTreeData, elseTree:DecisionTreeData);
 	GuardNull(expr:TExpr, thenTree:DecisionTreeData, elseTree:DecisionTreeData);
@@ -99,8 +97,9 @@ class DecisionTree {
 			switch dt.dtT {
 				case Leaf(caseData):
 					if (caseData.caseExpr != null) printExprNoblock(tabs, caseData.caseExpr);
-				case Switch(e, cases, defaultTree):
-					addLine(tabs, "switch (" + sExpr(tabs, e) + ")");
+				case Switch(subject, cases, defaultTree):
+					// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: the kind.
+					addLine(tabs, "switch " + Subject.sMatchKind(subject.sKind) + " (" + sExpr(tabs, subject.sExpr) + ")");
 					for (sc in cases) {
 						addLine(tabs + tabString, "case ");
 						buf.add(Constructor.toString(sc.scCon));
@@ -150,8 +149,10 @@ class DecisionTree {
 
 	public static function equal(dt1:DecisionTreeKind, dt2:DecisionTreeKind):Bool return switch [dt1, dt2] {
 		case [Leaf(c1), Leaf(c2)]: c1 == c2;
-		case [Switch(s1, c1, d1), Switch(s2, c2, d2)]: Texpr.equal(s1,
-				s2) && all2(function(a:DecisionSwitchCase,
+		case [Switch(s1, c1, d1), Switch(s2, c2, d2)]:
+			// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream (its comment follows).
+			// What the switch makes of the subject follows from its expression and the cases.
+			Texpr.equal(s1.sExpr, s2.sExpr) && all2(function(a:DecisionSwitchCase,
 					b:DecisionSwitchCase) return Constructor.equal(a.scCon, b.scCon) && a.scUnguarded == b.scUnguarded
 					&& equalDt(a.scDt, b.scDt),
 				c1, c2) && equalDt(d1, d2);
@@ -164,5 +165,11 @@ class DecisionTree {
 		case _: false;
 	};
 
-	public static function hash(dt:DecisionTreeKind):Int return core.ds.Hashtbl.hash(dt);
+	// port: HaxeFoundation/haxe#13071, ahead of the pinned upstream: a Switch hashes its subject's expression, cases and default.
+	public static function hash(dt:DecisionTreeKind):Int return switch dt {
+		case Switch(subject, cases, d):
+			core.ds.Hashtbl.hash(([subject.sExpr, cases, d] : Array<Dynamic>));
+		case _:
+			core.ds.Hashtbl.hash(dt);
+	};
 }
