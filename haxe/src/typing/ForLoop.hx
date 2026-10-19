@@ -49,12 +49,6 @@ enum IteratorKind {
 }
 
 typedef IteratorData = {var itKind:IteratorKind; var itType:T; var itExpr:TExpr;}
-
-// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream (its comment follows).
-// How values of a type can be accessed by index: the element type, how to read the element at an index and how
-// to read the length. Array patterns use this as well (#8012).
-typedef ArrayAccessData = {var aaType:T; var aaGet:TExpr->TExpr->T->Pos->TExpr; var aaLength:TExpr->Pos->TExpr;}
-
 typedef IterationIdent = {var name:String; var pos:Pos; var display:Null<DisplayKind>;}
 typedef ForLoopDisplay = (Typer, Expr, DisplayKind, AccessMode, WithTypeValue) -> TExpr;
 
@@ -79,20 +73,7 @@ class IterationKind {
 		return cfg;
 	}
 
-	public static function getNextArrayElement(arr:TExpr, index:TExpr, t:T, p:Pos):TExpr return mk(TArray(arr, index), t, p);
-
-	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: mk_field and get_array_length moved out of to_texpr.
-	static function mkField(e:TExpr, n:String):TExprDef {
-		var fa;
-		try {
-			fa = quickField(e.etype, n);
-		} catch (ex:NotFound) {
-			return Error.raiseMsg('Could not find field $n on ${core.TPrinting.sTypeKind(e.etype)}', e.epos);
-		}
-		return TField(e, fa);
-	}
-
-	static function getArrayLength(ctx:Typer, arr:TExpr, p:Pos):TExpr return mk(mkField(arr, "length"), ctx.com.basic.tint, p);
+	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: get_next_array_element moved to TyperBase.
 
 	static function isUnificationError(e:Dynamic):Bool return switch e {
 		case(core.ds.ExceptionTools.typing(_) => Some({errMessage: Unify(_)})): true;
@@ -194,48 +175,9 @@ class IterationKind {
 		return cannotIterateOn(ctx.com, e);
 	}
 
-	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: of_texpr_by_array_access's checks, on a type, returning
-	// ... how to access its values by index.
-	public static function getArrayAccess(ctx:Typer, t:T, p:Pos):ArrayAccessData return switch follow(t) {
-		case TInst(c = {clArrayAccess: pt}, pl) if (pt != null):
-			var length = c.clFields.get("length");
-			if (length == null || c.clFields.exists("iterator")) throw NotFound.raise();
-			switch follow(length.cfType) {
-				case TAbstract({aPath: {pack: [], name: "Int"}}, []):
-				case _: throw NotFound.raise();
-			}
-			{aaType: applyParams(c.clParams, pl, pt), aaGet: getNextArrayElement, aaLength: getArrayLength.bind(ctx)};
-		case TAbstract(a = {aImpl: c}, tl) if (c != null):
-			var length = core.ds.PMap.find("get_length", c.clStatics);
-			function getLength(e:TExpr,
-					p:Pos):TExpr return CallUnification.makeStaticCallBetter(ctx, c, length, tl, [e], ctx.com.basic.tint, p);
-			switch follow(length.cfType) {
-				case TFun(s): switch follow(s.ret) {
-						case TAbstract({aPath: {pack: [], name: "Int"}}, _):
-						case _: throw NotFound.raise();
-					}
-				case _: throw NotFound.raise();
-			}
-			try {
-				// first try: do we have an @:arrayAccess getter field?
-				var access = context.AbstractCast.findArrayReadAccessRaise(ctx, a, tl, mk(TConst(TNull), ctx.t.tint, p), p);
-				function getNext(base:TExpr, index:TExpr, t:T,
-						p:Pos):TExpr return CallUnification.makeStaticCallBetter(ctx, c, access.field, tl, [base, index], access.ret, p);
-				{aaType: access.ret, aaGet: getNext, aaLength: getLength};
-			} catch (ex:NotFound) {
-				// second try: do we have @:arrayAccess on the abstract itself?
-				if (!core.Meta.has(MetaTag.ArrayAccess, a.aMeta)
-					// let's allow this only for core-type abstracts
-					|| !core.Meta.has(MetaTag.CoreType, a.aMeta)
-					// in which case we assume that a singular type parameter is the element type
-					|| tl.length != 1) throw NotFound.raise();
-				{aaType: tl[0], aaGet: getNextArrayElement, aaLength: getLength};
-			}
-		case _: throw NotFound.raise();
-	};
-
+	// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: its checks are TyperBase.getArrayAccess's.
 	static function ofTexprByArrayAccess(ctx:Typer, e:TExpr, p:Pos):IteratorData {
-		var aa = getArrayAccess(ctx, e.etype, p);
+		var aa = TyperBase.getArrayAccess(ctx, e.etype, p);
 		return {itKind: IteratorCustom(aa.aaGet, aa.aaLength), itExpr: e, itType: aa.aaType};
 	}
 
@@ -349,6 +291,16 @@ class IterationKind {
 	public static function toTexpr(ctx:Typer, v:TVar, iterator:IteratorData, e2:TExpr, p:Pos):TExpr {
 		var e1 = iterator.itExpr, pt = iterator.itType;
 		var tv = ctx.t.tvoid, ti = ctx.t.tint;
+		function field(e:TExpr, n:String):TExprDef {
+			var fa;
+			try {
+				fa = quickField(e.etype, n);
+			} catch (ex:NotFound) {
+				return Error.raiseMsg('Could not find field $n on ${core.TPrinting.sTypeKind(e.etype)}', e.epos);
+			}
+			return TField(e, fa);
+		}
+		// port: HaxeFoundation/haxe#13070, ahead of the pinned upstream: get_array_length moved to TyperBase.
 		inline function genIntIter(e1:TExpr, pt:T, get:TExpr->TExpr->T->Pos->TExpr, len:TExpr->Pos->TExpr):TExpr {
 			var index = genLocal(ctx, ti, v.vPos);
 			index.vMeta.unshift({meta: MetaTag.ForLoopVariable, exprs: [], pos: nullPos});
@@ -441,14 +393,14 @@ class IterationKind {
 				var tcell = head.cfType;
 				var cell = genLocal(ctx, tcell, p);
 				var ce = mk(TLocal(cell), tcell, p);
-				var initVar = mk(TVar(v, mk(mkField(ce, "elt"), pt, p)), tv, v.vPos);
-				var next = mk(TBinop(OpAssign, ce, mk(mkField(ce, "next"), tcell, p)), tcell, p);
+				var initVar = mk(TVar(v, mk(field(ce, "elt"), pt, p)), tv, v.vPos);
+				var next = mk(TBinop(OpAssign, ce, mk(field(ce, "next"), tcell, p)), tcell, p);
 				var block = switch e2.eexpr {
 					case TBlock(el): mk(TBlock([initVar, next].concat(el)), tv, e2.epos);
 					case _: mk(TBlock([initVar, next, e2]), tv, p);
 				};
 				mk(TBlock([
-					mk(TVar(cell, mk(mkField(e1, "head"), tcell, p)), tv, p),
+					mk(TVar(cell, mk(field(e1, "head"), tcell, p)), tv, p),
 					mk(TWhile(mk(TBinop(OpNotEq, ce, mk(TConst(TNull), tcell, p)), ctx.t.tbool, p), block, NormalWhile), tv, p)
 				]), tv, p);
 			case IteratorHasNextNext(tmp, next, hasNext):

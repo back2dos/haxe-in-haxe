@@ -98,7 +98,7 @@ class ExprToPattern {
 	// can be matched by array patterns if they can be accessed by index like in `for` loops, and their length and elements
 	// are then read the same way (#8012). This returns how to access them, or None for values of the former types and for
 	// values which can't be accessed by index.
-	public static function getArrayAccess(ctx:Typer, t:T, p:Pos):Null<typing.ForLoop.ArrayAccessData> {
+	public static function getArrayAccess(ctx:Typer, t:T, p:Pos):Null<typing.TyperBase.ArrayAccessData> {
 		function isArray(seen:Array<T>, t:T):Bool return switch follow(t) {
 			case TInst({clPath: {pack: [], name: "Array"}}, [_]) | TDynamic(_):
 				true;
@@ -109,7 +109,7 @@ class ExprToPattern {
 				false;
 		};
 		if (isArray([], t)) return null;
-		return try typing.ForLoop.IterationKind.getArrayAccess(ctx, t, p) catch (ex:NotFound) null;
+		return try TyperBase.getArrayAccess(ctx, t, p) catch (ex:NotFound) null;
 	}
 
 	public static function make(pctx:PatternContext, toplevel:Bool, t:T, e:Expr):PatternData {
