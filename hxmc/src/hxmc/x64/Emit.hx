@@ -159,6 +159,7 @@ class Emit implements hxmc.Target.Emitter {
 		// (a move of a register to itself: a zero or sign extension is not)
 		f.threadJumps(i -> (i.op : XOp) == JMP,
 			i -> (i.op : XOp) == MOV && i.d == i.s1 && (isX(i.d) || !i.flag && !(i.size == 4 && i.imm2 == 1)));
+		f.duplicateDispatch(i -> (i.op : XOp) == JMP, i -> (i.op : XOp) == JTABLE, 10);
 		for (b in f.blocks)
 			b.label = a.newLabel();
 		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
@@ -492,8 +493,14 @@ class Emit implements hxmc.Target.Emitter {
 			case JCC:
 				a.jcc(i.cond, i.target.label);
 			case LEATABLE:
-				var l = a.newLabel();
-				tables.push({label: l, entries: i.table});
+				// (a table's copies, LFunc.duplicateDispatch: the same table)
+				var l = -1;
+				for (t in tables)
+					if (t.entries == i.table) l = t.label;
+				if (l < 0) {
+					l = a.newLabel();
+					tables.push({label: l, entries: i.table});
+				}
 				a.leaLabel(i.d, l);
 			case JTABLE:
 				a.movsxd(i.s2, new Mem(i.d, 0, i.s1, 4));
