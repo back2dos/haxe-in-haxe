@@ -161,7 +161,17 @@ pass it: `COMPILER_ARGS`), on Linux, once the old space passes 64 MB, a
 helper thread faults in its pages ahead of the minor collections, which
 would otherwise wait for the kernel to zero each fresh page they copy into
 (`RT_PREFAULT=0`: no helper). It trades CPU time for wall time: the
-HaxeBenchmarks' alloc takes 7.6% less wall time and 20% more CPU time with it. `RT_STATS=1` prints the resizes and what was promoted. A change of the runtime's
+HaxeBenchmarks' alloc takes 7.6% less wall time and 20% more CPU time with it. `RT_STATS=1` prints the resizes and what was promoted.
+
+Strings are UTF-16; they cross the system boundaries (files, processes,
+sockets, the environment, `Bytes.getString` and `ofString`) as UTF-8
+(`Str.decode`, `Str.utf8Into`). A byte that does not begin a well-formed
+sequence decodes to one unit, U+DC80 to U+DCFF for 0x80 to 0xFF (as Python's
+surrogateescape), which encodes back to that byte, so any bytes read and
+written again are the same bytes (the corpus' `Utf8Bytes`; the port keeps
+OCaml's byte strings this way: [porting.md](porting.md)).
+
+A change of the runtime's
 interface or of the IR's conventions needs a tool that knows it: build once
 against the previous runtime first, or bootstrap again.
 
