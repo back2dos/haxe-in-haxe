@@ -171,6 +171,12 @@ class StringHelper {
 		return !validUtf8(s);
 	}
 
+	// port: the string of `bytes`, as OCaml's strings take any bytes: getString,
+	// which on Eval (a code point host) does not check them as toString does
+	// ("Invalid string"); on a UTF-16 host bytes that are not UTF-8 become lone
+	// surrogates (codePointHost).
+	public static inline function ofBytes(bytes:haxe.io.Bytes):String return bytes.getString(0, bytes.length);
+
 	// port: `s` as a UTF-8 decoder (sedlex's) reads its bytes: on a UTF-16 host
 	// bytes that are not UTF-8 are lone surrogates (codePointHost), which their
 	// neighbours can make UTF-8 again (pieces joined): the bytes decoded again.

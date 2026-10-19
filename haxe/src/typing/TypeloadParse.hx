@@ -127,7 +127,7 @@ class TypeloadParse {
 		if (com.fileContents.length == 0
 			&& Common.defined(com, Define.DisplayStdin)
 			&& core.display.DisplayPosition.displayPosition.isInFile(key)) {
-			var s = Sys.stdin().readAll().toString();
+			var s = core.StringHelper.ofBytes(Sys.stdin().readAll());
 			Sys.stdin().close();
 			com.fileContents = [{fileKey: key, content: s}];
 			contents = s;
@@ -141,7 +141,7 @@ class TypeloadParse {
 			catch (_:Dynamic) return raiseTypingError("Could not open " + rfile.file, p);
 			// port: bytes that are not UTF-8 decode to lone surrogates, which the
 			// lexer rejects as upstream's does (syntax.Lexer.MalFormed)
-			contents = bytes.toString();
+			contents = core.StringHelper.ofBytes(bytes);
 		}
 		return parseFileFromString(com, rfile.file, p, contents);
 	}

@@ -941,7 +941,7 @@ class StdResource {
 
 	public static final getString = EvalEncode.vfun1(name -> {
 		var s = resources().findOpt(EvalDecode.decodeString(name));
-		s == null ? VNull : EvalString.createUnknown(s.toString());
+		s == null ? VNull : EvalString.createUnknown(core.StringHelper.ofBytes(s));
 	});
 
 	public static final getBytes = EvalEncode.vfun1(name -> {
@@ -2250,7 +2250,7 @@ class StdNativeString {
 
 	public static final toString = EvalEncode.vfun1(v -> {
 		var s = EvalDecode.decodeNativeString(v);
-		EvalString.createUnknown(s.toString());
+		EvalString.createUnknown(core.StringHelper.ofBytes(s));
 	});
 
 	public static final toBytes = EvalEncode.vfun1(v -> {

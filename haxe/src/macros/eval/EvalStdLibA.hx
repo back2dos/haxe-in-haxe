@@ -497,7 +497,7 @@ class StdBytes {
 		var pos = EvalDecode.decodeInt(pos);
 		var len = EvalDecode.decodeInt(len);
 		var s = try bytesSub(self, pos, len) catch (_:InvalidArgument) outsideBounds();
-		return EvalString.createUnknown(s.toString());
+		return EvalString.createUnknown(core.StringHelper.ofBytes(s));
 	});
 
 	public static final getUInt16 = EvalEncode.vifun1((vthis, pos) -> {
@@ -1483,7 +1483,7 @@ class StdFile {
 	public static final getContent = EvalEncode.vfun1(path -> {
 		var path = EvalDecode.decodeString(path);
 		var b = try sys.io.File.getBytes(path) catch (_:Dynamic) EvalContext.excString("Could not read file " + path);
-		return EvalString.createUnknown(b.toString());
+		return EvalString.createUnknown(core.StringHelper.ofBytes(b));
 	});
 
 	public static final read = EvalEncode.vfun2((path, binary) -> {
