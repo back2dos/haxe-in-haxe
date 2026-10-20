@@ -1028,7 +1028,7 @@ class FuncGen {
 	// inline, the rest through Helpers.naGet and GcNArray.set
 
 	// the most elements of each kind (MirBuild's: the same programs fail)
-	static final NA_LIMITS = [0x0FFFFFFD, 0x1FFFFFFA, 0x0FFFFFFD, 0x0FFFFFFD, 0x7FFFFFE8];
+	static final NA_LIMITS:haxe.ds.Vector<Int> = core.ds.VectorTools.vector(0x0FFFFFFD, 0x1FFFFFFA, 0x0FFFFFFD, 0x0FFFFFFD, 0x7FFFFFE8);
 
 	function narray(name:String, args:haxe.ds.Vector<Ex>) {
 		var p = m.dataType("p");

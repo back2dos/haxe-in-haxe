@@ -911,7 +911,7 @@ class GcModule {
 	}
 
 	// a NativeArray's element kinds by their numbers (FnLower.nativeKind, rt.Types.AK_*)
-	public static final NA_KINDS = ["p", "i", "f", "l", "b"];
+	public static final NA_KINDS:haxe.ds.Vector<String> = core.ds.VectorTools.vector("p", "i", "f", "l", "b");
 
 	public var nwrapType(get, never):Int;
 

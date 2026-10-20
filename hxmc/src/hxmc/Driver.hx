@@ -356,17 +356,19 @@ class Driver {
 		// (the threads only read the program); then, in module order, the
 		// string literals they found are registered and the index written
 		var nm = order.length;
-		var paths = [for (m in order) dir + "/" + moduleFile(m)];
+		var paths = new haxe.ds.Vector<String>(nm);
+		for (mi in 0...nm)
+			paths[mi] = dir + "/" + moduleFile(order[mi]);
 		var memPaths = paths.copy();
-		var keys = [for (_ in 0...nm) ""];
-		var lits:Array<Array<String>> = [for (_ in 0...nm) null];
+		var keys = new haxe.ds.Vector<String>(nm, "");
+		var lits = new haxe.ds.Vector<Array<String>>(nm);
 		var objs:Array<Obj> = [for (_ in 0...nm) null];
 		var s0 = haxe.Timer.stamp();
 		// (the functions that may be inlined: their digests first, Fingerprint.Inlined)
 		var inlined:Null<Fingerprint.Inlined> = null;
 		if (MirBuild.inlineCands != null) {
 			var cands = MirBuild.inlineCands;
-			inlined = new Fingerprint.Inlined(prep, [for (f in p.funcs) if (cands.exists(f)) f]);
+			inlined = new Fingerprint.Inlined(prep, haxe.ds.Vector.fromArrayCopy([for (f in p.funcs) if (cands.exists(f)) f]));
 			var d = Inline.DEPTH;
 			while (d >= 1) {
 				var depth = d;
@@ -411,7 +413,7 @@ class Driver {
 			}
 		}
 		// largest modules first, so the last ones to finish are small
-		var weight = [for (m in order) 0];
+		var weight = new haxe.ds.Vector<Int>(nm);
 		for (mi in todo)
 			for (f in byModule.get(order[mi]))
 				weight[mi] += f.body.length + f.locals.length;
