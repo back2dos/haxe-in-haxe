@@ -174,6 +174,7 @@ class Driver {
 			}
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
+			if (o.opt && !abi.wasm && ShrinkWrap.on) new ShrinkWrap(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {
 				// WebAssembly: structured code from the Mir, no instruction selection or registers
