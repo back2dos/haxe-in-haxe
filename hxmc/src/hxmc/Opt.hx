@@ -99,9 +99,13 @@ class Opt {
 		}
 		rewrite();
 		dce();
-		if (condProp()) {
+		var rounds = 0;
+		while (rounds++ < 3 && condProp()) {
 			pruneBlocks();
 			mergeBlocks();
+			// (a branch made a jump can leave a join's phi used by its
+			// branch alone: thread it, which can make branches known again)
+			simplifyCfg();
 			dce();
 		}
 		if (licmOn)
@@ -305,16 +309,26 @@ class Opt {
 							fa.push(c.a);
 							fb.push(c.b);
 							fv.push(b == t.targets[0]);
+						} else if (!c.dead) {
+							// (any other value: whether it is not 0)
+							fc.push(-1);
+							fa.push(t.a);
+							fb.push(-1);
+							fv.push(b == t.targets[0]);
 						}
 					}
 				}
 				var t = b.term();
 				if (t != null && t.op == Br && t.targets[0] != t.targets[1] && fc.length > 0) {
 					var c = vals[t.a];
-					if (c.op == Cmp) {
+					{
 						var known = 0; // 1 true, 2 false
 						var k = fc.length;
 						while (k-- > 0 && known == 0) {
+							if (fc[k] == -1 || c.op != Cmp) {
+								if (fc[k] == -1 && fa[k] == t.a) known = fv[k] ? 1 : 2;
+								continue;
+							}
 							var same = fa[k] == c.a && fb[k] == c.b;
 							var swapped = fa[k] == c.b && fb[k] == c.a;
 							if (same && fc[k] == c.imm) known = fv[k] ? 1 : 2;
@@ -465,8 +479,13 @@ class Opt {
 						uses[x]++;
 			}
 		var vals = f.vals;
+		// (rounds: an edge threaded past a join can leave the phi of the join
+		// before it used by its branch alone, as in `a && b && c`)
+		var threaded = true, rounds = 0;
+		while (threaded && rounds++ < 4) {
+		threaded = false;
 		for (b in f.blocks.copy()) {
-			if (b == f.entry || b.handler) continue;
+			if (b == f.entry || b.handler || b.preds.length == 0) continue;
 			var ins = b.ins;
 			var n = ins.length;
 			if (n < 2 || n > 4) continue;
@@ -532,7 +551,10 @@ class Opt {
 				// drop the edge into b
 				b.preds.splice(k, 1);
 				phi.args.splice(k, 1);
+				uses[v]--;
+				threaded = true;
 			}
+		}
 		}
 		pruneBlocks();
 		mergeBlocks();
