@@ -25,6 +25,11 @@ the legacy encoding). Left:
   module, of i64 values also used in full: a second, i32 local for those
   with many address uses, or an i32 pointer type in Mir, would remove most
   (about 480 KB raw, little gzipped).
+- Size and startup of UI apps: a small canvas app is about 1.8 MB of wasm,
+  against about 44 KB of JavaScript with the DOM renderer. Link-time dead
+  code elimination ([compiler.md](compiler.md#central-object-cache-and-quieter-builds))
+  first, then code splitting with lazily loaded wasm modules; time to
+  first frame measured on a mid-range phone.
 - The playground's module size (10.8 MB, 2.1 MB gzipped): folding a call
   into its user (30 KB raw, but 16 KB more gzipped), fewer wraps.
 
@@ -575,6 +580,17 @@ Order:
 
 Needed by Android and plugins: the relocation model, TLS model, output
 kind and segment alignment are already parameters in `Abi`/`Target`.
+
+## Windows
+
+- **A GUI subsystem define.** Executables are always console programs
+  today, so double-clicking a ui app opens a console as well.
+  `-D hxmc.subsystem=windows` writes subsystem 2 (GUI) in the PE header;
+  launched from a terminal, the program attaches to the parent console
+  (`AttachConsole(ATTACH_PARENT_PROCESS)`) so `trace` still prints.
+  Documented beside `-D hxmc.libc=glibc` in packages/ui's README and
+  GUIDE. (Found building a small app, Oct 19.)
+- The dev loop's cold first edit: [dev-loop.md](dev-loop.md#windows-the-first-edit-is-a-cold-build-found-oct-19).
 
 ## Linux
 

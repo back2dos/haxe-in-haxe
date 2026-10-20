@@ -18,9 +18,10 @@ haxe/test --run <Name> --help`-style options at the top of each file):
 | `Haxelib` | `-L` through lix's haxelib shim, batch and server | 14/14 |
 | `EvalDebugger` | scripted Eval debugger sessions (`-D eval-debugger`): breakpoints, stepping, scopes, evaluation, assignment, exception and function breakpoints, a macro | 6/6 |
 | `fuzz/` | random programs per target (`diff:<target>`) or by program output (`exec:<a>,<b>`), with reduction (`make test-fuzz LANE=diff:js`); `--cases haxe/test/fuzz/cases` checks the kept programs (failures fixed since, reduced, one directory each) on the lanes | CI: the diff lanes of ten targets, `exec:interp,hxmc` and `exec:interp,hxmc-wasm` (below) |
-| `Targets` | the website's target table (`site/data/targets.json`): haxe-formatter and the port itself compiled for every target by both, CPU, wall and peak RSS, outputs compared (hl/c after `HlcNames`); `-p self -t hlc --merge --json site/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
+| `Targets` | the website's target table (`bench.yml`'s `targets` jobs, published to `bench-data` as `targets.json`; `site/data/targets.json` the fallback): haxe-formatter and the port itself compiled for every target by both, sequential (`-D disable-parallelism`: CPU) and with default parallelism (wall), peak RSS, outputs compared (hl/c after `HlcNames`; a parallel output where the reference's own parallel output varies is marked `varies`); `-p self -t hlc --merge --json site/data/targets.json` replaces those rows only | 18/18 identical (the rows the reference compiles) |
 | `Measure` | peak RSS, wall and CPU time: the self-compile (ours and the reference), the native build, the WebAssembly builds | self-compile 879 MB vs the reference's 1414 MB |
 | `unit.hxml` | unit tests of port modules, in-process | pass |
+| `IpcStress` | round trips of multi-byte strings through Eval's `sys.io.Process` (echo through stdin, a grandchild's environment variable as in upstream's `TestUnicode.testIPC`, short reads while the child writes; once per round a process closed after its stdin while another thread reads files reusing that number: the double close the runtime no longer does), `haxe -cp haxe/test --run IpcStress <haxe> [rounds]`; CI: four at once on both `linux-test` machines (upstream-tests.yml) | 52 checks per round, no failures |
 
 Sequential runs pass `-D disable-parallelism`: the reference itself is not
 deterministic in parallel mode. Upstream's compiler-side suite (RunCi `macro`:
@@ -102,7 +103,10 @@ fuzzer programs, compiled by the tool, run with a 64 KB nursery (a missing
 root shows) and compared with their golden files, which are frozen (the
 outputs of hxc, the C target hxmc came from): a new case gets one with
 `--bless` (checked by hand), a changed output is an edit of its golden file
-with the reason in the commit. `Crosshost`: the tool as a WebAssembly module
+with the reason in the commit. A `// build-seconds: <n>` line of a case bounds
+the tool's time to build it (`BigInit`: a function of a thousand nested
+constructor calls, the shape of ml2hx's generated tables, once a minute of
+register allocation). `Crosshost`: the tool as a WebAssembly module
 writes the same bytes as the native tool, for every target, itself included.
 `RT_VERIFY=1` fills the free nursery with a pattern, so uninitialized
 allocations and missed roots show at once. `ModuleCacheCheck` (`make
@@ -198,6 +202,25 @@ required checks yet).
 `gfx-check` and `gfx-web-check` also draw `FeatureScene` (buffer and texture
 writes, R8 and RGBA8 textures, blending, scissor) against
 `packages/gfx/test/features.png`.
+`make 3d-check` (CI's `gfx` job): `@hxmc/3d` ([plans/3d.md](plans/3d.md)): its
+math (quaternions against gfx's rotation matrices, inverses, decomposition,
+bounds), the scene graph's matrices and their cache, the camera and the
+fixed-step clock, and the glTF reader (the sample scene of
+`packages/3d/test/SampleModel.hx` as .glb and .gltf, its accessors, the
+hierarchy as scene nodes, files it must reject), on Eval, natively and as
+wasm32-wasi (`packages/3d/test/SceneTest.hx`, `GltfTest.hx`;
+`@hxmc/physics`: `packages/physics/test/PhysicsTest.hx`, its checksum the
+same on all three), input
+actions from synthetic events natively and as wasm32-wasi (`InputTest.hx`),
+a `Model.of` reference to a name the file lacks rejected, `@hxmc/3d-ui`'s
+markup on the scene graph natively (`packages/3d-ui/test/SceneUiTest.hx`), then the
+renderer's frames (`packages/3d/test/Scenes.hx`: the sample glTF scene)
+headless against `packages/3d/test/<scene>.png` by the rule above
+(`RenderTest`, `check.sh`; `make 3d-programs GFX_TARGET=<target>` builds it
+for another target: CI runs the ARM64 one on llvmpipe (`gfx-arm64`) and the
+Windows ones on D3D11's WARP (`gfx-windows`), and `check.sh` runs a Windows
+build under Wine on Linux); `make 3d-web-check`: the same on WebGPU and
+WebGL2 in headless Chromium (`packages/3d/test/web.mjs`).
 
 ## UI
 
@@ -366,7 +389,11 @@ main it appends `results/<date>-<commit>.json` to the `bench-data` branch and
 regenerates `history.json` (per run, case and target: median, min, max,
 peak RSS and the compile times) and `latest.json` there (`Bench --history`),
 which the website build copies (`make site BENCH_DATA=<checkout>`) for its
-table and charts. The first points on `bench-data` are earlier measurements
+table and charts. The same workflow runs `Targets` in groups of targets
+(`targets` jobs, both compilers of a row on one runner; `Targets --join`
+joins them) and appends `targets/<date>-<commit>.json`, regenerating
+`targets.json` and `targets-history.json` (`Targets --history`), which
+replace the committed `site/data/targets.json` in the site's build. The first points on `bench-data` are earlier measurements
 imported from this repository's history (`"source": "imported"`: a
 development VM, best of the runs).
 
