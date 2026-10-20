@@ -34,8 +34,8 @@ using StringTools;
 //          module (node, node with 256 KB, wasmtime, node with legacy
 //          exception handling); the tool as a module building
 //          every case for every target and itself; the fixpoint: before pushing
-// Cases named restrict the corpus lanes to them; the port, ThreadNatives and
-// fixpoint lanes ignore them. Lanes run one after another (they share the
+// Cases named restrict the corpus lanes to them; the port, ThreadNatives
+// and fixpoint lanes ignore them. Lanes run one after another (they share the
 // cases' output directories); the reference (bin/reference/haxe) is needed
 // for the port lanes.
 class Tiers {
