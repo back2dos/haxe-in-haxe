@@ -82,11 +82,12 @@ class GcNative {
 			if (t == null) break;
 			if (W.typeName(t) == n) return t;
 		}
-		return n == "String" ? String : null;
+		return n == "String" ? String : n == "Date" ? std.Date : null;
 	}
 
+	// (a date: of time 0, made as every date is, as hxmc.rt.Dyn's)
 	public static function createEmpty(c:Dynamic):Dynamic
-		return W.createEmpty(c);
+		return c == std.Date ? hxmc.rt.Date.of(0) : W.createEmpty(c);
 
 	public static function enumCtorNames(e:Dynamic):Array<String> {
 		if (!W.isType(e) || W.typeKind(e) != 1) return null;
