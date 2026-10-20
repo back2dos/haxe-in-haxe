@@ -387,6 +387,14 @@ class Loader {
 					Mem.setI32(p, 4 * i, tyNum(cs[i]));
 				Mem.setPtr(e, 88, p);
 			}
+			// a class's entry for Type.createInstance (DataGen, Types.maker: 1 no
+			// constructor, 2 + its signature the function at 88)
+			var mk:Dynamic = t.maker;
+			if (mk != null && mk.fn == null) Mem.setI32(e, 84, 1);
+			if (mk != null && mk.fn != null) {
+				Mem.setI32(e, 84, 2 + num.get(mk.sig));
+				Mem.setPtr(e, 88, ptr(symAddr(mk.fn)));
+			}
 		}
 		// the new classes' and interfaces' statics (rt_static: fid, kind, index, rank,
 		// address; the bundle has them in the order Type.getClassFields lists them)
@@ -473,6 +481,8 @@ class Loader {
 			if (!StringTools.startsWith(n, "DSP_")) xb.set(n, {k: "d", v: addrOf(p)});
 		for (n => s in defs)
 			if (s.section.kind == Text && StringTools.startsWith(n, "F_")) xb.set(n, {k: "t", v: value(s).v});
+		// (the runtime's walks of the types, Type.resolveClass, reach the new ones)
+		Mem.setI32(Mem.sym("rt_ntypes"), 0, nextType);
 		var entries:Array<Dynamic> = facts.entries;
 		for (en in entries)
 			b.entries.set(en.name, ptr(symAddr(en.sym)));
