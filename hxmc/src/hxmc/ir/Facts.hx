@@ -345,10 +345,11 @@ class Facts {
 		for (e in p.enums)
 			for (c in e.ctors)
 				names.set(c.name, true);
-		for (c in p.classes)
-			if (c.statics != null)
-				for (s in c.statics)
-					names.set(s.name, true);
+		for (cs in [p.classes, p.interfaces])
+			for (c in cs)
+				if (c.statics != null)
+					for (s in c.statics)
+						names.set(s.name, true);
 		for (n in bodyNames.keys())
 			names.set(n, true);
 		fieldNames = [for (k in names.keys()) k];

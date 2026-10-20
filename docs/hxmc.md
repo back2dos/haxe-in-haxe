@@ -203,6 +203,19 @@ functions (and where a name is computed) and the data's parts;
 `HXMC_REACH=0` keeps everything. WasmGC uses the same analysis (WasmGC
 below).
 
+Statics through a class value (`Reflect.field(C, "x")`, `c.x` on a Dynamic
+holding `C`, `Type.getClassFields`, `haxe.rtti.Meta`'s `__meta__`): a class
+or interface used as a value gets a table of its statics
+(`Lower.reflectStatics`: those Eval has, an inline variable too, not its
+superclasses'), in the order the reference lists them (Eval's: by the names'
+hashes), kept when live code can have the class value (it names the class, or
+can get a value's class, resolve a class by name, or get a superclass): its
+variables, whose static initializers then run, and its functions that are
+live otherwise or looked up by name, as closures; the others are left out, as
+with `-dce full` (`Reflect.field` gives null, `Type.getClassFields` does not
+list them). A class never used as a value has no table (WasmGC: nor an
+interface).
+
 ## Native arrays
 
 `hxmc.NativeArray<T>` (`hxmc/std/hxmc/NativeArray.hx`) is fixed-size storage
