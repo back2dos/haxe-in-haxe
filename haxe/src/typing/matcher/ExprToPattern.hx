@@ -28,6 +28,7 @@ import context.Typecore.*;
 import context.Typecore;
 import typing.matcher.Pattern;
 import typing.matcher.Constructor;
+import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
 
@@ -84,7 +85,7 @@ class ExprToPattern {
 			tname: loop(mt),
 			tpackage: [],
 			tsub: null,
-			tparams: []
+			tparams: vector()
 		}, p), ParamSpawnMonos, LoadNormal);
 	}
 

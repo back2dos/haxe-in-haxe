@@ -76,6 +76,7 @@ import context.TyperPass;
 import typing.Typeload.*;
 import typing.TypeloadFields.FieldError.*;
 import typing.TypeloadFields.TypeloadFields.*;
+import core.ds.VectorTools;
 import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
@@ -476,7 +477,7 @@ class TypeloadFields {
 				}
 			case _:
 		}
-		return ae(EVars(vector(mkEvar({name: "", pos: Globals.nullPos}, {type: CTAnonymous(fields), pos: p}))), p);
+		return ae(EVars(vector(mkEvar({name: "", pos: Globals.nullPos}, {type: CTAnonymous(haxe.ds.Vector.fromArrayCopy(fields)), pos: p}))), p);
 	}
 
 	public static function resolveTypeImport(ctx:Typer, p:Pos, i:String):Array<String> {
@@ -561,8 +562,7 @@ class TypeloadFields {
 		// port: tInfos is a projection: read the metadata again, build macros may have replaced it
 		for (m in tInfos(mt).mtMeta) if (m.meta == core.MetaList.StrictMeta.Using) for (e in m.exprs) try {
 			var path = stringPosListOfExprPathRaise(e);
-			path.reverse();
-			var r = ImportHandling.handleUsing(ctx, path, e.pos);
+			var r = ImportHandling.handleUsing(ctx, VectorTools.ofArrayReversed(path), e.pos);
 			// Delay for #10107, but use delay_late to make sure base classes run before their children do.
 			delayLate(ctx.g, PConnectField, function() {
 				var filtered = r.filterClasses(r.types);
@@ -745,7 +745,7 @@ class TypeloadFields {
 		c.clBuild = function() return BuildMacro(pending);
 		buildModuleDef(ctx, TClassDecl(c), c.clMeta, function() return fields, function(e) switch e.expr {
 			case EVars([{evType: {type: CTAnonymous(f), pos: p}, evExpr: null}]):
-				fields = f.map(function(v) return transformField(ctx, cctx, c, v, fields, p));
+				fields = f.mapToArray(function(v) return transformField(ctx, cctx, c, v, fields, p));
 			case _:
 				raiseTypingError("Class build macro must return a single variable with anonymous fields", e.pos);
 		});
@@ -1070,7 +1070,7 @@ class TypeloadFields {
 		if (fctx.isGeneric && params.length == 0) raiseTypingError("Generic functions must have type parameters", p);
 		// remove display of first argument which will contain the "this" expression
 		if (fctx.isMacro && !ctx.com.isMacroContext && !fctx.isStatic) fd = Record.withFields(fd,
-			{fArgs: fd.fArgs.length == 0 ? [] : fd.fArgs.slice(1)});
+			{fArgs: fd.fArgs.length == 0 ? vector() : fd.fArgs.slice(1)});
 		if (fctx.isMacro) {
 			if (ctx.com.isMacroContext) {
 				// a class with a macro cannot be extern in macro context (issue #2015)
@@ -1518,7 +1518,7 @@ class TypeloadFields {
 		return cf;
 	}
 
-	public static function initClass(ctxC:Typer, cctx:ClassInitCtx, c:TClass, p:Pos, herits:Array<ClassFlag>,
+	public static function initClass(ctxC:Typer, cctx:ClassInitCtx, c:TClass, p:Pos, herits:haxe.ds.Vector<ClassFlag>,
 			fields:Array<ClassField>):Void {
 		var com:CommonContext = ctxC.com;
 		if (cctx.isClassDebug) Sys.println("Created class context: " + dumpClassContext(cctx));

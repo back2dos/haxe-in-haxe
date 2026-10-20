@@ -450,7 +450,7 @@ typedef CommonContext = {
 	var std:TClass;
 	var globalMetadata:Array<GlobalMetadataEntry>;
 	var fileContents:Array<FileContent>;
-	var parserCache:Lookup<String, Array<TypeDecl>>;
+	var parserCache:Lookup<String, haxe.ds.Vector<TypeDecl>>;
 	var moduleToFile:Lookup<GlobalTypePath, core.ClassPaths.ResolvedFile>;
 	var overloadCache:Lookup<{path:GlobalTypePath, name:String}, Array<CastField>>;
 	var moduleLut:ModuleLut;

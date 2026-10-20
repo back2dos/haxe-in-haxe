@@ -15,6 +15,9 @@ import context.NativeLibraries;
 import generators.jvm.JvmSignature.JWildcard;
 import generators.jvm.JvmSignature.JTypeArgument;
 import generators.jvm.JvmSignature.JSignature;
+import core.ds.VectorTools;
+
+using core.ds.VectorTools;
 
 private typedef MetaTag = core.MetaList.StrictMeta;
 
@@ -733,14 +736,14 @@ class SignatureConverter {
 				{
 					tpackage: r.pack,
 					tname: r.name,
-					tparams: params,
+					tparams: Vector.fromArrayCopy(params),
 					tsub: null,
 				};
 			case mname:
 				{
 					tpackage: r.pack,
 					tname: mname,
-					tparams: params,
+					tparams: Vector.fromArrayCopy(params),
 					tsub: r.name,
 				};
 		}
@@ -750,21 +753,21 @@ class SignatureConverter {
 	public static function ctTypeParam(name:String):ComplexType return core.Ast.Ast.makePtpCt({
 		tpackage: [],
 		tname: name,
-		tparams: [],
+		tparams: vector(),
 		tsub: null
 	}, nullPos);
 
 	public static function ctVoid():ComplexType return core.Ast.Ast.makePtpCt({
 		tpackage: [],
 		tname: "Void",
-		tparams: [],
+		tparams: vector(),
 		tsub: null
 	}, nullPos);
 
 	public static function ctDynamic():ComplexType return core.Ast.Ast.makePtpCt({
 		tpackage: [],
 		tname: "Dynamic",
-		tparams: [],
+		tparams: vector(),
 		tsub: null
 	}, nullPos);
 
@@ -854,12 +857,12 @@ class Converter {
 		}
 		var tp:TypeParam = {
 			tpName: {name: name, pos: p},
-			tpParams: [],
+			tpParams: vector(),
 			tpMeta: [],
 			tpDefault: null,
 			tpConstraints: switch constraints {
 				case []: null;
-				case _: {type: CTIntersection(constraints), pos: p};
+				case _: {type: CTIntersection(Vector.fromArrayCopy(constraints)), pos: p};
 			}
 		};
 		return tp;
@@ -877,9 +880,9 @@ class Converter {
 					ecName: {name: jf.jfName, pos: p},
 					ecDoc: null,
 					ecMeta: [],
-					ecArgs: [],
+					ecArgs: vector(),
 					ecPos: p,
-					ecParams: [],
+					ecParams: vector(),
 					ecType: null
 				});
 			case _:
@@ -891,10 +894,10 @@ class Converter {
 		var d:EnumDefinition = {
 			name: {name: className, pos: p},
 			doc: null,
-			params: [], /* enums never have type parameters */
+			params: vector(), /* enums never have type parameters */
 			meta: meta,
-			flags: [EExtern],
-			data: data,
+			flags: vector(EExtern),
+			data: Vector.fromArrayCopy(data),
 		};
 		return {definition: EEnum(d), pos: p};
 	}
@@ -1020,8 +1023,8 @@ class Converter {
 						};
 					}
 					var f:Func = {
-						fParams: jf.jfTypes.map(function(tp) return convertTypeParameter(ctx, tp, p)),
-						fArgs: [for (i in 0...args.length) convertArg(i, args[i])],
+						fParams: Vector.fromArrayCopy(jf.jfTypes.map(function(tp) return convertTypeParameter(ctx, tp, p))),
+						fArgs: VectorTools.init(args.length, i -> convertArg(i, args[i])),
 						fType: switch ret {
 							case null: {type: SignatureConverter.ctVoid(), pos: p};
 							case jsig: {type: SignatureConverter.convertSignature(ctx, p, jsig), pos: p};
@@ -1063,7 +1066,7 @@ class Converter {
 						tpackage: ["java", "lang", "annotation"],
 						tname: "Annotation",
 						tsub: null,
-						tparams: []
+						tparams: vector()
 					}, p)));
 			case jsig:
 				addFlag(HExtends(getTypePath(SignatureConverter.convertSignature(ctx, p, jsig))));
@@ -1176,10 +1179,10 @@ class Converter {
 		var d:ClassDefinition = {
 			name: {name: className, pos: p},
 			doc: null,
-			params: jc.jcTypes.map(function(tp) return convertTypeParameter(ctx, tp, p)),
+			params: Vector.fromArrayCopy(jc.jcTypes.map(function(tp) return convertTypeParameter(ctx, tp, p))),
 			meta: meta,
-			flags: flags,
-			data: fields.copy(),
+			flags: Vector.fromArrayCopy(flags),
+			data: Vector.fromArrayCopy(fields.copy()),
 		};
 		return {definition: EClass(d), pos: p};
 	}
@@ -1195,7 +1198,7 @@ class Converter {
 			};
 			return convertType(ctx, e.jc, e.file);
 		});
-		return {pack: pack, declarations: types};
+		return {pack: pack, declarations: Vector.fromArrayCopy(types)};
 	}
 }
 

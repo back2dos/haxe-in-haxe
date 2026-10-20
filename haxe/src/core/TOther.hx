@@ -8,10 +8,13 @@ import core.TFunctions;
 import core.TFunctions.*;
 import haxe.ds.StringMap;
 import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // port: from haxe/src/core/tOther.ml.
 class TExprToExpr {
-	public static function tpath(path:GlobalTypePath, modulePath:GlobalTypePath, params:Array<TypeParamOrConst>):ComplexType {
+	public static function tpath(path:GlobalTypePath, modulePath:GlobalTypePath, params:Vector<TypeParamOrConst>):ComplexType {
 		return Ast.makePtpCt(path.name == modulePath.name ? Ast.mkTypePath(path.pack, path.name,
 			params) : Ast.mkTypePath(modulePath.pack, modulePath.name, params, path.name),
 			Globals.nullPos);
@@ -21,31 +24,29 @@ class TExprToExpr {
 		case TMono(r):
 			if (r.tmType == null) throw new TypeExit();
 			convertType(r.tmType);
-		case TInst(c, tl) if (c.clPrivate): Ast.makePtpCt(Ast.mkTypePath([], c.clPath.name, tl.map(tparam)), Globals.nullPos);
-		case TEnum(e, tl) if (e.ePrivate): Ast.makePtpCt(Ast.mkTypePath([], e.ePath.name, tl.map(tparam)), Globals.nullPos);
-		case TType(td, tl) if (td.tPrivate): Ast.makePtpCt(Ast.mkTypePath([], td.tPath.name, tl.map(tparam)), Globals.nullPos);
-		case TAbstract(a, tl) if (a.aPrivate): Ast.makePtpCt(Ast.mkTypePath([], a.aPath.name, tl.map(tparam)), Globals.nullPos);
-		case TEnum(e, pl): tpath(e.ePath, e.eModule.mPath, pl.map(tparam));
+		case TInst(c, tl) if (c.clPrivate): Ast.makePtpCt(Ast.mkTypePath([], c.clPath.name, tl.mapToVector(tparam)), Globals.nullPos);
+		case TEnum(e, tl) if (e.ePrivate): Ast.makePtpCt(Ast.mkTypePath([], e.ePath.name, tl.mapToVector(tparam)), Globals.nullPos);
+		case TType(td, tl) if (td.tPrivate): Ast.makePtpCt(Ast.mkTypePath([], td.tPath.name, tl.mapToVector(tparam)), Globals.nullPos);
+		case TAbstract(a, tl) if (a.aPrivate): Ast.makePtpCt(Ast.mkTypePath([], a.aPath.name, tl.mapToVector(tparam)), Globals.nullPos);
+		case TEnum(e, pl): tpath(e.ePath, e.eModule.mPath, pl.mapToVector(tparam));
 		case TInst(c,
 			pl) if (c.clKind.match(KExpr(_)) || c.clKind.match(KTypeParameter(_))): tpath({pack: [], name: c.clPath.name},
-				{pack: [], name: c.clPath.name}, pl.map(tparam));
-		case TInst(c, pl): tpath(c.clPath, c.clModule.mPath, pl.map(tparam));
+				{pack: [], name: c.clPath.name}, pl.mapToVector(tparam));
+		case TInst(c, pl): tpath(c.clPath, c.clModule.mPath, pl.mapToVector(tparam));
 		// recurse on type-type
 		case TType(td,
-			pl): StringTools.startsWith(td.tPath.name, "#") ? convertType(follow(t)) : tpath(td.tPath, td.tModule.mPath, pl.map(tparam));
-		case TAbstract(a, pl): tpath(a.aPath, a.aModule.mPath, pl.map(tparam));
-		case TFun(s): CTFunction([
-				for (arg in s.args) {
+			pl): StringTools.startsWith(td.tPath.name, "#") ? convertType(follow(t)) : tpath(td.tPath, td.tModule.mPath, pl.mapToVector(tparam));
+		case TAbstract(a, pl): tpath(a.aPath, a.aModule.mPath, pl.mapToVector(tparam));
+		case TFun(s): CTFunction(s.args.mapToVector(function(arg):TypeHint {
 					var ct = convertTypeHint(arg.type);
 					if (arg.name != "") ct = {type: CTNamed({name: arg.name, pos: Globals.nullPos}, ct), pos: Globals.nullPos};
-					arg.optional ? {type: CTOptional(ct), pos: Globals.nullPos} : ct;
-				}
-			], convertTypeHint(s.ret));
+					return arg.optional ? {type: CTOptional(ct), pos: Globals.nullPos} : ct;
+				}), convertTypeHint(s.ret));
 		case TAnon(a): switch a.aStatus {
 				case ClassStatics(c): tpath({pack: [], name: "Class"}, {pack: [], name: "Class"},
-						[TPType({type: tpath(c.clPath, c.clPath, []), pos: Globals.nullPos})]);
+						vector(TPType({type: tpath(c.clPath, c.clPath, vector()), pos: Globals.nullPos})));
 				case EnumStatics(e): tpath({pack: [], name: "Enum"}, {pack: [], name: "Enum"},
-						[TPType({type: tpath(e.ePath, e.ePath, []), pos: Globals.nullPos})]);
+						vector(TPType({type: tpath(e.ePath, e.ePath, vector()), pos: Globals.nullPos})));
 				case _:
 					var fields:Array<ClassField> = [];
 					var names = [for (name in a.aFields.keys()) name];
@@ -69,16 +70,14 @@ class TExprToExpr {
 									{name: accessToString(v.vWrite, "set"), pos: Globals.nullPos}, mkTypeHint(f.cfType, Globals.nullPos),
 									null);
 							case [Method(_), TFun(s)]: FFun({
-									fParams: [],
-									fArgs: [
-										for (arg in s.args) {
+									fParams: vector(),
+									fArgs: s.args.mapToVector(arg -> ({
 											name: {name: arg.name, pos: Globals.nullPos},
 											optional: arg.optional,
 											meta: [],
 											type: convertTypeHint(arg.type),
 											expr: null
-										}
-									],
+										} : FuncArg)),
 									fType: convertTypeHint(s.ret),
 									fExpr: null
 								});
@@ -93,10 +92,10 @@ class TExprToExpr {
 							cffAccess: access
 						});
 					}
-					CTAnonymous(fields);
+					CTAnonymous(Vector.fromArrayCopy(fields));
 			}
-		case TDynamic(null): tpath({pack: [], name: "Dynamic"}, {pack: [], name: "Dynamic"}, []);
-		case TDynamic(t): tpath({pack: [], name: "Dynamic"}, {pack: [], name: "Dynamic"}, [tparam(t)]);
+		case TDynamic(null): tpath({pack: [], name: "Dynamic"}, {pack: [], name: "Dynamic"}, vector());
+		case TDynamic(t): tpath({pack: [], name: "Dynamic"}, {pack: [], name: "Dynamic"}, vector(tparam(t)));
 		case TLazy(f): convertType(lazyType(f));
 	};
 
@@ -139,16 +138,14 @@ class TExprToExpr {
 				ENew(path, el.map(convertExpr));
 			case TUnop(op, p, e): EUnop(op, p, convertExpr(e));
 			case TFunction(f): EFunction(FKAnonymous, {
-					fParams: [],
-					fArgs: [
-						for (arg in f.tfArgs) {
+					fParams: vector(),
+					fArgs: f.tfArgs.mapToVector(arg -> ({
 							name: {name: arg.variable.vName, pos: arg.variable.vPos},
 							optional: false,
 							meta: arg.variable.vMeta,
 							type: mkTypeHint(arg.variable.vType, Globals.nullPos),
 							expr: eopt(arg.defaultValue)
-						}
-					],
+						} : FuncArg)),
 					fType: mkTypeHint(f.tfType, Globals.nullPos),
 					fExpr: convertExpr(f.tfExpr)
 				});

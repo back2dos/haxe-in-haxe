@@ -669,7 +669,7 @@ class HxbWriter {
 	function writeTypePath(tp:TypePath):Void {
 		chunk.writeList(tp.tpackage, chunk.writeString);
 		chunk.writeString(tp.tname);
-		chunk.writeList(tp.tparams, writeTypeParamOrConst);
+		chunk.writeVector(tp.tparams, writeTypeParamOrConst);
 		chunk.writeOption(tp.tsub, chunk.writeString);
 	}
 
@@ -693,18 +693,18 @@ class HxbWriter {
 			writePlacedTypePath(tp);
 		case CTFunction(thl, th):
 			chunk.writeU8(1);
-			chunk.writeList(thl, writeTypeHint);
+			chunk.writeVector(thl, writeTypeHint);
 			writeTypeHint(th);
 		case CTAnonymous(cffl):
 			chunk.writeU8(2);
-			chunk.writeList(cffl, writeCfield);
+			chunk.writeVector(cffl, writeCfield);
 		case CTParent(th):
 			chunk.writeU8(3);
 			writeTypeHint(th);
 		case CTExtend(ptp, cffl):
 			chunk.writeU8(4);
-			chunk.writeList(ptp, writePlacedTypePath);
-			chunk.writeList(cffl, writeCfield);
+			chunk.writeVector(ptp, writePlacedTypePath);
+			chunk.writeVector(cffl, writeCfield);
 		case CTOptional(th):
 			chunk.writeU8(5);
 			writeTypeHint(th);
@@ -714,7 +714,7 @@ class HxbWriter {
 			writeTypeHint(th);
 		case CTIntersection(thl):
 			chunk.writeU8(7);
-			chunk.writeList(thl, writeTypeHint);
+			chunk.writeVector(thl, writeTypeHint);
 	}
 
 	function writeTypeHint(th:TypeHint):Void {
@@ -724,7 +724,7 @@ class HxbWriter {
 
 	function writeTypeParam(tp:TypeParam):Void {
 		writePlacedName(tp.tpName);
-		chunk.writeList(tp.tpParams, writeTypeParam);
+		chunk.writeVector(tp.tpParams, writeTypeParam);
 		chunk.writeOption(tp.tpConstraints, writeTypeHint);
 		chunk.writeOption(tp.tpDefault, writeTypeHint);
 		chunk.writeList(tp.tpMeta, writeMetadataEntry);
@@ -739,8 +739,8 @@ class HxbWriter {
 	}
 
 	function writeFunc(f:Func):Void {
-		chunk.writeList(f.fParams, writeTypeParam);
-		chunk.writeList(f.fArgs, writeFuncArg);
+		chunk.writeVector(f.fParams, writeTypeParam);
+		chunk.writeVector(f.fArgs, writeFuncArg);
 		chunk.writeOption(f.fType, writeTypeHint);
 		chunk.writeOption(f.fExpr, writeExpr);
 	}
@@ -2060,7 +2060,7 @@ class HxbWriter {
 			chunk.writeU8(5);
 		case KGenericBuild(l):
 			chunk.writeU8(6);
-			chunk.writeList(l, writeCfield);
+			chunk.writeVector(l, writeCfield);
 		case KAbstractImpl(a):
 			chunk.writeU8(7);
 			writeAbstractRef(a);

@@ -78,7 +78,7 @@ class InstanceBuilder {
 		return t;
 	}
 
-	public static function buildMacroBuild(ctx:Typer, c:TClass, pl:TParams, cfl:Array<ClassField>, p:Pos):T {
+	public static function buildMacroBuild(ctx:Typer, c:TClass, pl:TParams, cfl:haxe.ds.Vector<ClassField>, p:Pos):T {
 		var buildExpr = try Meta.get(MetaTag.GenericBuild, c.clMeta) catch (_:NotFound) {
 			raiseTypingError(Globals.sTypePath(c.clPath) + " is missing @:genericBuild meta. Was it removed by a macro?", p);
 		};
@@ -87,7 +87,7 @@ class InstanceBuilder {
 			case _: raiseTypingError("genericBuild requires a single expression call parameter", p);
 		};
 		var oldRet = ctx.e.ret, oldBuild = ctx.c.getBuildInfos;
-		ctx.c.getBuildInfos = function() return {type: TClassDecl(c), params: pl, fields: cfl};
+		ctx.c.getBuildInfos = function() return {type: TClassDecl(c), params: pl, fields: cfl.toArray()};
 		var macroResult:context.Typecore.MacroResult = ctx.g.doMacro(ctx, MMacroType, call.path, call.field, call.args, p);
 		var t = switch macroResult {
 			case MError | MMacroInMacro: spawnMonomorph(ctx, p);

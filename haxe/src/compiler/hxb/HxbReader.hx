@@ -473,7 +473,7 @@ class HxbReader {
 	public function readTypePath():TypePath {
 		var pack = readList(readString);
 		var name = readString();
-		var tparams = readList(readTypeParamOrConst);
+		var tparams = readVector(readTypeParamOrConst);
 		var tsub = readOption(readString);
 		return {
 			tpackage: pack,
@@ -495,7 +495,7 @@ class HxbReader {
 
 	public function readTypeParam():TypeParam {
 		var pn = readPlacedName();
-		var ttp = readList(readTypeParam);
+		var ttp = readVector(readTypeParam);
 		var tho = readOption(readTypeHint);
 		var def = readOption(readTypeHint);
 		var meta = readMetadata();
@@ -532,8 +532,8 @@ class HxbReader {
 	}
 
 	public function readFunc():Func {
-		var params = readList(readTypeParam);
-		var args = readList(readFuncArg);
+		var params = readVector(readTypeParam);
+		var args = readVector(readFuncArg);
 		var tho = readOption(readTypeHint);
 		var eo = readOption(readExpr);
 		return {
@@ -548,21 +548,21 @@ class HxbReader {
 		return switch readByte() {
 			case 0: CTPath(readPlacedTypePath());
 			case 1:
-				var thl = readList(readTypeHint);
+				var thl = readVector(readTypeHint);
 				var th = readTypeHint();
 				CTFunction(thl, th);
-			case 2: CTAnonymous(readList(readCfield));
+			case 2: CTAnonymous(readVector(readCfield));
 			case 3: CTParent(readTypeHint());
 			case 4:
-				var ptp = readList(readPlacedTypePath);
-				var cffl = readList(readCfield);
+				var ptp = readVector(readPlacedTypePath);
+				var cffl = readVector(readCfield);
 				CTExtend(ptp, cffl);
 			case 5: CTOptional(readTypeHint());
 			case 6:
 				var pn = readPlacedName();
 				var th = readTypeHint();
 				CTNamed(pn, th);
-			case 7: CTIntersection(readList(readTypeHint));
+			case 7: CTIntersection(readVector(readTypeHint));
 			case _: throw "assert false";
 		}
 	}
@@ -1826,7 +1826,7 @@ class HxbReader {
 				var tl = readTypes();
 				KGenericInstance(c, tl);
 			case 5: KMacroType;
-			case 6: KGenericBuild(readList(readCfield));
+			case 6: KGenericBuild(readVector(readCfield));
 			case 7: KAbstractImpl(readAbstractRef().force());
 			case 8: KModuleFields(currentModule);
 			case i:

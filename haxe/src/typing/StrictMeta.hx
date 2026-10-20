@@ -145,7 +145,7 @@ class StrictMeta {
 						sub = s;
 					case _: throw "Invalid strict metadata path";
 				}
-				mkTypePath(pack, n, [], sub);
+				mkTypePath(pack, n, vector(), sub);
 			case _:
 				displayError(com, "Unexpected expression when building strict meta", e.pos);
 				throw core.ds.Exit.raise();

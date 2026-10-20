@@ -1063,7 +1063,7 @@ class Typer {
 				tpackage: ["haxe"],
 				tname: "Exception",
 				tsub: null,
-				tparams: []
+				tparams: vector()
 			}, Globals.nullPos) : catchSyntax.type;
 			var t = Typeload.loadComplexType(ctx, true, LoadNormal, th);
 			function loop(t:T):T return switch follow(t) {
@@ -1432,7 +1432,7 @@ class Typer {
 						expr: ENew(makePtp({
 							tpackage: ["haxe", "ds"],
 							tname: "Map",
-							tparams: [],
+							tparams: vector(),
 							tsub: null
 						}, Globals.nullPos), vector()),
 						pos: p
@@ -1889,7 +1889,7 @@ class Typer {
 									expr: ENew(makePtp({
 										tpackage: ["haxe", "ds"],
 										tname: "Map",
-										tparams: [],
+										tparams: vector(),
 										tsub: null
 									}, Globals.nullPos), vector()),
 									pos: p

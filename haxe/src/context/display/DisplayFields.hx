@@ -266,7 +266,7 @@ class DisplayFields {
 						tpackage: [],
 						tname: "EnumValue",
 						tsub: null,
-						tparams: []
+						tparams: vector()
 					});
 					switch t {
 						case TAbstractDecl(a = {aImpl: c}) if (c != null):

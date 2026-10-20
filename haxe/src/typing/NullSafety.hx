@@ -22,6 +22,7 @@ import syntax.Lexer;
 
 using Lambda;
 using core.ds.ArrayTools;
+using core.ds.VectorTools;
 
 import core.MetaList.StrictMeta as MetaTag;
 import core.Globals.Pos;
@@ -301,7 +302,7 @@ class NullSafety {
 			case TField(_, FAnon(cf) | FClosure(_, cf) | FStatic(_, cf) | FInstance(_, _, cf)): try {
 					var meta = getMeta(MetaTag.HaxeArguments, cf.cfMeta);
 					switch meta.exprs {
-						case [{expr: EFunction(_, {fArgs: args})}] if (args.length == count): args.map(function(a) return a.meta);
+						case [{expr: EFunction(_, {fArgs: args})}] if (args.length == count): args.mapToArray(function(a) return a.meta);
 						case _: empty();
 					}
 				} catch (ex:NotFound) empty();

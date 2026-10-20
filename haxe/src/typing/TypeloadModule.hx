@@ -54,9 +54,11 @@ import context.display.DeprecationCheck;
 import typing.Typeload.*;
 import typing.TypeloadCheck.BuildCanceled;
 import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 using Lambda;
 using core.ds.ArrayTools;
+using core.ds.VectorTools;
 
 @:structInit class TypedDeclaration {
 	public var declaration:TypeDecl;
@@ -91,14 +93,14 @@ class TypeloadModule {
 		cffDoc: d.doc,
 		cffPos: p,
 		cffMeta: d.meta,
-		cffAccess: ([{access: AStatic, pos: nullPos}] : Array<core.Ast.PlacedAccess>).concat(d.flags),
+		cffAccess: ([{access: AStatic, pos: nullPos}] : Array<core.Ast.PlacedAccess>).concat(d.flags.toArray()),
 		cffKind: d.data
 	};
 
 	/*
 		Build module structure : should be atomic - no type loading is possible
 	*/
-	public static function createModuleTypes(ctx:TyperContext, m:ModuleDef, decls:Array<TypeDecl>,
+	public static function createModuleTypes(ctx:TyperContext, m:ModuleDef, decls:Vector<TypeDecl>,
 			loadp:Pos):{imports:Array<TypeDecl>, declarations:Array<TypedDeclaration>} {
 		var com:CommonContext = ctx.com;
 		var imports:Array<TypeDecl> = [],
@@ -128,7 +130,7 @@ class TypeloadModule {
 				&& !MetadataTools.has(MetaTag.Native, meta)) Naming.checkUppercaseIdentifierName(com, name, "type", p);
 		inline function makeClass(d:ClassDefinition, p:Pos):TClass {
 			hasDeclaration = true;
-			var priv = d.flags.contains(HPrivate),
+			var priv = d.flags.has(HPrivate),
 				path = makePath(d.name.name, priv, d.meta, d.name.pos),
 				c = mkClass(m, path, p, d.name.pos);
 			// we shouldn't load any other type until we propertly set cl_build
@@ -169,18 +171,18 @@ class TypeloadModule {
 					add(decl, TClassDecl(makeClass(d, p)));
 				case EEnum(d):
 					hasDeclaration = true;
-					var priv = d.flags.contains(EPrivate),
+					var priv = d.flags.has(EPrivate),
 						en = mkEnum(m, makePath(d.name.name, priv, d.meta, p), p, d.name.pos);
 					en.eDoc = d.doc;
 					en.eMeta = d.meta.copy();
 					en.ePrivate = priv;
-					if (d.flags.contains(EExtern)) addEnumFlag(en, EnExtern);
+					if (d.flags.has(EExtern)) addEnumFlag(en, EnExtern);
 					else checkTypeName(d.name.name, d.meta, p);
 					add(decl, TEnumDecl(en));
 				case ETypedef(d):
 					checkTypeName(d.name.name, d.meta, p);
 					hasDeclaration = true;
-					var priv = d.flags.contains(TDPrivate),
+					var priv = d.flags.has(TDPrivate),
 						td = mkTypedef(m, makePath(d.name.name, priv, d.meta, p), p, d.name.pos, mkMono());
 					td.tDoc = d.doc;
 					td.tPrivate = priv;
@@ -196,7 +198,7 @@ class TypeloadModule {
 					add(decl, TTypeDecl(td));
 				case EAbstract(d):
 					checkTypeName(d.name.name, d.meta, p);
-					var priv = d.flags.contains(AbPrivate),
+					var priv = d.flags.has(AbPrivate),
 						path = makePath(d.name.name, priv, d.meta, p),
 						enumPos = MetadataTools.maybeGetPos(MetaTag.Enum, d.meta);
 					var a:TAbstract = {
@@ -223,8 +225,8 @@ class TypeloadModule {
 						aWrite: null,
 						aCall: null,
 						aConstructor: null,
-						aExtern: d.flags.contains(AbExtern),
-						aEnum: d.flags.contains(AbEnum) || enumPos != null};
+						aExtern: d.flags.has(AbExtern),
+						aEnum: d.flags.has(AbEnum) || enumPos != null};
 					if (enumPos == null) {
 						if (a.aEnum) a.aMeta.unshift({meta: MetaTag.Enum, exprs: vector(), pos: nullPos}); // HAXE5: remove
 					} else Common.moduleWarning(com, ctx.m.curmod, WDeprecatedEnumAbstract, Warning.fromMeta(d.meta),
@@ -232,9 +234,7 @@ class TypeloadModule {
 					add(decl, TAbstractDecl(a));
 					if (d.data.length == 0 && MetadataTools.has(MetaTag.CoreType, a.aMeta)) a.aThis = tDynamic;
 					else {
-						var params = [
-							for (tp in d.params) TPType(AstTools.makePtpTh(AstTools.mkTypePath([], tp.tpName.name), nullPos))
-						], aType = AstTools.makePtpTh(AstTools.mkTypePath([], d.name.name, params), nullPos), thisType = aType;
+						var params = d.params.map(tp -> TPType(AstTools.makePtpTh(AstTools.mkTypePath([], tp.tpName.name), nullPos))), aType = AstTools.makePtpTh(AstTools.mkTypePath([], d.name.name, params), nullPos), thisType = aType;
 						for (flag in d.flags) switch flag {
 							case AbOver(t):
 								thisType = t;
@@ -246,10 +246,10 @@ class TypeloadModule {
 						if (MetadataTools.has(MetaTag.Dce, a.aMeta)) meta.unshift({meta: MetaTag.Dce, exprs: vector(), pos: nullPos});
 						var cd:ClassDefinition = {
 							name: {name: d.name.name + "_Impl_", pos: d.name.pos},
-							flags: [HPrivate],
+							flags: vector(HPrivate),
 							data: fields,
 							doc: null,
-							params: [],
+							params: vector(),
 							meta: meta
 						}, c = makeClass(cd, p);
 						a.aImpl = c;
@@ -269,10 +269,10 @@ class TypeloadModule {
 			var p:core.Globals.Pos = {pfile: first.pfile, pmin: first.pmin, pmax: first.pmin},
 				d:ClassDefinition = {
 					name: {name: m.mPath.name + "_Fields_", pos: nullPos},
-					flags: [HPrivate],
-					data: fields,
+					flags: vector(HPrivate),
+					data: haxe.ds.Vector.fromArrayCopy(fields),
 					doc: null,
-					params: [],
+					params: vector(),
 					meta: []
 				},
 				c = makeClass(d, p);
@@ -343,7 +343,7 @@ class TypeloadModule {
 				if (buildClassHook != null) buildClassHook(c, true);
 				try {
 					for (f in inheritance) f();
-					TypeloadFields.initClass(local, cctx, c, p, d.flags, d.data);
+					TypeloadFields.initClass(local, cctx, c, p, d.flags, d.data.toArray());
 					if (buildClassHook != null) buildClassHook(c, false);
 					c.clBuild = function() return Built;
 					local.g.buildCount++;
@@ -460,15 +460,13 @@ class TypeloadModule {
 					fParams: c.ecParams,
 					fType: c.ecType,
 					fExpr: null,
-					fArgs: [
-						for (arg in c.ecArgs) {
-							name: {name: arg.name, pos: nullPos},
-							optional: arg.optional,
-							meta: [],
-							type: arg.type,
-							expr: null
-						}
-					]
+					fArgs: c.ecArgs.map(arg -> ({
+						name: {name: arg.name, pos: nullPos},
+						optional: arg.optional,
+						meta: [],
+						type: arg.type,
+						expr: null
+					} : FuncArg))
 				});
 				{
 					cffName: c.ecName,
@@ -483,10 +481,9 @@ class TypeloadModule {
 		TypeloadFields.buildModuleDef(local, TEnumDecl(e), e.eMeta, getConstructs, function(expression:Expr) {
 			switch expression.expr {
 				case EVars([{evType: {type: CTAnonymous(fields)}, evExpr: null}]):
-					constructs = [
-						for (f in fields) {
-							var args:Array<EnumConstructorArg> = [],
-								params:Array<TypeParam> = [],
+					constructs = fields.map(function(f):EnumConstructor {
+							var args:Vector<EnumConstructorArg> = vector(),
+								params:Vector<TypeParam> = vector(),
 								type:Null<TypeHint> = null;
 							switch f.cffKind {
 								case FVar(t, null):
@@ -497,16 +494,14 @@ class TypeloadModule {
 								})):
 									type = fn.fType;
 									params = fn.fParams;
-									args = [
-										for (arg in fn.fArgs) {
-											if (arg.type == null) Error.raiseTypingError("Missing function parameter type", f.cffPos);
-											{name: arg.name.name, optional: arg.optional, type: arg.type};
-										}
-									];
+									args = fn.fArgs.map(function(arg):EnumConstructorArg {
+										if (arg.type == null) Error.raiseTypingError("Missing function parameter type", f.cffPos);
+										return {name: arg.name.name, optional: arg.optional, type: arg.type};
+									});
 								case _:
 									Error.raiseTypingError("Invalid enum constructor in @:build result", expression.pos);
 							}
-							{
+							return {
 								ecName: f.cffName,
 								ecDoc: f.cffDoc,
 								ecMeta: f.cffMeta,
@@ -515,8 +510,7 @@ class TypeloadModule {
 								ecParams: params,
 								ecType: type
 							};
-						}
-					];
+						});
 				case _:
 					Error.raiseTypingError("Enum build macro must return a single variable with anonymous object fields", expression.pos);
 			}
@@ -678,7 +672,7 @@ class TypeloadModule {
 
 	public static function initImportsOrUsing(ctx:TyperContext, decl:TypeDecl):Void {
 		var com = ctx.com;
-		function checkPathDisplay(path:Array<PlacedName>,
+		function checkPathDisplay(path:haxe.ds.Vector<PlacedName>,
 				p:Pos):Void if (core.display.DisplayPosition.displayPosition.isInFile(com.partScope.fileKeys.get(p.pfile)))
 				context.display.DisplayPath.handlePathDisplay(ctx, path, p);
 		switch decl.definition {
@@ -715,7 +709,7 @@ class TypeloadModule {
 	/*
 		Creates a module context for [m] and types [tdecls] using it.
 	*/
-	public static function typeTypesIntoModule(com:CommonContext, g:TyperGlobals, m:ModuleDef, decls:Array<TypeDecl>, p:Pos):TyperContext {
+	public static function typeTypesIntoModule(com:CommonContext, g:TyperGlobals, m:ModuleDef, decls:Vector<TypeDecl>, p:Pos):TyperContext {
 		var ctx = TyperManager.cloneForModule(g.rootTyper, makeCurmod(com, g, m)),
 			created = createModuleTypes(ctx, m, decls, p);
 		initTypeParams(ctx, created.declarations);
@@ -727,7 +721,7 @@ class TypeloadModule {
 		return ctx;
 	}
 
-	public static function handleImportHx(com:CommonContext, g:TyperGlobals, m:ModuleDef, decls:Array<TypeDecl>, p:Pos):Array<TypeDecl> {
+	public static function handleImportHx(com:CommonContext, g:TyperGlobals, m:ModuleDef, decls:Vector<TypeDecl>, p:Pos):Vector<TypeDecl> {
 		var pathSplit = core.Path.getPathParts(core.Path.UniqueKey.lazyPath(m.mExtra.mFile));
 		pathSplit.reverse();
 		if (pathSplit.length > 0) pathSplit.shift();
@@ -749,13 +743,13 @@ class TypeloadModule {
 			pack = pack.slice(1);
 		}
 		for (file in candidates) {
-			var imported:Array<TypeDecl>;
+			var imported:Vector<TypeDecl>;
 			try {
 				imported = com.parserCache.find(file);
 				var im:ModuleDef = com.moduleLut.find({pack: [], name: file});
 				if (im.mExtra.mKind != MFake) addDependency(m, im, MDepFromImport);
 			} catch (_:NotFound) {
-				imported = [];
+				imported = vector();
 				var warnings:Array<syntax.Parser.ParseWarning> = [];
 				var exists = sys.FileSystem.exists(file);
 				if (exists) {
@@ -787,7 +781,7 @@ class TypeloadModule {
 	/*
 		Creates a new module and types [tdecls] into it.
 	*/
-	public static function typeModule(com:CommonContext, g:TyperGlobals, path:GlobalTypePath, file:String, decls:Array<TypeDecl>, p:Pos,
+	public static function typeModule(com:CommonContext, g:TyperGlobals, path:GlobalTypePath, file:String, decls:haxe.ds.Vector<TypeDecl>, p:Pos,
 			dontCheckPath:Bool = false, isExtern:Bool = false):ModuleDef {
 		var m = makeModule(com, g, path, file, p);
 		com.moduleLut.add(path, m);
@@ -854,7 +848,7 @@ class TypeloadModule {
 		} catch (_:NotFound) {}
 		inline function missing():Dynamic return Error.raiseErrorMsg(ModuleNotFound(path), p);
 		if (com.moduleNonexistentLut.mem(path) || g.loadOnlyCachedModules) return missing();
-		var isExtern = false, file:String, decls:Array<TypeDecl>, warnings:Array<syntax.Parser.ParseWarning>;
+		var isExtern = false, file:String, decls:Vector<TypeDecl>, warnings:Array<syntax.Parser.ParseWarning>;
 		try {
 			// Try parsing
 			var parsed = TypeloadParse.parseModule(com, path, p);
@@ -865,7 +859,7 @@ class TypeloadModule {
 			// Nothing to parse, try loading extern type
 			// port: entries are {name, load:(path,pos)->Null<core.Ast.Package>}
 			isExtern = true;
-			var found:Null<{file:String, decls:Array<TypeDecl>}> = null;
+			var found:Null<{file:String, decls:Vector<TypeDecl>}> = null;
 			for (entry in com.loadExternType) {
 				var a:Null<core.Ast.Package> = entry.load(path, p);
 				if (a != null) {

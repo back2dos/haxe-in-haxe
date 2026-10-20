@@ -61,6 +61,7 @@ import macros.MacroApi.MacroApiImpl;
 import macros.MacroApi.InvalidExpr;
 import macros.eval.EvalValue.Value;
 import macros.eval.EvalContext.RunTimeException;
+import core.ds.VectorTools;
 import core.ds.VectorTools.vector;
 import haxe.ds.Vector;
 
@@ -251,7 +252,7 @@ class MacroContext {
 								return null;
 							else {
 								var d = MacroApiImpl.decodeTypeDef(td);
-								return {pack: d.path.pack, declarations: [{definition: d.def, pos: d.pos}]};
+								return {pack: d.path.pack, declarations: vector({definition: d.def, pos: d.pos})};
 							}
 						}
 					}
@@ -581,12 +582,12 @@ class MacroContext {
 					ctx.com.cs.taintModule(mpath, DefineType);
 					var mdep = mdep == null ? ctx.m.curmod : TypeloadModule.loadModule(ctx, AstTools.parsePath(mdep), pos, MDepFromMacro);
 					var mnew = TypeloadModule.typeModule(ctx.com, ctx.g, mpath,
-						ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), [
+						ctx.com.partScope.fileKeys.generateVirtual(mpath, ctx.com.partScope.compilationStep), vector(
 						{
 							definition: tdef,
 							pos: pos
 						}
-					], pos, hasNativeMeta);
+					), pos, hasNativeMeta);
 					mnew.mExtra.mKind = isMacro ? MMacro : MFake;
 					addDependency(mnew, mdep, MDepFromMacro);
 					addDependency(mdep, mnew, MDepFromMacroDefine);
@@ -598,7 +599,7 @@ class MacroContext {
 			if (!ctx.com.isMacroContext)
 				switch tdef {
 					case EClass(c)
-						if (Lambda.exists(c.data,
+						if (VectorTools.exists(c.data,
 							function(cff) return Lambda.exists(cff.cffAccess, function(a) return a.access == AMacro))):
 						add(true, mctx);
 					case _:
@@ -617,9 +618,9 @@ class MacroContext {
 			});
 			var usings:Array<TypeDecl> = usings.map(function(tp):TypeDecl {
 				var sl = tp.tpackage.concat([tp.tname]).concat(tp.tsub == null ? [] : [tp.tsub]);
-				return {definition: EUsing(sl.map(function(s):PlacedName return {name: s, pos: Globals.nullPos})), pos: pos};
+				return {definition: EUsing(sl.mapToVector(function(s):PlacedName return {name: s, pos: Globals.nullPos})), pos: pos};
 			});
-			var types = imports.concat(usings).concat(types);
+			var types = Vector.fromArrayCopy(imports.concat(usings).concat(types));
 			var mpath = AstTools.parsePath(m);
 			try {
 				var m = ctx.com.moduleLut.find(mpath);
@@ -1099,9 +1100,9 @@ class MacroContext {
 			case MExpr:
 				Typecore.unify(mctx, mret, expr, mpos);
 			case MBuild:
-				var params = [
+				var params = vector(
 					TPType(makePtpTh(AstTools.mkTypePath(["haxe", "macro"], "Expr", null, "Field"), Globals.nullPos))
-				];
+				);
 				var ctfields = AstTools.mkTypePath([], "Array", params);
 				var tfields = Typeload.loadInstance(mctx, makePtp(ctfields, p), ParamNormal, LoadNormal);
 				Typecore.unify(mctx, mret, tfields, mpos);
@@ -1279,7 +1280,7 @@ class MacroContext {
 						};
 						return MSuccess({
 							expr: EVars(vector(
-								mkEvar({name: "fields", pos: Globals.nullPos}, {type: CTAnonymous(fields), pos: p})
+								mkEvar({name: "fields", pos: Globals.nullPos}, {type: CTAnonymous(haxe.ds.Vector.fromArrayCopy(fields)), pos: p})
 							)),
 							pos: p
 						});

@@ -464,7 +464,7 @@ enum TClassKind {
 	KGeneric;
 	KGenericInstance(cls:TClass, params:TParams);
 	KMacroType;
-	KGenericBuild(fields:Array<ClassField>);
+	KGenericBuild(fields:Vector<ClassField>);
 	KAbstractImpl(abs:TAbstract);
 	KModuleFields(module:ModuleDef);
 }

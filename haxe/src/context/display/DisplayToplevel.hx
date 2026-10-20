@@ -42,6 +42,8 @@ import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
 
+using core.ds.VectorTools;
+
 class ExploreClassPathTask extends ServerTask {
 	final com:CommonContext;
 	final checked:haxe.ds.StringMap<Bool>;
@@ -312,7 +314,7 @@ class DisplayToplevel {
 			}
 		}
 
-		function processDecls(pack:Array<String>, name:String, decls:Array<TypeDecl>):Bool {
+		function processDecls(pack:Array<String>, name:String, decls:haxe.ds.Vector<TypeDecl>):Bool {
 			var addedSomething = false;
 			function add(item:CompletionItemData, name:Null<String>):Void {
 				addedSomething = true;
@@ -321,10 +323,10 @@ class DisplayToplevel {
 			function run():Void for (decl in decls) {
 				try {
 					var r = switch decl.definition {
-						case EClass(d): {tname: d.name.name, isPrivate: d.flags.contains(HPrivate), meta: d.meta};
-						case EEnum(d): {tname: d.name.name, isPrivate: d.flags.contains(EPrivate), meta: d.meta};
-						case ETypedef(d): {tname: d.name.name, isPrivate: d.flags.contains(TDPrivate), meta: d.meta};
-						case EAbstract(d): {tname: d.name.name, isPrivate: d.flags.contains(AbPrivate), meta: d.meta};
+						case EClass(d): {tname: d.name.name, isPrivate: d.flags.has(HPrivate), meta: d.meta};
+						case EEnum(d): {tname: d.name.name, isPrivate: d.flags.has(EPrivate), meta: d.meta};
+						case ETypedef(d): {tname: d.name.name, isPrivate: d.flags.has(TDPrivate), meta: d.meta};
+						case EAbstract(d): {tname: d.name.name, isPrivate: d.flags.has(AbPrivate), meta: d.meta};
 						case EStatic(d): {
 								tname: d.name.name,
 								isPrivate: core.ds.ArrayTools.exists(d.flags, a -> a.access == APrivate),

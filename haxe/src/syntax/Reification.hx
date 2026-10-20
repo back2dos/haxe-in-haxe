@@ -138,7 +138,7 @@ class Reification {
 					fld("pack", field(ei, "pack", p)),
 					fld("name", field(ei, "name", p)),
 					fld("sub", field(ei, "sub", p)),
-					fld("params", arr(toTparam, t.tparams, p)),
+					fld("params", vec(toTparam, t.tparams, p)),
 					fld("pos", toPos(p)),
 					fld("posPath", toPos(ptp.posPath))
 				], p);
@@ -146,7 +146,7 @@ class Reification {
 			var fields = [
 				fld("pack", arr(toString, t.tpackage, p)),
 				fld("name", toString(t.tname, p)),
-				fld("params", arr(toTparam, t.tparams, p)),
+				fld("params", vec(toTparam, t.tparams, p)),
 				fld("pos", toPos(p)),
 				fld("posPath", toPos(ptp.posPath))
 			];
@@ -166,14 +166,14 @@ class Reification {
 				}
 			}) if (n.charAt(0) == "$"): toString(n, p);
 			case CTPath(t): en("ComplexType", "TPath", vector(toTpath(t)), p);
-			case CTFunction(args, ret): en("ComplexType", "TFunction", vector(arr(toTypeHint, args, p), toTypeHint(ret, p)), p);
-			case CTAnonymous(fields): en("ComplexType", "TAnonymous", vector(arr(toCfield, fields, p)), p);
+			case CTFunction(args, ret): en("ComplexType", "TFunction", vector(vec(toTypeHint, args, p), toTypeHint(ret, p)), p);
+			case CTAnonymous(fields): en("ComplexType", "TAnonymous", vector(vec(toCfield, fields, p)), p);
 			case CTParent(t): en("ComplexType", "TParent", vector(toTypeHint(t, p)), p);
 			case CTExtend(tl,
-				fields): en("ComplexType", "TExtend", vector(arr(function(t, _) return toTpath(t), tl, p), arr(toCfield, fields, p)), p);
+				fields): en("ComplexType", "TExtend", vector(vec(function(t, _) return toTpath(t), tl, p), vec(toCfield, fields, p)), p);
 			case CTOptional(t): en("ComplexType", "TOptional", vector(toTypeHint(t, p)), p);
 			case CTNamed(n, t): en("ComplexType", "TNamed", vector(placed(n), toTypeHint(t, p)), p);
-			case CTIntersection(tl): en("ComplexType", "TIntersection", vector(arr(toCtype, tl, p)), p);
+			case CTIntersection(tl): en("ComplexType", "TIntersection", vector(vec(toCtype, tl, p)), p);
 		};
 		inline function toFun(f:Func, p:Pos):Expr {
 			p = {pfile: p.pfile, pmin: p.pmin, pmax: p.pmin};
@@ -189,13 +189,13 @@ class Reification {
 			function param(t:TypeParam, p:Pos):Expr return obj([
 				fld("name", placed(t.tpName)),
 				fld("constraints", t.tpConstraints == null ? nil(p) : arr(toCtype, [t.tpConstraints], p)),
-				fld("params", arr(param, t.tpParams, p))
+				fld("params", vec(param, t.tpParams, p))
 			], p);
 			return obj([
-				fld("args", arr(arg, f.fArgs, p)),
+				fld("args", vec(arg, f.fArgs, p)),
 				fld("ret", opt(toTypeHint, f.fType, p)),
 				fld("expr", opt(toExpr, f.fExpr, p)),
-				fld("params", arr(param, f.fParams, p))
+				fld("params", vec(param, f.fParams, p))
 			], p);
 		}
 		toCfield = function(f, p) {
@@ -398,7 +398,7 @@ class Reification {
 		};
 		function toTparamDecl(p:Pos, t:TypeParam):Expr return obj([
 			fld("name", placed(t.tpName)),
-			fld("params", {expr: EArrayDecl(t.tpParams.mapToVector(function(t) return toTparamDecl(p, t))), pos: p}),
+			fld("params", {expr: EArrayDecl(t.tpParams.map(function(t) return toTparamDecl(p, t))), pos: p}),
 			fld("meta", toMeta(t.tpMeta, p)),
 			fld("constraints", {expr: EArrayDecl(t.tpConstraints == null ? vector() : vector(toCtype(t.tpConstraints, p))), pos: p}),
 			fld("defaultType", opt(toCtype, t.tpDefault, p))
@@ -428,7 +428,7 @@ class Reification {
 						fld("pos", toPos(p)),
 						fld("meta", toMeta(d.meta, p)),
 						fld("params", {
-							expr: EArrayDecl(d.params.mapToVector(function(t) return toTparamDecl(p, t))),
+							expr: EArrayDecl(d.params.map(function(t) return toTparamDecl(p, t))),
 							pos: p
 						}),
 						fld("isExtern", bool(externFlag, p)),
@@ -439,7 +439,7 @@ class Reification {
 							bool(finalFlag, p),
 							bool(abstractFlag, p)
 						), p)),
-						fld("fields", {expr: EArrayDecl(d.data.mapToVector(function(f) return toCfield(f, p))), pos: p})
+						fld("fields", {expr: EArrayDecl(d.data.map(function(f) return toCfield(f, p))), pos: p})
 					], p);
 				case _: throw "assert";
 			};

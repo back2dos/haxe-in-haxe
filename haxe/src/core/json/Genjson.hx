@@ -247,7 +247,7 @@ class Genjson {
 	public static function generateAstTypeParam(ctx:GenjsonContext, tp:TypeParam):JsonValue {
 		return jobject([
 			kv("name", jstring(tp.tpName.name)),
-			kv("params", jlist(generateAstTypeParam.bind(ctx), tp.tpParams)),
+			kv("params", jlist(generateAstTypeParam.bind(ctx), tp.tpParams.toArray())),
 			kv("constraints", jtodo),
 			kv("metadata", generateMetadata(ctx, tp.tpMeta))
 		]);

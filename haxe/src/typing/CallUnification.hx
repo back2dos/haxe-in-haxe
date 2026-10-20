@@ -168,7 +168,7 @@ class CallUnification {
 									// typer requires dynamic arrays to be explicitly declared as Array<Dynamic>
 									if (follow(argT) == tDynamic) {
 										var dynamicType = makePtpTh(mkTypePath([], "Dynamic"), p);
-										var ct = makePtpCt(mkTypePath([], "Array", [TPType(dynamicType)]), p);
+										var ct = makePtpCt(mkTypePath([], "Array", vector(TPType(dynamicType))), p);
 										e = {expr: ECheckType(e, {type: ct, pos: p}), pos: p}; // ([arg1, arg2...]:Array<Dynamic>)
 									}
 									return [typeAgainst(name, t, e)];

@@ -82,7 +82,7 @@ class AstPrinter {
 			+ sTypeParamOrConsts(tabs, t.path.tparams);
 
 	public static function sTypeParamOrConsts(tabs:String,
-			pl:Array<TypeParamOrConst>):String return pl.length == 0 ? "" : "<" + [for (p in pl) sTypeParamOrConst(tabs, p)].join(",") +
+			pl:haxe.ds.Vector<TypeParamOrConst>):String return pl.length == 0 ? "" : "<" + [for (p in pl) sTypeParamOrConst(tabs, p)].join(",") +
 			">";
 
 	public static function sTypeParamOrConst(tabs:String, p:TypeParamOrConst):String return switch p {
@@ -166,7 +166,7 @@ class AstPrinter {
 			+ (t.tpConstraints == null ? "" : ":(" + sComplexType(tabs, t.tpConstraints.type) + ")");
 
 	public static function sTypeParamList(tabs:String,
-			tl:Array<TypeParam>):String return tl.length == 0 ? "" : "<" + [for (t in tl) sTypeParam(tabs, t)].join(", ") + ">";
+			tl:haxe.ds.Vector<TypeParam>):String return tl.length == 0 ? "" : "<" + [for (t in tl) sTypeParam(tabs, t)].join(", ") + ">";
 
 	public static function sFuncArg(tabs:String,
 			a:FuncArg):String return a.optional ? "?" : "" + a.name.name + sOptTypeHint(tabs, a.type, ":") + sOptExpr(tabs, a.expr, " = ");

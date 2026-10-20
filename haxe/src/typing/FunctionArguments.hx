@@ -128,13 +128,13 @@ class FunctionArguments {
 	final isExtern:Bool;
 	final doDisplay:Bool;
 	final abstractThis:Null<T>;
-	final syntax:Array<FuncArg>;
+	final syntax:haxe.ds.Vector<FuncArg>;
 	final withDefault:Array<ArgumentWithDefault>;
 	var typeRepr:Null<Array<{name:String, optional:Bool, type:T}>> = null;
 	var exprRepr:Null<Array<{variable:TVar, defaultValue:Null<TExpr>}>> = null;
 
 	public function new(com:CommonContext, typeArg:Int->Bool->Null<TypeHint>->Pos->T, isExtern:Bool, doDisplay:Bool, abstractThis:Null<T>,
-			syntax:Array<FuncArg>) {
+			syntax:haxe.ds.Vector<FuncArg>) {
 		this.com = com;
 		this.isExtern = isExtern;
 		this.doDisplay = doDisplay;

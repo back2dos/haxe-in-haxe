@@ -25,6 +25,7 @@ import core.Ast.StringLiteralKind;
 import core.Ast.Token;
 import core.Ast.Unop;
 import core.Globals.Pos;
+import haxe.ds.Vector;
 
 enum LexerErrorMsg {
 	InvalidCharacter(code:Int);
@@ -111,7 +112,7 @@ class Lexer {
 		lline: 1,
 		lmaxline: 1,
 		llines: [{offset: 0, line: 1}],
-		lalines: haxe.ds.Vector.fromArrayCopy([{offset: 0, line: 1}]),
+		lalines: Vector.fromArrayCopy([{offset: 0, line: 1}]),
 		llast: 0x7FFFFFFF,
 		llastindex: 0
 	};
@@ -199,7 +200,7 @@ class Lexer {
 		// rebuild cache if we have a new line
 		if (f.lmaxline != f.lline) {
 			f.lmaxline = f.lline;
-			f.lalines = haxe.ds.Vector.fromArrayCopy(f.llines);
+			f.lalines = Vector.fromArrayCopy(f.llines);
 			f.llast = 0x7FFFFFFF;
 			f.llastindex = 0;
 		}

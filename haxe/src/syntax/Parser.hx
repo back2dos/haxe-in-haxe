@@ -30,6 +30,7 @@ import core.ds.Stream;
 import core.Message.WarningCode;
 import syntax.Lexer.LexerContext;
 import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 enum ParserPreprocessorError {
 	InvalidEnd;
@@ -409,7 +410,7 @@ class Parser {
 	public static final magicTypePath:TypePath = {
 		tpackage: [],
 		tname: "",
-		tparams: [],
+		tparams: vector(),
 		tsub: null
 	};
 

@@ -724,7 +724,7 @@ class Inheritance {
 		}
 	}
 
-	public static function setHeritance(ctx:Typer, c:TClass, herits:Array<ClassFlag>, p:Pos):Array<Void->Void> {
+	public static function setHeritance(ctx:Typer, c:TClass, herits:haxe.ds.Vector<ClassFlag>, p:Pos):Array<Void->Void> {
 		var isLib = Meta.has(MetaTag.LibType, c.clMeta),
 			oldMeta = c.clMeta,
 			hasInterf = false;

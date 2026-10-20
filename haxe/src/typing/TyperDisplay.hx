@@ -686,7 +686,7 @@ class TyperDisplay {
 									tpackage: mt.pack,
 									tname: mt.moduleName,
 									tsub: mt.name,
-									tparams: []
+									tparams: vector()
 								});
 								switch resolveTypedef(mt) {
 									case TClassDecl(c): hasConstructor(c);

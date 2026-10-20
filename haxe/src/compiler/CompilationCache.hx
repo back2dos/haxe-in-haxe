@@ -21,11 +21,11 @@ import core.ds.VectorTools.vector;
 	public var cFilePath:ResolvedFile;
 	public var cTime:Float;
 	public var cPackage:Array<String>;
-	public var cDecls:Array<TypeDecl>;
+	public var cDecls:haxe.ds.Vector<TypeDecl>;
 	public var cModuleName:Null<String>;
 	public var cPdi:ParserDisplayInformation;
 
-	public inline function new(cFilePath:ResolvedFile, cTime:Float, cPackage:Array<String>, cDecls:Array<TypeDecl>,
+	public inline function new(cFilePath:ResolvedFile, cTime:Float, cPackage:Array<String>, cDecls:haxe.ds.Vector<TypeDecl>,
 			cModuleName:Null<String>, cPdi:ParserDisplayInformation) {
 		this.cFilePath = cFilePath;
 		this.cTime = cTime;
