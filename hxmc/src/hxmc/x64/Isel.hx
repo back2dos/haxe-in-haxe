@@ -431,17 +431,24 @@ class Isel implements hxmc.Target.Selector {
 		}
 		// x & constant compared with 0 (== or !=), used only there, in its
 		// block: a TESTI of the comparison
+		// (also when value numbering left one x & constant for several such
+		// comparisons: each tests x, the and is not computed nor kept live)
 		testFolds = new Map();
+		var testUses = new Map<Int, Int>();
 		for (b in mf.blocks)
 			for (c in b.ins) {
 				if (c.op != Cmp || c.imm != (CEq : Int) && c.imm != (CNe : Int)) continue;
 				if (immOf(c.b) != 0 || isymOf(c.b) != null) continue;
 				var x = mf.vals[c.a];
-				if (x.op != And || x.block != b || useCount[x.id] != 1 || x.ty == F64) continue;
+				if (x.op != And || x.ty == F64) continue;
 				var k = immOf(x.b);
 				if (k == null || isymOf(x.b) != null || folded[x.a]) continue;
-				testFolds[x.id] = true;
-				folded[x.id] = true;
+				var n = testUses.exists(x.id) ? testUses.get(x.id) + 1 : 1;
+				testUses.set(x.id, n);
+				if (n == useCount[x.id]) {
+					testFolds[x.id] = true;
+					folded[x.id] = true;
+				}
 			}
 		// x + constant used only as the address of loads and stores: their
 		// displacement (a symbolic constant, a global's offset, relocated)
