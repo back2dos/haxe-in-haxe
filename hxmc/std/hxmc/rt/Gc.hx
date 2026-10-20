@@ -181,6 +181,10 @@ class Gc {
 	static var nnatives:Int;
 	static var nativesCap:Int;
 	static var nativesLock:Ptr;
+	// macOS (no pipe2, accept4 or SOCK_CLOEXEC): a descriptor the runtime creates
+	// gets FD_CLOEXEC under this lock, which fork takes too, so no child forked
+	// meanwhile inherits it (PosixSys.cloexecFds, PosixSys.spawn)
+	public static var fdLock:Ptr;
 	static var deadNatives:Ptr;
 	static var deadCap:Int;
 
@@ -1039,6 +1043,9 @@ class Gc {
 	@:hxmc.noGc static function collectFor(full:Bool, need:I64) {
 		if (!Threads.worldStop()) return;
 		if (youngDirty.ult(youngNext)) youngDirty = youngNext;
+		#if hxmc.census
+		if (census != 0) Census.countYoung(youngStart, youngNext);
+		#end
 		if (full) majorAndTime(need) else {
 			var before = oldPtr;
 			var m0 = majors;
@@ -1166,6 +1173,9 @@ class Gc {
 		}
 		Mem.setI64(p, 0, header);
 		LibC.memset(p.add(8), 0, bytes - 8);
+		#if hxmc.census
+		if (census != 0) Census.countAlloc(header, bytes);
+		#end
 		return p.add(8);
 	}
 
@@ -1372,6 +1382,8 @@ class Gc {
 		Os.mutexInit(finalsLock);
 		nativesLock = LibC.malloc(Os.MUTEX_BYTES);
 		Os.mutexInit(nativesLock);
+		fdLock = LibC.malloc(Os.MUTEX_BYTES);
+		Os.mutexInit(fdLock);
 		return sstack;
 	}
 
@@ -1415,7 +1427,7 @@ class Gc {
 		Mem.setI64(out, 0, 0);
 		Mem.setI64(out, 8, 0);
 		if (Mem.os() != 0) return;
-		var fd = Posix.open(Mem.cstr("/proc/self/status"), 0, 0);
+		var fd = Posix.open(Mem.cstr("/proc/self/status"), 0x80000, 0); // O_CLOEXEC
 		if (fd < 0) return;
 		var buf = Mem.stack(8192);
 		var n = 0;
@@ -1465,9 +1477,11 @@ class Gc {
 		#if hxmc.census
 		if (census != 0) {
 			var c = census;
+			Census.countYoung(youngStart, youngNext);
 			census = 0;
 			majorAndTime(0);
 			censusNow(Mem.cstr("exit"));
+			Census.allocReport();
 			census = c;
 		}
 		#end

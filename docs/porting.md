@@ -29,6 +29,13 @@ These apply to every change of `haxe/src`.
   UTF8 functions, lengths in bytes); compare strings with
   `core.ds.Key.compareStrings` (OCaml's order: code point order, which UTF-16
   units are not).
+- Upstream's lists are Arrays, except where a hot path relies on O(1)
+  `x :: l` and shared tails: there `core.ds.MlList` (`Nil`/`Cons`, the shape
+  of ml2hx's runtime list), so far the matcher's rows (2% fewer instructions
+  in the self-compile). Convert another site only when it measures: the
+  resolution list and the analyzer's CFG edges saved 0.2-0.5% of the
+  instructions and no wall time beyond noise, so they stayed Arrays.
+  `core.TType`'s fields stay Arrays (hxmc's back end and HXB read them).
 - Output that depends on the reference binary itself is the one exception
   to byte identity: hl/c's digest names of the types whose description
   holds a closure (Marshal writes code pointers and the digest of the
