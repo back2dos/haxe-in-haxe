@@ -1131,24 +1131,28 @@ class Cleanup {
 							case TLocal(v) if (locals.exists(v.vId)): true;
 							case _: checkExpr(referencesLocal, e);
 						};
-						function loop2(el:Vector<TExpr>):Vector<TExpr> return switch el {
-							case [{eexpr: TBreak}] if (isTrueExpr(e1) && !continues):
-								doWhile = Texpr.Builder.makeBool(scom.basic, true, e1.epos);
-								vector();
-							case [{eexpr: TIf(cond, {eexpr: TBlock([{eexpr: TBreak}])}, null)}]
-								if (isTrueExpr(e1) && !referencesLocal(cond) && !continues):
-								doWhile = cond;
-								vector();
-							case []: vector();
-							case _:
-								var first = el[0];
-								switch first.eexpr {
-									case TBreak | TContinue | TReturn(_) | TThrow(_): vector(first);
+						// port: the list walked by index (upstream: loop2 on its tail), the
+						// statements kept a prefix of el, copied once
+						function loop2(el:Vector<TExpr>):Vector<TExpr> {
+							for (i in 0...el.length) {
+								var first = el[i];
+								// (the last statement)
+								if (i == el.length - 1) switch first.eexpr {
+									case TBreak if (isTrueExpr(e1) && !continues):
+										doWhile = Texpr.Builder.makeBool(scom.basic, true, e1.epos);
+										return el.slice(0, i);
+									case TIf(cond, {eexpr: TBlock([{eexpr: TBreak}])}, null) if (isTrueExpr(e1) && !referencesLocal(cond) && !continues):
+										doWhile = cond;
+										return el.slice(0, i);
 									case _:
-										collectVars(first);
-										VectorTools.cons(first, loop2(el.slice(1)));
 								}
-						};
+								switch first.eexpr {
+									case TBreak | TContinue | TReturn(_) | TThrow(_): return el.slice(0, i + 1);
+									case _: collectVars(first);
+								}
+							}
+							return el.slice(0, el.length);
+						}
 						var el = loop2(el);
 						doWhile == null ? withExpr(e,
 							TWhile(e1, withExpr(e2, TBlock(el)),
