@@ -837,7 +837,7 @@ class Lower {
 			switch TFunctions.follow(ef.efType) {
 				case TFun(s):
 					ci.params = s.args.mapToVector(a -> boxed(ty(a.type)));
-					ci.paramNames = [for (a in s.args) a.name];
+					ci.paramNames = s.args.mapToVector(a -> a.name);
 				case _:
 					ci.global = prog.globals.length;
 					prog.globals.push({ty: TRef(RCtor(ci)), init: ci, name: ei.ident + "_" + ci.name});

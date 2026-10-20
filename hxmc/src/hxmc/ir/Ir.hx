@@ -102,7 +102,7 @@ class CtorInfo {
 	public var name:String;
 	public var tag:Int;
 	public var params:Vector<Ty>; // from slot 0: the tag is the header's type index (Gc.hx)
-	public var paramNames:Array<String> = [];
+	public var paramNames:Vector<String> = vector();
 	public var global:Int = -1; // singleton for constructors without arguments
 	public var tindex:Int = -1;
 
