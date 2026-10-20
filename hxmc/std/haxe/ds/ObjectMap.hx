@@ -203,7 +203,8 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	}
 
 	// rebuild with removed entries dropped and room for twice the live ones
-	// (a table that only grows doubles: at 1/2 full, to 1/4; removals cost at most one entry moved each);
+	// (a table that only grows doubles: at 1/2 full, to 1/4; a rebuild after
+	// removals moves at most one entry per removal);
 	// the index is up to date, or there is no live entry
 	function grow() {
 		var okvs = kvs, od = dead, on = used;

@@ -142,7 +142,8 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 	}
 
 	// rebuild with removed entries dropped and room for twice the live ones
-	// (a table that only grows doubles: at 1/2 full, to 1/4; removals cost at most one entry moved each)
+	// (a table that only grows doubles: at 1/2 full, to 1/4; a rebuild after
+	// removals moves at most one entry per removal)
 	function grow() {
 		var os = slots, ovs = vs, od = dead, on = used, ocap = mask + 1;
 		var cap = 8;

@@ -149,7 +149,8 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	}
 
 	// rebuild with removed entries dropped and room for twice the live ones
-	// (a table that only grows doubles: at 1/2 full, to 1/4; removals cost at most one entry moved each)
+	// (a table that only grows doubles: at 1/2 full, to 1/4; a rebuild after
+	// removals moves at most one entry per removal)
 	function grow() {
 		var os = slots, okvs = kvs, od = dead, on = used, ocap = mask + 1;
 		var cap = 8;
