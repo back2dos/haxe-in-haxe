@@ -189,26 +189,26 @@ class Facts {
 	// start with its superclass's, so the layout of a subclass extends the
 	// superclass's. Returns per field its location (see `at`); appends the
 	// physical slots (for the pointer map) to `slots`.
-	static function layout(slots:Array<Null<Ty>>, tys:Array<Ty>):Array<Int> {
-		var locs = [], half = -1;
-		for (t in tys)
-			switch t {
+	static function layout(slots:Array<Null<Ty>>, tys:Array<Ty>):Vector<Int> {
+		var locs = new Vector<Int>(tys.length), half = -1;
+		for (k in 0...tys.length)
+			switch tys[k] {
 				case TI32 | TBool:
 					if (half >= 0) {
-						locs.push(2 * half + 1);
+						locs[k] = 2 * half + 1;
 						half = -1;
 					} else {
 						half = slots.length;
-						locs.push(2 * half);
+						locs[k] = 2 * half;
 						slots.push(TI32);
 					}
 				case TStruct(_, size):
 					// (a struct's memory: whole slots, none a reference)
-					locs.push(slots.length);
+					locs[k] = slots.length;
 					for (_ in 0...(size + 7) >> 3)
 						slots.push(TI64);
-				case _:
-					locs.push(slots.length);
+				case t:
+					locs[k] = slots.length;
 					slots.push(t);
 			}
 		return locs;

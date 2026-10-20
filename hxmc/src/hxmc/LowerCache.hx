@@ -156,7 +156,7 @@ enum LCall {
 	CBoundClos(f:FuncInfo, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>, owner:FuncInfo, r:LambdaInfo);
 	CAdapter(from:SigInfo, to:SigInfo, r:LambdaInfo);
 	CDynAdapter(to:SigInfo, r:LambdaInfo);
-	CLambda(sig:SigInfo, captures:Array<Local>, name:String, module:String, r:LambdaInfo);
+	CLambda(sig:SigInfo, captures:haxe.ds.Vector<Local>, name:String, module:String, r:LambdaInfo);
 	CSelector(name:String, sig:SigInfo, r:Int);
 	CNeedsDispatch(c:TClass, name:String, r:Bool);
 	CLookup(c:TClass, name:String, r:Null<{cls:TClass, field:TClassField}>);
@@ -553,7 +553,7 @@ class CachedLower extends Lower {
 		return r;
 	}
 
-	override public function newLambda(sig:SigInfo, captures:Array<Local>, body:hxmc.ir.FnLower->Void, name:String, module:String):LambdaInfo {
+	override public function newLambda(sig:SigInfo, captures:haxe.ds.Vector<Local>, body:hxmc.ir.FnLower->Void, name:String, module:String):LambdaInfo {
 		depth++;
 		var r = super.newLambda(sig, captures, body, name, module);
 		depth--;
@@ -667,7 +667,7 @@ class CachedLower extends Lower {
 			case CLambda(s, caps, name, module, r):
 				var body = cache.lambdaEntry(r.fn);
 				if (body == null) mismatch("closure " + name + " without its body");
-				var n = newLambda(obj(s), [for (x in caps) local(x)], _ -> throw "hxmc: a replayed closure lowered", name, module);
+				var n = newLambda(obj(s), caps.map(local), _ -> throw "hxmc: a replayed closure lowered", name, module);
 				bindLambda(r, n);
 				bodyLambdas.remove(n.fn);
 				replayLambdas.set(n.fn, body);

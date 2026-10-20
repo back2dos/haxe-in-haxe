@@ -824,17 +824,19 @@ class Lower {
 		ei = new EnumInfo(core.Globals.sTypePath(e.ePath), ident(e.ePath.pack, e.ePath.name));
 		enums.set(e, ei);
 		prog.enums.push(ei);
+		var ctors = [];
 		for (name in e.eNames) {
 			var ef = e.eConstrs.get(name);
-			ei.ctors.push(new CtorInfo(ei, name, ef.efIndex, []));
+			ctors.push(new CtorInfo(ei, name, ef.efIndex, vector()));
 		}
-		ei.ctors.sort((a, b) -> a.tag - b.tag);
+		ctors.sort((a, b) -> a.tag - b.tag);
+		ei.ctors = Vector.fromArrayCopy(ctors);
 		outsideUnfolding(() -> for (name in e.eNames) {
 			var ef = e.eConstrs.get(name);
 			var ci = ei.ctors[ef.efIndex];
 			switch TFunctions.follow(ef.efType) {
 				case TFun(s):
-					ci.params = [for (a in s.args) boxed(ty(a.type))];
+					ci.params = s.args.mapToVector(a -> boxed(ty(a.type)));
 					ci.paramNames = [for (a in s.args) a.name];
 				case _:
 					ci.global = prog.globals.length;
@@ -1148,7 +1150,7 @@ class Lower {
 	// `name` and `module`: a name that stays the same when unrelated code changes
 	// (Lower.lambdaName for closures in a function body, else derived from what
 	// the closure forwards to) and the module whose C file holds it
-	public function newLambda(sig:SigInfo, captures:Array<Local>, body:FnLower->Void, name:String, module:String):LambdaInfo {
+	public function newLambda(sig:SigInfo, captures:Vector<Local>, body:FnLower->Void, name:String, module:String):LambdaInfo {
 		var fi = new FuncInfo(name, module);
 		var li = new LambdaInfo(prog.lambdas.length, sig, captures, fi);
 		fi.lambda = li;
@@ -1222,7 +1224,7 @@ class Lower {
 			for (i in 0...f.args.length)
 				if (!(f.sret && i == f.args.length - 1)) closureArgTy(f.args[i].ty, ds != null && i < ds.length ? ds[i] : null)
 		], f.ret);
-		li = newLambda(sig, [], fl -> fl.forward(f, null), f.name + "__sclos", f.module);
+		li = newLambda(sig, vector(), fl -> fl.forward(f, null), f.name + "__sclos", f.module);
 		staticClosures.set(f, li);
 		return li;
 	}
@@ -1233,7 +1235,7 @@ class Lower {
 	public function hostClosure(name:String, sig:SigInfo, ?self:Ty):LambdaInfo {
 		var li = hostClosures.get(name);
 		if (li != null) return li;
-		li = newLambda(sig, self == null ? [] : [new Local(-1, "self", self)], fl -> fl.forwardHost(name), name + "__hclos", "_closures");
+		li = newLambda(sig, self == null ? vector() : vector(new Local(-1, "self", self)), fl -> fl.forwardHost(name), name + "__hclos", "_closures");
 		hostClosures.set(name, li);
 		return li;
 	}
@@ -1243,7 +1245,7 @@ class Lower {
 	public function ctorClosure(ci:CtorInfo, sig:SigInfo):LambdaInfo {
 		var li = ctorClosures.get(ci);
 		if (li != null) return li;
-		li = newLambda(sig, [], fl -> fl.forwardCtor(ci), ci.en.ident + "_" + ci.name + "__cclos", "_closures");
+		li = newLambda(sig, vector(), fl -> fl.forwardCtor(ci), ci.en.ident + "_" + ci.name + "__cclos", "_closures");
 		ctorClosures.set(ci, li);
 		return li;
 	}
@@ -1270,7 +1272,7 @@ class Lower {
 			}
 			var sig = prog.sig([for (i in 1...n) hasDefault(i) ? optionalTy(ds.args[i]) : ds.args[i]], ds.ret);
 			var self = new Local(-1, "self", TRef(RObj(root)));
-			return newLambda(sig, [self], fl -> fl.forward(null, dispatch), lambdaName(owner), owner.module);
+			return newLambda(sig, vector(self), fl -> fl.forward(null, dispatch), lambdaName(owner), owner.module);
 		}
 		var li = boundClosures.get(f);
 		if (li != null && dispatch == null) return li;
@@ -1278,7 +1280,7 @@ class Lower {
 		var args = [for (i in 1...(f.sret ? f.args.length - 1 : f.args.length)) closureArgTy(f.args[i].ty, ds != null && i < ds.length ? ds[i] : null)];
 		var sig = prog.sig(args, f.ret);
 		var self = new Local(-1, "self", TRef(RObj(root)));
-		li = newLambda(sig, [self], fl -> fl.forward(f, dispatch), dispatch == null ? f.name + "__bound" : lambdaName(owner), dispatch == null ? f.module : owner.module);
+		li = newLambda(sig, vector(self), fl -> fl.forward(f, dispatch), dispatch == null ? f.name + "__bound" : lambdaName(owner), dispatch == null ? f.module : owner.module);
 		if (dispatch == null) boundClosures.set(f, li);
 		return li;
 	}
@@ -1291,7 +1293,7 @@ class Lower {
 		var li = adapters.get(key);
 		if (li != null) return li;
 		var inner = new Local(-1, "inner", TRef(RClos(from)));
-		li = newLambda(to, [inner], fl -> fl.adapt(from), "adapt__" + from.key + "__" + to.key, "_closures");
+		li = newLambda(to, vector(inner), fl -> fl.adapt(from), "adapt__" + from.key + "__" + to.key, "_closures");
 		adapters.set(key, li);
 		return li;
 	}
@@ -1304,7 +1306,7 @@ class Lower {
 		var li = dynAdapters.get(to.key);
 		if (li != null) return li;
 		var inner = new Local(-1, "inner", TRef(RAny));
-		li = newLambda(to, [inner], fl -> fl.adaptDynamic(), "dynadapt__" + to.key, "_closures");
+		li = newLambda(to, vector(inner), fl -> fl.adaptDynamic(), "dynadapt__" + to.key, "_closures");
 		dynAdapters.set(to.key, li);
 		return li;
 	}

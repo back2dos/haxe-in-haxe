@@ -502,7 +502,7 @@ class FnLower {
 	// operands converted to the given representations (missing trailing ones:
 	// defaults; `callee` the function they are of, `recv` its receiver, when
 	// one may read its arguments or `this`: defaultValue)
-	function args(es:Vector<TExpr>, to:Array<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0, ?callee:FuncInfo, ?recv:() -> Ex):Vector<Ex> {
+	function args(es:Vector<TExpr>, to:Vector<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0, ?callee:FuncInfo, ?recv:() -> Ex):Vector<Ex> {
 		var xs = operands(es);
 		var vars = callee != null ? l.argVars.get(callee) : null;
 		var r = [], rTys = [];
@@ -651,8 +651,8 @@ class FnLower {
 		return found;
 	}
 
-	static function tys(f:FuncInfo):Array<Ty>
-		return [for (a in f.args) a.ty];
+	static function tys(f:FuncInfo):Vector<Ty>
+		return f.args.mapToVector(a -> a.ty);
 
 	function asLocal(x:Ex, t:Ty):Local {
 		return switch x {
@@ -1416,11 +1416,11 @@ class FnLower {
 		}
 	}
 
-	function ctorSig(c:TClass):Array<Ty> {
-		if (c.clConstructor == null) return [];
+	function ctorSig(c:TClass):Vector<Ty> {
+		if (c.clConstructor == null) return vector();
 		return switch TFunctions.follow(c.clConstructor.cfType) {
-			case TFun(s): [for (a in s.args) ty(a.type)];
-			case _: [];
+			case TFun(s): s.args.mapToVector(a -> ty(a.type));
+			case _: vector();
 		}
 	}
 
@@ -1502,7 +1502,7 @@ class FnLower {
 				var ci = l.ctorInfo(ef, en);
 				if (ci.global >= 0) coerce(EGlobal(ci.global, TRef(RCtor(ci))), TRef(RCtor(ci)), tyOf(e)) else {
 					// a constructor with arguments used as a function
-					var sig = l.getProgram().sig(ci.params, TRef(REnum(ci.en)));
+					var sig = l.getProgram().sig(ci.params.toArray(), TRef(REnum(ci.en)));
 					var li = l.ctorClosure(ci, sig);
 					coerce(temp(TRef(RClos(sig)), ENewClos(li, vector())), TRef(RClos(sig)), tyOf(e));
 				}
@@ -1584,12 +1584,12 @@ class FnLower {
 	// receiver's class runs (an override may declare other values than the
 	// method the static type finds, `ds`). `xs` are the arguments after the
 	// receiver (`to` with it).
-	function overrideDefaults(c:TClass, name:String, o:Ex, xs:Vector<Ex>, given:Int, to:Array<Ty>, ds:Null<Array<Null<TExpr>>>) {
+	function overrideDefaults(c:TClass, name:String, o:Ex, xs:Vector<Ex>, given:Int, to:Vector<Ty>, ds:Null<Array<Null<TExpr>>>) {
 		for (i in given + 1...to.length) {
 			var all:Array<Null<Ex>> = [o];
 			for (x in xs)
 				all.push(x);
-			var x = receiverDefault(c, name, o, i, ds != null && i < ds.length ? ds[i] : null, to[i], xs[i - 1], all, to);
+			var x = receiverDefault(c, name, o, i, ds != null && i < ds.length ? ds[i] : null, to[i], xs[i - 1], all, to.toArray());
 			for (k in 1...all.length)
 				xs[k - 1] = all[k];
 			if (x != null) xs[i - 1] = x;
@@ -2027,7 +2027,7 @@ class FnLower {
 				// haxe.Resource's content: an object per resource with its name
 				// and its data in base64 (Lower.resources), as genjs writes it
 				var sh = l.getProgram().shape([{name: "name", ty: TRef(RStr)}, {name: "data", ty: TRef(RStr)}]);
-				var objs = Lower.resources.mapToVector(r -> temp(TRef(RAnon), ENewAnon(sh, sh.fields.mapToVector(f -> EStr(f.name == "name" ? r.name : r.data)))));
+				var objs = Lower.resources.mapToVector(r -> temp(TRef(RAnon), ENewAnon(sh, sh.fields.map(f -> EStr(f.name == "name" ? r.name : r.data)))));
 				var at = TRef(RArr(TRef(RAnon)));
 				return coerce(temp(at, ENewArr(TRef(RAnon), objs)), at, rt);
 			case TField(_, FStatic(c, cf)) if (c.hasClassFlag(CExtern) || cf.cfExpr == null):
@@ -2052,7 +2052,7 @@ class FnLower {
 				var intrinsic = intrinsicStatic(name, cargs, e);
 				if (intrinsic != null) return intrinsic;
 				var t = ty(s.ret);
-				var xs = args(cargs, [for (a in s.args) ty(a.type)], null);
+				var xs = args(cargs, s.args.mapToVector(a -> ty(a.type)), null);
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);
 			case TField(obj, FDynamic("cca")) if (tyOf(obj).match(TRef(RStr)) && cargs.length == 1):
 				// StringTools.fastCodeAt / unsafeCodeAt: `untyped s.cca(i)` (0 past the end, as on cpp/hl)
@@ -2101,7 +2101,11 @@ class FnLower {
 				};
 				var name = Lower.nativeName(c) + "_" + cf.cfName;
 				var t = ty(s.ret);
-				var xs = args(VectorTools.cons(obj, cargs), [tyOf(obj)].concat([for (a in s.args) ty(a.type)]), null);
+				var to = new Vector<Ty>(s.args.length + 1);
+				to[0] = tyOf(obj);
+				for (k in 0...s.args.length)
+					to[k + 1] = ty(s.args[k].type);
+				var xs = args(VectorTools.cons(obj, cargs), to, null);
 				var intrinsic = intrinsicMethod(name, xs, tyOf(obj));
 				if (intrinsic != null) return coerce(intrinsic, t, rt);
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);
@@ -2128,7 +2132,7 @@ class FnLower {
 					var rootTy = TRef(RObj(l.rootClass()));
 					var o = coerce(value(obj), tyOf(obj), rootTy);
 					var before = out.length;
-					var to = sig.ret.match(TStruct(_)) ? d.args.slice(0, d.args.length - 1) : d.args;
+					var to = VectorTools.ofArray(sig.ret.match(TStruct(_)) ? d.args.slice(0, d.args.length - 1) : d.args);
 					var xs = args(cargs, to, ds, 1, implFn, () -> o = receiverLocal(o, rootTy, before));
 					o = spillBefore(o, rootTy, before);
 					if (cargs.length + 1 < to.length && !o.match(ELocal(_))) o = ELocal(asLocal(o, rootTy)); // (the defaults may test it)
@@ -2163,7 +2167,7 @@ class FnLower {
 				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
 			case TField(obj, FDynamic(name)):
 				var o = coerce(value(obj), tyOf(obj), TRef(RAny));
-				var xs = args(cargs, [for (_ in cargs) TRef(RAny)], null);
+				var xs = args(cargs, new Vector<Ty>(cargs.length, TRef(RAny)), null);
 				var arr = temp(TRef(RArr(TRef(RAny))), ENewArr(TRef(RAny), xs));
 				var r = ECallHost(l.native("hx_dyn_call_field"), vector(o, EStr(name), arr), TRef(RAny));
 				return coerceRhs(r, TRef(RAny), rt);
@@ -2184,7 +2188,7 @@ class FnLower {
 			case _:
 				var fx = coerce(value(f), tyOf(f), TRef(RAny));
 				var c = asLocal(fx, TRef(RAny));
-				var xs = args(cargs, [for (_ in cargs) TRef(RAny)], null);
+				var xs = args(cargs, new Vector<Ty>(cargs.length, TRef(RAny)), null);
 				var arr = temp(TRef(RArr(TRef(RAny))), ENewArr(TRef(RAny), xs));
 				return coerceRhs(ECallHost(l.native("hx_dyn_call"), vector(ELocal(c), arr), TRef(RAny)), TRef(RAny), rt);
 		}
@@ -2377,7 +2381,7 @@ class FnLower {
 				case _:
 			}
 		var t = ty(s.ret);
-		var xs = args(cargs, [for (a in s.args) ty(a.type)], null);
+		var xs = args(cargs, s.args.mapToVector(a -> ty(a.type)), null);
 		if (t.match(TStruct(_))) {
 			// (the result's slot in this frame, MirBuild.cStructRet)
 			var lo = newLocal("cr", t);
@@ -2586,9 +2590,11 @@ class FnLower {
 	}
 
 	// the argument types a call passes to f (without its result's address)
-	static function callTys(f:FuncInfo):Array<Ty> {
-		var t = tys(f);
-		if (f.sret) t.pop();
+	static function callTys(f:FuncInfo):Vector<Ty> {
+		var n = f.sret ? f.args.length - 1 : f.args.length;
+		var t = new Vector<Ty>(n);
+		for (k in 0...n)
+			t[k] = f.args[k].ty;
 		return t;
 	}
 
@@ -2685,7 +2691,7 @@ class FnLower {
 			case _: l.getProgram().sig([for (a in tf.tfArgs) ty(a.variable.vType)], ty(tf.tfType));
 		};
 		var outerBoxed = boxed;
-		var li = l.newLambda(sig, captureLocals, fl -> fl.runLambda(tf, copyMap(outerBoxed), caps), Lower.lambdaName(fi), fi.module);
+		var li = l.newLambda(sig, Vector.fromArrayCopy(captureLocals), fl -> fl.runLambda(tf, copyMap(outerBoxed), caps), Lower.lambdaName(fi), fi.module);
 		return ENewClos(li, Vector.fromArrayCopy(capVals));
 	}
 

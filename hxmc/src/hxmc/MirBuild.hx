@@ -1737,7 +1737,7 @@ class MirBuild {
 				var row = symAddr(p.selectorSym(sel));
 				var ti = op1(ZExt, I64, tindex(o));
 				var fp = load(I64, 8, row, -8 * Abi.T_FIRST, false, ti, 8);
-				callInd(fp, xs, mty(sig.ret), sig.args.mapToVector(mty));
+				callInd(fp, xs, mty(sig.ret), sig.args.map(mty));
 			case ECallClos(s, clos, args):
 				var c = ex(clos);
 				var xs = new Vector<Int>(args.length + 1);

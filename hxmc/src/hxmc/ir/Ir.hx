@@ -45,7 +45,7 @@ class ClassInfo {
 	public var ident:String; // the prefix of its symbols
 	public var sup:Null<ClassInfo>;
 	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited (the class is the header's type index)
-	public var locs:Array<Int>; // per field: its slot, or for Int/Bool its 4-byte index (packed two per slot; Facts.layout)
+	public var locs:Vector<Int>; // per field: its slot, or for Int/Bool its 4-byte index (packed two per slot; Facts.layout)
 	public var nslots:Int;
 	public var methods:Map<String, FuncInfo> = new Map(); // own implementations
 	public var ctor:Null<FuncInfo>;
@@ -88,7 +88,7 @@ typedef StaticEntry = {name:String, clos:Null<LambdaInfo>, fn:Null<FuncInfo>, gl
 class EnumInfo {
 	public var name:String;
 	public var ident:String;
-	public var ctors:Array<CtorInfo> = [];
+	public var ctors:Vector<CtorInfo> = vector(); // by tag
 	public var tindex:Int = -1; // the enum's own descriptor (Enum<T> values)
 
 	public function new(name, ident) {
@@ -101,7 +101,7 @@ class CtorInfo {
 	public var en:EnumInfo;
 	public var name:String;
 	public var tag:Int;
-	public var params:Array<Ty>; // from slot 0: the tag is the header's type index (Gc.hx)
+	public var params:Vector<Ty>; // from slot 0: the tag is the header's type index (Gc.hx)
 	public var paramNames:Array<String> = [];
 	public var global:Int = -1; // singleton for constructors without arguments
 	public var tindex:Int = -1;
@@ -117,9 +117,9 @@ class CtorInfo {
 // An anonymous structure layout: the fields of an object literal, sorted by name.
 class ShapeInfo {
 	public var id:Int;
-	public var fields:Array<{name:String, ty:Ty}>; // slot 0 = dynamic overflow fields, then these
+	public var fields:Vector<{name:String, ty:Ty}>; // slot 0 = dynamic overflow fields, then these
 	public var tindex:Int = -1;
-	public var locs:Array<Int>; // as ClassInfo.locs
+	public var locs:Vector<Int>; // as ClassInfo.locs
 	public var nslots:Int;
 
 	public function new(id, fields) {
@@ -139,7 +139,7 @@ class ShapeInfo {
 // interchangeable; others need an adapter (FnLower.coerce).
 class SigInfo {
 	public var id:Int;
-	public var args:Array<Ty>;
+	public var args:Vector<Ty>;
 	public var ret:Ty;
 	public var key:String;
 
@@ -155,7 +155,7 @@ class SigInfo {
 class LambdaInfo {
 	public var id:Int;
 	public var sig:SigInfo;
-	public var captures:Array<Local>;
+	public var captures:Vector<Local>;
 	public var fn:FuncInfo;
 	public var tindex:Int = -1;
 
@@ -405,7 +405,10 @@ class Program {
 		var s = sigKeys.get(key);
 		if (s != null) return s;
 		var norm = (t:Ty) -> Ir.isRef(t) ? TRef(RAny) : t;
-		s = new SigInfo(sigs.length, [for (a in args) norm(a)], norm(ret), key);
+		var nargs = new Vector<Ty>(args.length);
+		for (k in 0...args.length)
+			nargs[k] = norm(args[k]);
+		s = new SigInfo(sigs.length, nargs, norm(ret), key);
 		sigs.push(s);
 		sigKeys.set(key, s);
 		return s;
@@ -436,7 +439,7 @@ class Program {
 		var key = b.toString();
 		var s = shapeKeys.get(key);
 		if (s != null) return s;
-		s = new ShapeInfo(shapes.length, sorted ? fs.copy() : fs);
+		s = new ShapeInfo(shapes.length, Vector.fromArrayCopy(fs));
 		shapes.push(s);
 		shapeKeys.set(key, s);
 		return s;

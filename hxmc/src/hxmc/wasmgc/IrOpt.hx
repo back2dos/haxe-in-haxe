@@ -363,14 +363,14 @@ private class Sra {
 					else if (!sameShape(g.kind, a)) badRoot.set(r, true);
 				}
 		}
-		var fields = new Map<Int, Array<Local>>(); // per replaced local: a local per field
+		var fields = new Map<Int, Vector<Local>>(); // per replaced local: a local per field
 		var tys = new Map<Int, Array<{name:String, ty:Ty}>>();
 		for (r => g in groups) {
 			if (badRoot.exists(r) || g.kind == null) continue;
 			var fs = fieldsOf(g.kind);
 			if (Lambda.exists(fs, x -> x.ty.match(TStruct(_))) || !accessesOk(g.members, fs)) continue;
 			for (l in g.members) {
-				fields.set(l.id, [for (x in fs) o.fresh(l.name + "_" + x.name, x.ty)]);
+				fields.set(l.id, fs.mapToVector(x -> o.fresh(l.name + "_" + x.name, x.ty)));
 				tys.set(l.id, fs);
 				o.drop(l);
 			}
@@ -549,7 +549,7 @@ private enum Access {
 // the replaced locals' statements on their field locals
 private class Rewrite {
 	final o:IrOpt;
-	final fields:Map<Int, Array<Local>>;
+	final fields:Map<Int, Vector<Local>>;
 	final tys:Map<Int, Array<{name:String, ty:Ty}>>;
 
 	public function new(o, fields, tys) {
