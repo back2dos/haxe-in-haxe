@@ -528,11 +528,11 @@ class Isel implements hxmc.Target.Selector {
 				if (p.args[k] != p.id) copyTo(reg(p.id), p.args[k]);
 			return;
 		}
-		var temps = [];
+		var temps = new Vector<Int>(phis.length), nt = 0;
 		for (p in phis) {
 			var t = f.newReg(p.ty == F64);
 			copyTo(t, p.args[k]);
-			temps.push(t);
+			temps[nt++] = t;
 		}
 		for (j in 0...phis.length)
 			mov(reg(phis[j].id), temps[j], 8);
@@ -854,7 +854,7 @@ class Isel implements hxmc.Target.Selector {
 				switchIns(i, b);
 			case Ret if (i.a >= 0 && m.structRet):
 				// a struct in x0-x1 or d0-d3 (s0-s3), from its memory
-				var rs = [];
+				var rs = new Vector<Int>(m.cRet.length), nr = 0;
 				for (p in m.cRet) {
 					var r = f.newReg(p.float);
 					var l = emit(LOAD);
@@ -866,7 +866,7 @@ class Isel implements hxmc.Target.Selector {
 						fm.d = r;
 						fm.s1 = l.d;
 					}
-					rs.push(r);
+					rs[nr++] = r;
 				}
 				var x = new LIns(RET);
 				x.uses = new Vector(rs.length);
@@ -905,7 +905,9 @@ class Isel implements hxmc.Target.Selector {
 			if (c < lo) lo = c;
 			if (c > hi) hi = c;
 		}
-		var targets = [for (k in 0...n) edgeTarget(b, i.targets[k])];
+		var targets = new Vector<LBlock>(n);
+		for (k in 0...n)
+			targets[k] = edgeTarget(b, i.targets[k]);
 		var span = hi - lo + 1;
 		if (n >= 4 && span > 0 && span <= 3 * n + 8) {
 			var idx = f.newReg(false);
@@ -1190,7 +1192,7 @@ class Isel implements hxmc.Target.Selector {
 		if (i.ty != Void) mov(reg(i.id), i.ty == F64 ? D0 : 0, 8);
 		if (i.structRet && i.cRet.length > 0) {
 			// a struct in x0-x1 or d0-d3 (s0-s3): out of them first, then into its memory
-			var rs = [], gk = 0, fk = 0;
+			var rs = new Vector<Int>(i.cRet.length), nr = 0, gk = 0, fk = 0;
 			for (p in i.cRet) {
 				var r = f.newReg(p.float && p.size == 8);
 				if (p.float && p.size == 4) {
@@ -1198,7 +1200,7 @@ class Isel implements hxmc.Target.Selector {
 					fm.d = r;
 					fm.s1 = D0 + fk++;
 				} else mov(r, p.float ? D0 + fk++ : gk++, 8);
-				rs.push(r);
+				rs[nr++] = r;
 			}
 			for (k in 0...i.cRet.length) {
 				var p = i.cRet[k];

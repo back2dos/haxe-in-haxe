@@ -408,18 +408,27 @@ class Isel implements hxmc.Target.Selector {
 			var ins = b.ins;
 			for (k in 0...ins.length) {
 				var c = ins[k];
-				var cands:Array<Int>;
+				// the candidates in order (-1: none)
+				var cand0 = -1, cand1 = -1;
 				if (c.op == Cmp && mf.vals[c.a].ty != F64) {
 					var bImm = immOf(c.b) != null, aImm = immOf(c.a) != null;
-					cands = bImm ? (isymOf(c.b) == null ? [c.a] : []) : aImm ? [] : [c.b, c.a];
+					if (bImm) {
+						if (isymOf(c.b) == null) cand0 = c.a;
+					} else if (!aImm) {
+						cand0 = c.b;
+						cand1 = c.a;
+					}
 				} else if ((c.op == Add || c.op == Sub || c.op == And || c.op == Or || c.op == Xor) && c.ty != F64) {
 					// the second operand (either, when commutative); not with an
 					// immediate operand (those take ALUI or LEA)
 					if (immOf(c.a) != null || immOf(c.b) != null) continue;
-					cands = c.op == Sub ? [c.b] : [c.b, c.a];
+					cand0 = c.b;
+					if (c.op != Sub) cand1 = c.a;
 					if (c.a == c.b) continue;
 				} else continue;
-				for (x in cands) {
+				for (q in 0...2) {
+					var x = q == 0 ? cand0 : cand1;
+					if (x < 0) break;
 					var l = mf.vals[x];
 					if (l.op != Load || l.block != b || useCount[x] != 1 || l.ty == F64) continue;
 					if (l.size != (l.ty == I32 ? 4 : 8)) continue;
@@ -758,11 +767,11 @@ class Isel implements hxmc.Target.Selector {
 				if (p.args[k] != p.id) copyTo(reg(p.id), p.args[k], p.ty);
 			return;
 		}
-		var temps = [];
+		var temps = new Vector<Int>(phis.length), nt = 0;
 		for (p in phis) {
 			var t = f.newReg(p.ty == F64);
 			copyTo(t, p.args[k], p.ty);
-			temps.push(t);
+			temps[nt++] = t;
 		}
 		for (j in 0...phis.length)
 			mov(reg(phis[j].id), temps[j], 8);
@@ -1138,14 +1147,14 @@ class Isel implements hxmc.Target.Selector {
 				switchIns(i, b, next);
 			case Ret if (i.a >= 0 && m.structRet):
 				// a struct in rax-rdx and xmm0-xmm1, from its memory (whole words)
-				var rs = [];
+				var rs = new Vector<Int>(m.cRet.length), nr = 0;
 				for (p in m.cRet) {
 					var r = f.newReg(p.float);
 					var l = emit(LOAD);
 					l.d = r;
 					l.size = 8;
 					memOf(l, i.a, -1, 1, p.off);
-					rs.push(r);
+					rs[nr++] = r;
 				}
 				var x = new LIns(RET);
 				x.uses = new Vector(rs.length);
@@ -1195,7 +1204,9 @@ class Isel implements hxmc.Target.Selector {
 			if (c < lo) lo = c;
 			if (c > hi) hi = c;
 		}
-		var targets = [for (k in 0...n) edgeTarget(b, i.targets[k])];
+		var targets = new Vector<LBlock>(n);
+		for (k in 0...n)
+			targets[k] = edgeTarget(b, i.targets[k]);
 		var span = hi - lo + 1;
 		if (n >= 4 && span > 0 && span <= 3 * n + 8) {
 			// jump table on value - lo
@@ -1390,11 +1401,11 @@ class Isel implements hxmc.Target.Selector {
 		if (i.structRet) {
 			// a struct in rax-rdx and xmm0-xmm1: out of them first, then into
 			// its memory (whole words: the slot is rounded up to them)
-			var rs = [], gk = 0, fk = 0;
+			var rs = new Vector<Int>(i.cRet.length), nr = 0, gk = 0, fk = 0;
 			for (p in i.cRet) {
 				var r = f.newReg(p.float);
 				mov(r, p.float ? XMM0 + fk++ : gk++ == 0 ? RAX : RDX, 8);
-				rs.push(r);
+				rs[nr++] = r;
 			}
 			for (k in 0...i.cRet.length) {
 				var s = emit(STORE);
