@@ -468,6 +468,7 @@ class Opt {
 			t.targets = [keep];
 			b.succs = [keep];
 		}
+		knownPhiArgs();
 		var uses = MFunc.ints(f.vals.length, 0);
 		for (b in f.blocks)
 			for (i in b.ins) {
@@ -482,7 +483,7 @@ class Opt {
 		// (rounds: an edge threaded past a join can leave the phi of the join
 		// before it used by its branch alone, as in `a && b && c`)
 		var threaded = true, rounds = 0;
-		while (threaded && rounds++ < 4) {
+		while (threaded && rounds++ < 64) { // (a chain of n terms takes about n rounds)
 		threaded = false;
 		for (b in f.blocks.copy()) {
 			if (b == f.entry || b.handler || b.preds.length == 0) continue;
@@ -558,6 +559,56 @@ class Opt {
 		}
 		pruneBlocks();
 		mergeBlocks();
+	}
+
+	// A phi's operand that arrives through a block entered only from a branch
+	// on that very value is known there: 0 on the branch's else edge, 1 on its
+	// then edge when the value is a boolean (a comparison, 0 or 1, a phi of
+	// those): `a || b` returned as a value (phi(a, b)) gets phi(1, b), which
+	// leaves a's phi used by its branch alone (threaded below)
+	function knownPhiArgs() {
+		var vals = f.vals;
+		var boolMemo = new Map<Int, Bool>();
+		function isBool(v:Int, depth:Int):Bool {
+			var x = vals[v];
+			switch x.op {
+				case Cmp: return true;
+				case Const: return x.sym == null && x.imm2 == 0 && (x.imm == 0 || x.imm == 1);
+				case Phi if (depth < 8):
+					var m = boolMemo.get(v);
+					if (m != null) return m;
+					boolMemo.set(v, true); // (a cycle through phis: assumed, checked by the other operands)
+					var r = true;
+					for (a in x.args)
+						if (!isBool(a, depth + 1)) {
+							r = false;
+							break;
+						}
+					boolMemo.set(v, r);
+					return r;
+				case _: return false;
+			}
+		}
+		for (b in f.blocks)
+			for (i in b.ins) {
+				if (i.op != Phi) break;
+				if (i.ty != I32) continue;
+				for (k in 0...i.args.length) {
+					var p = b.preds[k];
+					if (p.preds.length != 1 || p.handler) continue;
+					var t = p.preds[0].term();
+					if (t == null || t.op != Br || t.a != i.args[k] || t.targets[0] == t.targets[1]) continue;
+					var known = if (t.targets[1] == p) 0 else if (t.targets[0] == p && isBool(i.args[k], 0)) 1 else -1;
+					if (known < 0) continue;
+					var c = new MIns(Const, I32);
+					c.id = vals.length;
+					vals.push(c);
+					c.imm = known;
+					c.block = p;
+					p.ins.insert(p.term() == null ? p.ins.length : p.ins.length - 1, c);
+					i.args[k] = c.id;
+				}
+			}
 	}
 
 	// a block that jumps to a block with no other predecessor absorbs it
