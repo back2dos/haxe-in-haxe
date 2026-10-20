@@ -596,6 +596,12 @@ class Dyn {
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b)) return false;
 		var ta = tindex(a), tb = tindex(b);
+		// (the common cases first: two boxes of one kind)
+		if (ta == tb) {
+			if (ta == T_BOXFLOAT) return Mem.getF64(Mem.addr(a), 0) == Mem.getF64(Mem.addr(b), 0);
+			if (ta == T_BOXINT || ta == T_BOXBOOL) return Mem.getI32(Mem.addr(a), 0) == Mem.getI32(Mem.addr(b), 0);
+			if (ta == T_STRING) return Str.len(a) == Str.len(b) && Str.eqSlow(a, b);
+		}
 		if ((ta == T_BOXI64 || tb == T_BOXI64) && isI64(a) && isI64(b)) return unboxI64(a) == unboxI64(b);
 		if (isNum(a) && isNum(b)) return unboxFloat(a) == unboxFloat(b);
 		if (ta == T_BOXBOOL && tb == T_BOXBOOL) return Mem.getI32(Mem.addr(a), 0) == Mem.getI32(Mem.addr(b), 0);
