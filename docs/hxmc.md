@@ -692,10 +692,14 @@ its index in the exported `__indirect_function_table` (corpus case
 A wasm32 module's linear memory only grows, and browsers (phones above all,
 and several islands on one page) refuse it early, so the runtime
 (`hxmc/std/hxmc/rt/wasm/Heap.hx`, `Gc.hx`) takes only what it uses: the
-nursery's region is as large as the nursery (4 MB, then doubled by the
-adaptive sizing up to 32 MB: grown in place when it is the last region,
-else moved to a new one right after a minor collection, when it is empty;
-it stays as it is when memory cannot grow); the old space is chunks of 1 MB
+nursery's region is as large as the nursery (4 MB, then sized as the
+native one with one thread: doubled after a minor collection that promoted
+more than a 16th of what was allocated since the previous one, halved after
+8 that promoted less than a 64th, up to 32 MB, which the port's
+self-compile keeps: 6% less time than at 4 MB, three major collections
+instead of six, 18% less peak memory; grown in place when it is the last region, else
+moved to a new one right after a minor collection, when it is empty; it
+stays as it is when memory cannot grow); the old space is chunks of 1 MB
 taken as objects are promoted (`RT_OLD_MB`, 32, is when the first major
 collection comes, not a reservation); the shadow stack is `RT_STACK_MB`
 (4 MB; `wasi.mjs` sets it from node's `--stack-size`, as deep as node's
@@ -718,8 +722,13 @@ modules at once needs 2 MB; corpus case `DeepFrames`.) Memory
 memory.grow gave is zero, so only what was handed out before and freed is
 zeroed (`Heap.freshFrom`: the highest the regions reached): the nursery, the
 two stacks and the 64 KB granule table cost address space, not pages,
-until they are used. When memory.grow fails the runtime writes "out of
-memory: linear memory is N MB, growing it by M MB failed" and exits;
+until they are used. Memory grows by an eighth of its size at a time when
+that is more than is needed (else, or when the host refuses it, by what is
+needed): node collects its own heap after a memory.grow (V8 counts the
+grown buffer as new external memory), which in the port's self-compile,
+growing by the old space's 1 MB chunks, made 400 collections. When
+memory.grow fails the runtime writes "out of memory: linear memory is N
+MB, growing it by M MB failed" and exits;
 `packages/os/browser.mjs` turns a RangeError of the browser's (a new
 instance's memory, an ArrayBuffer) into "out of memory: the browser refused
 N MB ...", which the islands' loader shows (`data-error`).
