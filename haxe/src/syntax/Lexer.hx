@@ -485,20 +485,35 @@ class Lexer {
 		return i;
 	}
 
-	// port: records the surrogate pairs of `s` in `pairs`; false at a lone surrogate.
-	function scanPairs(s:String):Bool {
-		var i = 0, n = s.length;
+	// port: the first '*', '\n' or '\r' of s from i on, else n (comment's search apart
+	// from its recording: a loop that allocates nothing)
+	static function nextCommentStop(s:String, i:Int, n:Int):Int {
 		while (i < n) {
 			var c = StringTools.fastCodeAt(s, i);
-			if ((c & 0xF800) == 0xD800) {
-				if (c >= 0xDC00 || i + 1 == n || (StringTools.fastCodeAt(s, i + 1) & 0xFC00) != 0xDC00) return false;
-				if (pairs == null) pairs = [];
-				pairs.push(i);
-				i++;
-			}
+			if (c <= "*".code && (c == "*".code || c == "\n".code || c == "\r".code)) break;
 			i++;
 		}
+		return i;
+	}
+
+	// port: records the surrogate pairs of `s` in `pairs`; false at a lone surrogate.
+	function scanPairs(s:String):Bool {
+		var n = s.length, i = nextSurrogate(s, 0, n);
+		while (i < n) {
+			var c = StringTools.fastCodeAt(s, i);
+			if (c >= 0xDC00 || i + 1 == n || (StringTools.fastCodeAt(s, i + 1) & 0xFC00) != 0xDC00) return false;
+			if (pairs == null) pairs = [];
+			pairs.push(i);
+			i = nextSurrogate(s, i + 2, n);
+		}
 		return true;
+	}
+
+	// port: the first unit of s from i on that is a surrogate, else n (the search
+	// apart from scanPairs' recording: a loop that allocates nothing)
+	static function nextSurrogate(s:String, i:Int, n:Int):Int {
+		while (i < n && (StringTools.fastCodeAt(s, i) & 0xF800) != 0xD800) i++;
+		return i;
 	}
 
 	// port: the position (code point offset) of the UTF-16 index `i`.
@@ -1041,7 +1056,7 @@ class Lexer {
 		// port: The text up to "*/" in one piece (not a one-character string per character),
 		// found by one scan that records the newlines it passes (the comment rule's).
 		var n = source.length, i = index, end = -1;
-		while (i < n) {
+		while ((i = nextCommentStop(source, i, n)) < n) {
 			var c = StringTools.fastCodeAt(source, i++);
 			if (c == "*".code) {
 				if (i < n && StringTools.fastCodeAt(source, i) == "/".code) {
