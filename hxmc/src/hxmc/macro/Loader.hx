@@ -303,6 +303,8 @@ class Loader {
 		}
 		b.codeBytes = textSize;
 		if (Vm.mprotect(region, (textSize : I64), PROT_READ | PROT_EXEC) != 0) throw "mprotect failed";
+		// (its null accesses throw, as the compiler's own: hxmc.rt.Faults)
+		hxmc.rt.Faults.addCode(region, region.addL((textSize : I64)));
 		inline function symAddr(n:String):Int {
 			var d = defs.get(n);
 			if (d != null) return value(d).v;
