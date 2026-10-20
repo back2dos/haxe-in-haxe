@@ -120,7 +120,7 @@ class Genxml {
 				});
 				if (any) attributes.push(attr("v", texts.join(":")));
 			}
-			node("f", attributes, sig.args.map(a -> genType(a.optional ? followParam(a.type) : a.type)).concat([genType(sig.ret)]));
+			node("f", attributes, sig.args.mapToArray(a -> genType(a.optional ? followParam(a.type) : a.type)).concat([genType(sig.ret)]));
 		case TAnon(a):
 			var names = [for (name in a.aFields.keys()) name];
 			names.sort(core.ds.Key.compareStrings);
@@ -137,7 +137,7 @@ class Genxml {
 	}
 
 	static function genTypeRef(name:String, t:ModuleType,
-			params:TParams):RttiXml return node(name, [genPath(tpath(t), tPrivate(t))], params.map(t -> genType(t)));
+			params:TParams):RttiXml return node(name, [genPath(tpath(t), tPrivate(t))], params.mapToArray(t -> genType(t)));
 
 	static function genField(attributes:Array<Attribute>, f:TClassField):RttiXml {
 		inline function addGetSet(access:VarAccess, name:String, attrs:Array<Attribute>):Array<Attribute> return switch access {
@@ -186,7 +186,7 @@ class Genxml {
 		switch follow(e.efType) {
 			case TFun(sig):
 				attributes = [attr("a", sig.args.map(a -> (a.optional ? "?" : "") + a.name).join(":"))];
-				children = sig.args.map(a -> genType(a.optional ? followParam(a.type) : a.type)).concat(doc);
+				children = sig.args.mapToArray(a -> genType(a.optional ? followParam(a.type) : a.type)).concat(doc);
 			case _:
 		}
 		return node(e.efName, attributes, children.concat(genMeta(e.efMeta)));
@@ -204,7 +204,7 @@ class Genxml {
 
 	static function genClassPath(name:String,
 			ct:{cls:TClass, params:TParams}):RttiXml return node(name, [attr("path", Globals.sTypePath(tpath(TClassDecl(ct.cls))))],
-			ct.params.map(t -> genType(t)));
+			ct.params.mapToArray(t -> genType(t)));
 
 	static function fieldExists(f:TClassField,
 			c:TClass):Bool return c.clFields.exists(f.cfName) || c.clSuper != null && fieldExists(f, c.clSuper.cls);

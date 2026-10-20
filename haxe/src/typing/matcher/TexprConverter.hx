@@ -76,8 +76,8 @@ class TexprConverter {
 		case SKLength: "length";
 	};
 
-	static function unifyConstructor(ctx:Typer, params:Array<T>, t:T,
-			con:ConstructorData):Null<{con:ConstructorData, params:Array<T>}> return switch con.kind {
+	static function unifyConstructor(ctx:Typer, params:core.TType.TParams, t:T,
+			con:ConstructorData):Null<{con:ConstructorData, params:core.TType.TParams}> return switch con.kind {
 			case ConEnum(en, ef):
 				var tef = switch follow(ef.efType) {
 					case TFun(s): s.ret;
@@ -222,7 +222,7 @@ class TexprConverter {
 		};
 	}
 
-	static function reportNotExhaustive(lookup:Map<Int, TExpr>, e:TExpr, unmatched:Array<{con:ConstructorData, params:Array<T>}>):Dynamic {
+	static function reportNotExhaustive(lookup:Map<Int, TExpr>, e:TExpr, unmatched:Array<{con:ConstructorData, params:core.TType.TParams}>):Dynamic {
 		var sl:Array<String> = switch follow(e.etype) {
 			case TAbstract(a = {aImpl: c}, _) if (c != null && a.aEnum): unmatched.map(function(u) {
 					var con:ConstructorData = u.con;
@@ -252,7 +252,7 @@ class TexprConverter {
 		var lookup:Map<Int, TExpr> = [];
 		var com = ctx.com;
 		var p = root.dtPos;
-		function loop(rec:DtRecursion, params:Array<T>, dt:DecisionTreeData):Null<TExpr> {
+		function loop(rec:DtRecursion, params:core.TType.TParams, dt:DecisionTreeData):Null<TExpr> {
 			if (dt.dtTexpr != null) return dt.dtTexpr;
 			var e:Null<TExpr> = switch dt.dtT {
 				case Leaf(c): c.caseExpr == null ? mk(TBlock(vector()), ctx.t.tvoid, c.casePos) : c.caseExpr;
@@ -269,7 +269,7 @@ class TexprConverter {
 						var u = unifyConstructor(ctx, params, subject.etype, con);
 						if (u != null) unmatched.push(u);
 					}
-					inline function descend(params:Array<T>, dt:DecisionTreeData):Null<TExpr> {
+					inline function descend(params:core.TType.TParams, dt:DecisionTreeData):Null<TExpr> {
 						var e = loop(nextRec, params, dt);
 						if (e != null) return e;
 						if (withType == NoValue && ctors.finiteness == Infinite && top) return null;
@@ -277,7 +277,7 @@ class TexprConverter {
 						if (Common.ignoreError(com)) return null;
 						return reportNotExhaustive(lookup, subject, unmatched);
 					}
-					var groups:Array<{cons:Array<ConstructorData>, dt:DecisionTreeData, params:Array<T>}> = [];
+					var groups:Array<{cons:Array<ConstructorData>, dt:DecisionTreeData, params:core.TType.TParams}> = [];
 					for (sc in cases) {
 						var u = unifyConstructor(ctx, params, subject.etype, sc.scCon);
 						if (u == null) continue;
@@ -377,7 +377,7 @@ class TexprConverter {
 								// output, so let's make sure it appears there (issue #11738).
 								mk(TBlock(vector(subject, elseE)), elseE.etype, elseE.epos);
 						} else if (Common.ignoreError(com)) mk(TConst(TNull), mkMono(), b.dtPos);
-						else reportNotExhaustive(lookup, subject, [{con: {kind: ConConst(TNull), pos: dt.dtPos}, params: []}]);
+						else reportNotExhaustive(lookup, subject, [{con: {kind: ConConst(TNull), pos: dt.dtPos}, params: vector()}]);
 					} else {
 						var elseE = loop(rec, params, b);
 						if (elseE == null) {

@@ -416,7 +416,7 @@ class Genneko {
 						l.reverse();
 						new NExpr(EBlock(l), p);
 				});
-				return new NExpr(EFunction(f.tfArgs.map(a -> bs(argName(a))), withReturn(e)), p);
+				return new NExpr(EFunction(f.tfArgs.mapToArray(a -> bs(argName(a))), withReturn(e)), p);
 			case TBlock(el):
 				return new NExpr(EBlock(el.mapToArray(genExpr.bind(ctx))), p);
 			case TIf(cond, e1, e2):
@@ -550,13 +550,13 @@ class Genneko {
 						genMethod(ctx, p, f, [
 							{
 								name: "new",
-								e: new NExpr(EFunction(params.map(bs), new NExpr(EBlock([
+								e: new NExpr(EFunction(params.mapToArray(bs), new NExpr(EBlock([
 									new NExpr(EVars([{name: "@o", expr: call(p, builtin(p, "new"), [null_(p)])}]), p),
 									(call(p, builtin(p, "objsetproto"), [ident(p, "@o"), clpath])),
 									(call(p, builtin(p, "call"), [
 										field(p, this_(p), "__construct__"),
 										ident(p, "@o"),
-										array(p, params.map(ident.bind(p)))
+										array(p, params.mapToArray(ident.bind(p)))
 									])),
 									new NExpr(EReturn(ident(p, "@o")), p)
 								]), p)), p)
@@ -636,14 +636,14 @@ class Genneko {
 		return new NExpr(EBinop("=", field(p, path, c.efName), switch follow(c.efType) {
 			case TFun(sig):
 				var params = sig.args.map(a -> a.name);
-				new NExpr(EFunction(params.map(bs), new NExpr(EBlock([
+				new NExpr(EFunction(params.mapToArray(bs), new NExpr(EBlock([
 					new NExpr(EVars([
 						{
 							name: "@tmp",
 							expr: new NExpr(EObject([
 								{name: "tag", expr: str(p, c.efName)},
 								{name: "index", expr: int(p, c.efIndex)},
-								{name: "args", expr: array(p, params.map(ident.bind(p)))},
+								{name: "args", expr: array(p, params.mapToArray(ident.bind(p)))},
 							]), p)
 						}
 					]), p),

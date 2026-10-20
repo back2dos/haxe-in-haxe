@@ -87,8 +87,8 @@ class CppGen {
 	}
 
 	public static function functionSignature(basic:BasicTypes, includeNames:Bool, tfun:T, abi:String):String {
-		function printTfunArgList(includeNames:Bool, argList:Array<{name:String, optional:Bool, type:T}>):String {
-			return printRetypedTfunArgList(includeNames, argList.map(function(a) return CppRetyper.retypeArg(basic, CppRetyper.withStackValueType, a)));
+		function printTfunArgList(includeNames:Bool, argList:haxe.ds.Vector<{name:String, optional:Bool, type:T}>):String {
+			return printRetypedTfunArgList(includeNames, argList.mapToArray(function(a) return CppRetyper.retypeArg(basic, CppRetyper.withStackValueType, a)));
 		}
 
 		return switch follow(tfun) {

@@ -340,7 +340,7 @@ class Exceptions {
 		var fields = valueExceptionClass(ctx).clFields;
 		if (!fields.exists("value")) throw 'haxe.ValueException is missing field "value"';
 		var cf = fields.get("value");
-		var catchLocalValue = TypeOps.mk(TField(catchLocal, FInstance(valueExceptionClass(ctx), [], cf)), cf.cfType, catchLocal.epos);
+		var catchLocalValue = TypeOps.mk(TField(catchLocal, FInstance(valueExceptionClass(ctx), vector(), cf)), cf.cfType, catchLocal.epos);
 		function traverse(catches:Array<CatchClause>, finalElse:TExpr):TExpr {
 			if (catches.length == 0) return finalElse;
 			var c = catches[0];

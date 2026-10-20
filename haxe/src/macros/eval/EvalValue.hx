@@ -226,7 +226,7 @@ class Vzlib {
 
 enum VprototypeKind {
 	PClass(interfaces:Array<Int>);
-	PEnum(names:Array<{name:String, params:Array<Int>}>);
+	PEnum(names:Array<{name:String, params:haxe.ds.Vector<Int>}>);
 	PInstance;
 	PObject;
 }

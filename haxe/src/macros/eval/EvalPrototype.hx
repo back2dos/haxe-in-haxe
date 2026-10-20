@@ -31,6 +31,7 @@ import macros.eval.EvalValue;
 import macros.eval.EvalContext;
 import macros.eval.EvalHash;
 import haxe.ds.Vector;
+import core.ds.VectorTools.vector;
 
 using macros.eval.EvalValue.EvalValueTools;
 
@@ -356,7 +357,7 @@ class EvalPrototype {
 						case TFun(sig):
 							sig.args.map(a -> EvalHash.hash(a.name));
 						case _:
-							[];
+							vector();
 					}
 					{name: name, params: args};
 				});

@@ -113,7 +113,7 @@ enum TypeClass {
 	KOther;
 	KNumParam(t:T);
 	KStrParam(t:T);
-	KAbstract(a:TAbstract, tl:Array<T>);
+	KAbstract(a:TAbstract, tl:core.TType.TParams);
 }
 
 typedef AssignOpApi<A> = {
@@ -374,14 +374,14 @@ class Operators {
 					case TInst(c, []): c;
 					case _: throw "assert";
 				};
-				BinopSpecial(mk(TNew(c, [], vector(e1, e2)), t, p), false);
+				BinopSpecial(mk(TNew(c, vector(), vector(e1, e2)), t, p), false);
 			case OpArrow: Error.raiseTypingError("Unexpected =>", p);
 			case OpIn: Error.raiseTypingError("Unexpected in", p);
 			case OpNullCoal | OpAssign | OpAssignOp(_): throw "assert";
 		};
 	}
 
-	public static function findAbstractBinopOverload(ctx:Typer, op:Binop, e1:TExpr, e2:TExpr, a:TAbstract, c:TClass, tl:Array<T>,
+	public static function findAbstractBinopOverload(ctx:Typer, op:Binop, e1:TExpr, e2:TExpr, a:TAbstract, c:TClass, tl:core.TType.TParams,
 			left:Bool, isAssign:Bool, p:Pos):BinopResultData {
 		inline function mapA(t:T):T return applyParams(a.aParams, tl, t);
 		inline function make(opCf:Binop, cf:TClassField, e1:TExpr, e2:TExpr, ret:T, needs:Bool, swapped:Bool):BinopResultData {

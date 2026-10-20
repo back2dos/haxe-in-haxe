@@ -1,9 +1,5 @@
 package generators.genphp7;
 
-import core.ds.VectorTools.vector;
-import haxe.ds.Vector;
-
-using core.ds.VectorTools;
 // port: the local_vars and code_writer classes of haxe/src/generators/genphp7.ml.
 import core.Ast;
 import core.Ast as AstTools;
@@ -22,6 +18,10 @@ import context.Sourcemaps;
 import generators.Genphp7;
 import generators.genphp7.TypeWrappers;
 import generators.Genphp7.*;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 /**
 	Class to simplify collecting lists of declared and used local vars.
@@ -457,7 +457,7 @@ class CodeWriter {
 		Check if currently generated expression is located in a left part of assignment.
 	*/
 	public function isInWriteContext():Bool {
-		function isInRefArg(current:TExpr, types:Array<{name:String, optional:Bool, type:T}>, args:Vector<TExpr>):Bool {
+		function isInRefArg(current:TExpr, types:Vector<{name:String, optional:Bool, type:T}>, args:Vector<TExpr>):Bool {
 			// port: List.exists2; the Invalid_argument of different lengths gives false
 			var n = types.length < args.length ? types.length : args.length;
 			for (i in 0...n) if (args[i] == current && isRef(types[i].type)) return true;
@@ -866,7 +866,7 @@ class CodeWriter {
 			write("(");
 			writeExpr({
 				eexpr: TFunction({
-					tfArgs: [],
+					tfArgs: vector(),
 					tfType: blockExpr.etype,
 					tfExpr: ensureReturnInBlock(blockExpr),
 				}),
@@ -1428,7 +1428,7 @@ class CodeWriter {
 	public function writeType(typeExpr:TExpr):Void {
 		switch typeExpr.eexpr {
 			case TTypeExpr(TClassDecl(tcls)):
-				write(useT(TInst(tcls, [])));
+				write(useT(TInst(tcls, vector())));
 			case _:
 				if (isString(revealExpr(typeExpr))) writeExpr(typeExpr) else {
 					write("(");
@@ -1668,7 +1668,7 @@ class CodeWriter {
 				write(" instanceof ");
 				switch (revealExpr(typeExpr)).eexpr {
 					case TTypeExpr(TClassDecl(tcls)):
-						write(useT(TInst(tcls, [])));
+						write(useT(TInst(tcls, vector())));
 					case _:
 						writeExpr(typeExpr);
 						if (!(isString(typeExpr))) write("->phpClassName");
@@ -1805,7 +1805,7 @@ class CodeWriter {
 	public function writeExprPhpClassConst(targetExpr:TExpr):Void {
 		switch targetExpr.eexpr {
 			case TField(_, FStatic(ecls, field)):
-				write((useT(TInst(ecls, []))) + "::" + (fieldName(field)));
+				write((useT(TInst(ecls, vector()))) + "::" + (fieldName(field)));
 			case _: fail(pos(), "genphp7.code_writer#write_expr_php_class_const");
 		}
 	}

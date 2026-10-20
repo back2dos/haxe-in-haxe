@@ -20,6 +20,8 @@ import core.ds.NotFound;
 import context.SafeCom.SafeContext;
 import core.ds.VectorTools.vector;
 
+using core.ds.VectorTools;
+
 // port: find_array_read_access / find_array_write_access results (OCaml tuples)
 typedef ArrayReadAccess = {field:TClassField, type:T, ret:T, index:TExpr};
 typedef ArrayWriteAccess = {field:TClassField, type:T, ret:T, index:TExpr, value:TExpr};
@@ -174,7 +176,7 @@ class AbstractCast {
 
 	public static function prepareArrayAccessField(ctx:context.Typecore.Typer, a:TAbstract, pl:TParams, cf:TClassField,
 			p:Pos):PreparedArrayAccess {
-		var monos = [for (_ in cf.cfParams) Typecore.spawnMonomorph(ctx, p)];
+		var monos = cf.cfParams.map(_ -> Typecore.spawnMonomorph(ctx, p));
 		function map(t:T):T return core.TFunctions.applyParams(a.aParams, pl, core.TFunctions.applyParams(cf.cfParams, monos, t));
 		function checkConstraints():Void {
 			for (i in 0...monos.length) {
@@ -199,7 +201,7 @@ class AbstractCast {
 			var prepared = prepareArrayAccessField(ctx, a, pl, cf, p);
 			var tf = core.TFunctions.follow(prepared.map(cf.cfType));
 			switch tf {
-				case TFun(sig) if (sig.args.length >= 2 && Typecore.isEmptyOrPosInfos(sig.args.slice(2))):
+				case TFun(sig) if (sig.args.length >= 2 && Typecore.isEmptyOrPosInfos(sig.args, 2)):
 					try {
 						core.TUnification.unify(sig.args[0].type, prepared.getTa());
 						var e1 = castOrUnifyRaise(ctx, sig.args[1].type, e1, p);
@@ -228,7 +230,7 @@ class AbstractCast {
 			var prepared = prepareArrayAccessField(ctx, a, pl, cf, p);
 			var tf = core.TFunctions.follow(prepared.map(cf.cfType));
 			switch tf {
-				case TFun(sig) if (sig.args.length >= 3 && Typecore.isEmptyOrPosInfos(sig.args.slice(3))):
+				case TFun(sig) if (sig.args.length >= 3 && Typecore.isEmptyOrPosInfos(sig.args, 3)):
 					try {
 						core.TUnification.unify(sig.args[0].type, prepared.getTa());
 						var e1 = castOrUnifyRaise(ctx, sig.args[1].type, e1, p);

@@ -19,7 +19,7 @@ import core.display.CompletionItem;
 import core.ds.VectorTools.vector;
 
 // port: `((args,ret),ctf),doc` of a signature, as produced by TyperDisplay.convert_function_signature.
-typedef SignatureInfo = {sig:{args:Array<{name:String, optional:Bool, type:T}>, ret:T, ctf:CtFunction}, doc:Documentation};
+typedef SignatureInfo = {sig:{args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, ret:T, ctf:CtFunction}, doc:Documentation};
 
 class DisplayException extends haxe.Exception {
 	public final kind:DisplayExceptionKind;

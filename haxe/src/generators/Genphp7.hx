@@ -80,7 +80,7 @@ class PhpGeneratorContext {
 */
 enum DocType {
 	DocVar(typeName:String, description:Null<String>); /* (type name, description) */
-	DocMethod(args:Array<{name:String, optional:Bool, type:T}>, ret:T, description:Null<String>); /* (arguments, return type, description) */
+	DocMethod(args:Vector<{name:String, optional:Bool, type:T}>, ret:T, description:Null<String>); /* (arguments, return type, description) */
 	DocClass(description:Null<String>);
 }
 
@@ -736,17 +736,17 @@ class Genphp7 {
 
 		E.g `(a:String = null, b:Int, c:Bool = false)` is changed into `(a:String, b:Int, c:Bool = false)`
 	*/
-	public static function fixOptionalArgs<A>(isOptional:A->Bool, toMandatory:A->A, args:Array<A>):Array<A> {
+	public static function fixOptionalArgs<A>(isOptional:A->Bool, toMandatory:A->A, args:Vector<A>):Vector<A> {
 		var lastMandatory = -1;
 		for (i in 0...args.length) if (!isOptional(args[i])) lastMandatory = i;
-		return [for (i in 0...args.length) if (i <= lastMandatory && isOptional(args[i])) toMandatory(args[i]) else args[i]];
+		return VectorTools.init(args.length, i -> if (i <= lastMandatory && isOptional(args[i])) toMandatory(args[i]) else args[i]);
 	}
 
-	public static function fixTfuncArgs(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>):Array<{variable:TVar, defaultValue:Null<TExpr>}> {
+	public static function fixTfuncArgs(args:Vector<{variable:TVar, defaultValue:Null<TExpr>}>):Vector<{variable:TVar, defaultValue:Null<TExpr>}> {
 		return fixOptionalArgs((a:{variable:TVar, defaultValue:Null<TExpr>}) -> a.defaultValue != null, (a:{variable:TVar, defaultValue:Null<TExpr>}) -> ({variable: a.variable, defaultValue: null}:{variable:TVar, defaultValue:Null<TExpr>}), args);
 	}
 
-	public static function fixTsignatureArgs(args:Array<{name:String, optional:Bool, type:T}>):Array<{name:String, optional:Bool, type:T}> {
+	public static function fixTsignatureArgs(args:Vector<{name:String, optional:Bool, type:T}>):Vector<{name:String, optional:Bool, type:T}> {
 		return fixOptionalArgs((a:{name:String, optional:Bool, type:T}) -> a.optional, (a:{name:String, optional:Bool, type:T}) -> ({name: a.name, optional: false, type: a.type}:{name:String, optional:Bool, type:T}), args);
 	}
 
@@ -818,7 +818,7 @@ class Genphp7 {
 		@return New TBlock expression which is composed of setting default values for optional arguments and function body.
 	*/
 	public static function injectDefaults(ctx:PhpGeneratorContext, func:TFunc):TExpr {
-		function inject(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, bodyExprs:Vector<TExpr>):Vector<TExpr> {
+		function inject(args:Vector<{variable:TVar, defaultValue:Null<TExpr>}>, bodyExprs:Vector<TExpr>):Vector<TExpr> {
 			var result = [];
 			for (a in args) switch a.defaultValue {
 				case null:

@@ -304,7 +304,7 @@ class Genjvm {
 									die("", "generators/genjvm.ml");
 							}
 						case _:
-							if (core.Meta.has(MetaTag.CoreType, a.aMeta)) JObject(a.aPath, tl.map(function(t) return jtypeArgumentOfType(t))) else
+							if (core.Meta.has(MetaTag.CoreType, a.aMeta)) JObject(a.aPath, tl.mapToArray(function(t) return jtypeArgumentOfType(t))) else
 								jsignatureOfType(Abstract.getUnderlyingType(a, tl));
 					}
 				}
@@ -327,11 +327,11 @@ class Genjvm {
 				}
 			case TInst({clPath: {pack: ["_Class"], name: "Class_Impl_"}}, _): javaClassSig;
 			case TInst({clPath: {pack: ["_Enum"], name: "Enum_Impl_"}}, _): javaClassSig;
-			case TInst(c, tl): JObject(c.clPath, tl.map(function(t) return jtypeArgumentOfType(t)));
+			case TInst(c, tl): JObject(c.clPath, tl.mapToArray(function(t) return jtypeArgumentOfType(t)));
 			case TEnum(en, tl):
-				JObject(en.ePath, tl.map(function(t) return jtypeArgumentOfType(t)));
+				JObject(en.ePath, tl.mapToArray(function(t) return jtypeArgumentOfType(t)));
 			case TFun(s):
-				methodSig(s.args.map(function(a) {
+				methodSig(s.args.mapToArray(function(a) {
 					var jsig = jsignatureOfType(a.type);
 					var jsig = if (a.optional) getBoxedType(jsig) else jsig;
 					return jsig;
@@ -513,7 +513,7 @@ class Genjvm {
 					try {
 						TUnification.unifyCustom(TUnification.nativeUnificationContext, t, applyParams(cf.cfParams, cfMonos, map(cf.cfType)));
 						cfMonos.map(followA);
-						f.addFunctionalInterface(jfi, cMonos.map(jsignatureOfType.bind(gctx)));
+						f.addFunctionalInterface(jfi, cMonos.mapToArray(jsignatureOfType.bind(gctx)));
 					} catch (e:Dynamic) {
 						gctx.mutexes.unify.release();
 						throw e;
@@ -851,9 +851,9 @@ class Genjvm {
 			if (ef == null) throw NotFound.raise();
 			var args = switch TFunctions.follow(ef.efType) {
 				case TFun(s): s.args.map(function(a) return {name: a.name, jsig: jsignatureOfType(gctx, a.type)});
-				case _: [];
+				case _: vector();
 			}
-			var jsigs = args.map(function(a) return a.jsig);
+			var jsigs = args.mapToArray(function(a) return a.jsig);
 			/* Create class for constructor */
 			var jcCtor = {
 				var jcCtor = jcEnum.spawnInnerClass(null, jcEnum.getThisPath(), ef.efName);
@@ -867,13 +867,13 @@ class Genjvm {
 				for (a in args) jmCtor.addArgumentAndField(a.name, a.jsig, [FdPublic, FdFinal]);
 				jmCtor.return_();
 				jcCtor.addAnnotation({pack: ["haxe", "jvm", "annotation"], name: "EnumValueReflectionInformation"}, [
-					{name: "argumentNames", kind: AArray(args.map(function(a) return AnnotationKind.AString(a.name)))}
+					{name: "argumentNames", kind: AArray(args.mapToArray(function(a) return AnnotationKind.AString(a.name)))}
 				], true);
 				if (args.length > 0) {
 					var jmParams = jcCtor.spawnMethod("_hx_getParameters", methodSig([], arraySig(objectSig)), [MPublic, MSynthetic]);
 					var eq = generateEnumEquals(gctx, jcCtor);
 					var jmEquals = eq.jm, compareField = eq.compareField;
-					var fl = args.map(function(a) {
+					var fl = args.mapToArray(function(a) {
 						compareField(a.name, a.jsig);
 						return function() {
 							jmParams.loadThis();
@@ -1044,7 +1044,7 @@ class Genjvm {
 						jm.getfield(path, cf.cfName, jsigCf);
 						for (l in locals) l.l.load();
 						var jret = returnOfType(gctx, tr);
-						var meth = gctx.typedFunctions.registerSignature(locals.map(function(l) return l.jsig), jret);
+						var meth = gctx.typedFunctions.registerSignature(locals.mapToArray(function(l) return l.jsig), jret);
 						jm.invokevirtual(haxeFunctionPath, meth.name, methodSig(meth.dargs, meth.dret));
 						if (jret != null) jm.cast_(jret);
 						jm.return_();
@@ -1119,10 +1119,10 @@ class Genjvm {
 		var gctx:GenerationContext = {
 			gctx: gctx0,
 			out: out,
-			tRuntimeException: TInst(resolveClass(gctx0, {pack: ["java", "lang"], name: "RuntimeException"}), []),
+			tRuntimeException: TInst(resolveClass(gctx0, {pack: ["java", "lang"], name: "RuntimeException"}), vector()),
 			entryPoint: entryPoint,
-			tException: TInst(resolveClass(gctx0, {pack: ["java", "lang"], name: "Exception"}), []),
-			tThrowable: TInst(resolveClass(gctx0, {pack: ["java", "lang"], name: "Throwable"}), []),
+			tException: TInst(resolveClass(gctx0, {pack: ["java", "lang"], name: "Exception"}), vector()),
+			tThrowable: TInst(resolveClass(gctx0, {pack: ["java", "lang"], name: "Throwable"}), vector()),
 			anonIdentification: anonIdentification,
 			preprocessor: null,
 			typedefInterfaces: null,
@@ -1481,7 +1481,7 @@ class TexprToJvm {
 		};
 	}
 
-	public function handleArgInits(jm:JvmMethodBuilder, handler:TexprToJvm, actualArgs:Array<LocalRef>, args:Array<TransformedArg>):Void {
+	public function handleArgInits(jm:JvmMethodBuilder, handler:TexprToJvm, actualArgs:Vector<LocalRef>, args:Vector<TransformedArg>):Void {
 		if (actualArgs.length != args.length) throw new core.ds.InvalidArgument("List.iter2");
 		for (i in 0...actualArgs.length) {
 			var load = actualArgs[i].load, store = actualArgs[i].store;
@@ -1532,7 +1532,7 @@ class TexprToJvm {
 		}
 		var args = tf.tfArgs.map(function(a) return transformArg(a.variable, a.defaultValue));
 		var ret = Genjvm.returnOfType(gctx, tf.tfType);
-		var jmInvoke = wf.generateInvoke(args.map(function(arg) return {name: arg.aName, jsig: arg.aJsigArg}), ret, filter);
+		var jmInvoke = wf.generateInvoke(args.mapToArray(function(arg) return {name: arg.aName, jsig: arg.aJsigArg}), ret, filter);
 		var handler = new TexprToJvm(gctx, fieldInfo, jcClosure, jmInvoke, ret);
 		handler.setEnv(env);
 		var actualArgs = args.map(function(arg) return handler.addLocal2(arg.aId, arg.aName, arg.aJsigArg, VarArgument));
@@ -1622,11 +1622,11 @@ class TexprToJvm {
 			var args:Array<{name:String, jsig:JSignature}> = null, ret:Null<JSignature> = null;
 			switch followWithCoro(cf.cfType) {
 				case NotCoro(TFun(s)):
-					args = s.args.map(function(a) return {name: a.name, jsig: vtype(a.type)});
+					args = s.args.mapToArray(function(a) return {name: a.name, jsig: vtype(a.type)});
 					ret = Genjvm.returnOfType(gctx, s.ret);
 				case Coro(s):
 					var s = context.Common.expandCoroType(gctx.gctx.basic, s.args, s.ret);
-					args = s.args.map(function(a) return {name: a.name, jsig: vtype(a.type)});
+					args = s.args.mapToArray(function(a) return {name: a.name, jsig: vtype(a.type)});
 					ret = Genjvm.returnOfType(gctx, s.ret);
 				case _:
 					die("", "generators/genjvm.ml");
@@ -2475,7 +2475,7 @@ class TexprToJvm {
 				tl = s.args;
 				tr = Genjvm.returnOfType(gctx, s.ret);
 			case _:
-				tl = el.mapToArray(function(e) return {name: "", optional: false, type: e.etype});
+				tl = el.map(function(e) return {name: "", optional: false, type: e.etype});
 				tr = objectSig;
 		}
 		var acc:Array<JSignature> = [];
@@ -2689,7 +2689,7 @@ class TexprToJvm {
 								texpr(Genjvm.rvalueAny, e1);
 								tro = invoke(e1.etype);
 							case c:
-								var rcf = rawClassField(function(cf) return cf.cfType, c, [], cf.cfName);
+								var rcf = rawClassField(function(cf) return cf.cfType, c, vector(), cf.cfName);
 								var cf = rcf.field;
 								var pathInner = switch rcf.owner {
 									case null: die("", "generators/genjvm.ml");
@@ -3320,7 +3320,7 @@ class TclassToJvm {
 			}
 			// port: guarded (see Genjvm.guardUnify)
 			return Genjvm.guardUnify(gctx, function() return OverloadResolution.resolveInstanceOverload(false, mapType, c, cf.cfName,
-				tl.mapToVector(function(a) return TexprBuilder.makeNull(a.type, nullPos))));
+				tl.map(function(a) return TexprBuilder.makeNull(a.type, nullPos))));
 		}
 		function ifMethod(f:TClassField->Void, cf:TClassField) {
 			switch cf.cfKind {
@@ -3372,7 +3372,7 @@ class TclassToJvm {
 	function setInterfaces():Void {
 		for (ci in c.clImplements) {
 			if (isAnnotation && Genjvm.isPathOf(ci.cls.clPath, ["java", "lang", "annotation"], "Annotation")) {} else {
-				jc.addInterface(ci.cls.clPath, ci.params.map(function(t) return Genjvm.jtypeArgumentOfType(gctx, [], t)));
+				jc.addInterface(ci.cls.clPath, ci.params.mapToArray(function(t) return Genjvm.jtypeArgumentOfType(gctx, [], t)));
 			}
 		}
 	}
@@ -3438,7 +3438,7 @@ class TclassToJvm {
 				args = tf.tfArgs;
 				tr = Genjvm.returnOfType(gctx, tf.tfType);
 			case _:
-				args = [];
+				args = vector();
 				tr = null;
 		}
 		var handler = new TexprToJvm(gctx, fieldInfo, jc, jm, tr);
@@ -3647,13 +3647,13 @@ class TclassToJvm {
 	}
 
 	function generateSignature():Void {
-		jc.setTypeParameters(c.clParams.map(function(ttp) {
-			var jsigs = getConstraints(ttp).map(function(t) return getBoxedType(Genjvm.jsignatureOfType(gctx, t)));
+		jc.setTypeParameters(c.clParams.mapToArray(function(ttp) {
+			var jsigs = getConstraints(ttp).mapToArray(function(t) return getBoxedType(Genjvm.jsignatureOfType(gctx, t)));
 			return {name: ttp.ttpName, jsigs: jsigs};
 		}));
 		switch c.clSuper {
 			case null:
-			case sup: jc.setSuperParameters(sup.params.map(function(t) return Genjvm.jtypeArgumentOfType(gctx, [], t)));
+			case sup: jc.setSuperParameters(sup.params.mapToArray(function(t) return Genjvm.jtypeArgumentOfType(gctx, [], t)));
 		}
 	}
 
@@ -3733,7 +3733,7 @@ class JvmPreprocessor {
 			case cf:
 				switch Genjvm.jsignatureOfType(gctx, cf.cfType) {
 					case JMethod(args, ret):
-						var jfi = JavaFunctionalInterface.create(args, ret, c.clPath, cf.cfName, c.clParams.concat(cf.cfParams).map(extractParamName));
+						var jfi = JavaFunctionalInterface.create(args, ret, c.clPath, cf.cfName, c.clParams.concat(cf.cfParams).mapToArray(extractParamName));
 						gctx.functionalInterfaces = [{c: c, cf: cf, jfi: jfi}].concat(gctx.functionalInterfaces);
 					case _:
 				}

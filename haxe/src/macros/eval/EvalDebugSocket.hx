@@ -352,8 +352,8 @@ class EvalDebugSocket {
 						case PEnum(names):
 							var fields = names[ve.eindex].params;
 							[
-								for (i => n in fields) {
-									var n = EvalHash.revHash(n);
+								for (i in 0...fields.length) {
+									var n = EvalHash.revHash(fields[i]);
 									var v = ve.eargs[i];
 									{n: n, v: v};
 								}
@@ -553,7 +553,7 @@ class EvalDebugSocket {
 					return switch (EvalContext.getStaticPrototypeRaise(EvalContext.getCtx(), ve.epath)).pkind {
 						case PEnum(names):
 							var fields = names[ve.eindex].params;
-							fields.map(n -> ({n: n, k: "value", column: null} : Completion));
+							fields.mapToArray(n -> ({n: n, k: "value", column: null} : Completion));
 						case _: [];
 					}
 			}

@@ -284,7 +284,7 @@ class TypeloadFields {
 	}
 
 	/**** end of strict meta handling *****/
-	public static function getMethodArgs(field:TClassField):Array<{variable:TVar, defaultValue:Null<TExpr>}> return switch field.cfExpr {
+	public static function getMethodArgs(field:TClassField):haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}> return switch field.cfExpr {
 		case {eexpr: TFunction(f)}: f.tfArgs;
 		case _: throw NotFound.raise();
 	};
@@ -295,10 +295,10 @@ class TypeloadFields {
 	public static function getStructInitSuperInfo(ctx:Typer, c:TClass,
 			p:Pos):{args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, expr:Null<TExpr>, types:Array<{name:String, optional:Bool, type:T}>} {
 		if (c.clSuper == null || c.clSuper.cls.clConstructor == null) return {args: [], expr: null, types: []};
-		var s = c.clSuper, ctor = s.cls.clConstructor, args:Array<{variable:TVar, defaultValue:Null<TExpr>}> = try {
+		var s = c.clSuper, ctor = s.cls.clConstructor, args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}> = try {
 			getMethodArgs(ctor);
 		} catch (_:NotFound) {
-			[];
+			vector();
 		};
 		var argsRev:Array<{variable:TVar, defaultValue:Null<TExpr>}> = [],
 			typesRev:Array<{name:String, optional:Bool, type:T}> = [],
@@ -366,8 +366,8 @@ class TypeloadFields {
 			tl.unshift({name: cf.cfName, optional: opt, type: t});
 		}
 		if (sup.expr != null) el.unshift(sup.expr);
-		var tf = ({tfArgs: args.concat(sup.args), tfType: ctx.t.tvoid, tfExpr: mk(TBlock(haxe.ds.Vector.fromArrayCopy(el)), ctx.t.tvoid, p)} : core.TType.TFunc);
-		var e = mk(TFunction(tf), TFun({args: tl.concat(sup.types), ret: ctx.t.tvoid}), p),
+		var tf = ({tfArgs: haxe.ds.Vector.fromArrayCopy(args.concat(sup.args)), tfType: ctx.t.tvoid, tfExpr: mk(TBlock(haxe.ds.Vector.fromArrayCopy(el)), ctx.t.tvoid, p)} : core.TType.TFunc);
+		var e = mk(TFunction(tf), TFun({args: haxe.ds.Vector.fromArrayCopy(tl.concat(sup.types)), ret: ctx.t.tvoid}), p),
 			cf = mkField("new", e.etype, p, Globals.nullPos);
 		cf.cfDoc = docFromString(doc.toString());
 		cf.cfExpr = e;
@@ -668,7 +668,7 @@ class TypeloadFields {
 	public static function createTyperContextForField(ctx:Typer, cctx:ClassInitCtx, fctx:FieldInitCtx, cff:ClassField,
 			cf:TClassField):Typer {
 		DeprecationCheck.checkIs(ctx.com, ctx.m.curmod, ctx.c.curclass.clMeta, cff.cffMeta, cff.cffName.name, cff.cffMeta, cff.cffName.pos);
-		var params = fctx.isStatic && !fctx.isAbstractMember && !MetadataTools.has(LibType, cctx.tclass.clMeta) /* TODO: remove this */ ? [] : ctx.typeParams;
+		var params = fctx.isStatic && !fctx.isAbstractMember && !MetadataTools.has(LibType, cctx.tclass.clMeta) /* TODO: remove this */ ? vector() : ctx.typeParams;
 		ctx = TyperManager.cloneForField(ctx, cf, params);
 		var c = cctx.tclass;
 		if (fctx.isAbstract && !MetadataTools.has(LibType, c.clMeta)) {
@@ -849,7 +849,7 @@ class TypeloadFields {
 		}
 		function handleTo():Void {
 			if (fctx.isMacro) invalidModifier(ctx.com, fctx, "macro", "cast function", p);
-			inline function validArgs(args:Array<{name:String, optional:Bool, type:T}>):Bool return args.length == 1
+			inline function validArgs(args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>):Bool return args.length == 1
 				|| (args.length == 2 && args[1].optional && isPosInfos(args[1].type));
 			switch [cf.cfKind, cf.cfType] {
 				case [Var(_), _]:
@@ -864,9 +864,9 @@ class TypeloadFields {
 			}
 			// TODO: this doesn't seem quite right...
 			if (!hasClassFieldFlag(cf, CfImpl)) addClassFieldFlag(cf, CfImpl);
-			inline function resolveM(args:Array<T>):T {
+			inline function resolveM(args:core.TType.TParams):T {
 				try {
-					unifyRaise(t, tfun([tthis].concat(args), m), cf.cfPos);
+					unifyRaise(t, tfun(VectorTools.cons(tthis, args), m), cf.cfPos);
 				} catch (e:core.Error.TypingError) {
 					switch e.error.errMessage {
 						case Unify(_):
@@ -886,7 +886,7 @@ class TypeloadFields {
 			var isMulti = MetadataTools.has(MultiType, a.aMeta) && !fctx.isAbstractMember;
 			if (isMulti && !MetadataTools.has(MultiType, cf.cfMeta)) cf.cfMeta.unshift(meta(MultiType));
 			var r = makeLazy(ctx.g, t, function() {
-				var args:Array<T>;
+				var args:core.TType.TParams;
 				if (isMulti) {
 					var ctor = a.aConstructor;
 					if (ctor == null)
@@ -898,8 +898,8 @@ class TypeloadFields {
 						case _: Globals.die("", "typeloadFields.ml");
 					};
 				} else args = switch cf.cfType {
-					case TFun({args: [_, {optional: true, type: t}]}) if (isPosInfos(t)): [t];
-					case _: [];
+					case TFun({args: [_, {optional: true, type: t}]}) if (isPosInfos(t)): vector(t);
+					case _: vector();
 				};
 				return resolveM(args);
 			}, "@:to");
@@ -917,11 +917,11 @@ class TypeloadFields {
 				if (!typeIseq(ctx.t.tstring, t2)) raiseTypingError("Second argument type must be String", cf.cfPos);
 			}
 			switch follow(t) {
-				case TFun(s) if (s.args.length >= 2 && isEmptyOrPosInfos(s.args.slice(2))):
+				case TFun(s) if (s.args.length >= 2 && isEmptyOrPosInfos(s.args, 2)):
 					if (a.aRead != null) displayError(ctx.com, "Multiple resolve-read methods are not supported", cf.cfPos);
 					checkFun(s.args[0].type, s.args[1].type);
 					a.aRead = cf;
-				case TFun(s) if (s.args.length >= 3 && isEmptyOrPosInfos(s.args.slice(3))):
+				case TFun(s) if (s.args.length >= 3 && isEmptyOrPosInfos(s.args, 3)):
 					if (a.aWrite != null) displayError(ctx.com, "Multiple resolve-write methods are not supported", cf.cfPos);
 					checkFun(s.args[0].type, s.args[1].type);
 					a.aWrite = cf;
@@ -963,7 +963,7 @@ class TypeloadFields {
 				if (fctx.isMacro) invalidModifier(ctx.com, fctx, "macro", "operator function", p);
 				var targ = fctx.isAbstractMember ? tthis : ta;
 				try {
-					typeEq(EqStrict, t, tfun([targ], mkMono()));
+					typeEq(EqStrict, t, tfun(vector(targ), mkMono()));
 				} catch (e:Unify_error) {
 					raiseErrorMsg(Unify(e.errors), cf.cfPos);
 				}
@@ -1266,11 +1266,11 @@ class TypeloadFields {
 			var a = cctx.abstractType;
 			if (MetadataTools.has(IsVar, f.cffMeta)) raiseTypingError("Abstract properties cannot be real variables", f.cffPos);
 			var ta = applyParams(a.aParams, extractParamTypes(a.aParams), a.aThis);
-			tget = tfun([ta], ret);
-			tset = tfun([ta, ret], ret);
+			tget = tfun(vector(ta), ret);
+			tset = tfun(vector(ta, ret), ret);
 		} else {
-			tget = tfun([], ret);
-			tset = TFun({args: [{name: "value", optional: false, type: ret}], ret: ret});
+			tget = tfun(vector(), ret);
+			tset = TFun({args: vector({name: "value", optional: false, type: ret}), ret: ret});
 		}
 		inline function findAccessor(name:String):Array<CastField> {
 			if (fctx.isStatic) {

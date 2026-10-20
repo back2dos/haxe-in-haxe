@@ -319,7 +319,7 @@ class TypeloadParse {
 // port: module ConditionDisplay of typeloadParse.ml
 class ConditionDisplay {
 	static final tSemver:core.TType.T = TInst(core.TFunctions.mkClass(core.TFunctions.nullModule, {pack: [], name: "SemVer"},
-		Globals.nullPos, Globals.nullPos), []);
+		Globals.nullPos, Globals.nullPos), vector());
 
 	static function convertSmallType(com:CommonContext, v:syntax.ParserEntry.SmallType):{s:String, t:core.TType.T}
 		return switch v {
@@ -340,7 +340,7 @@ class ConditionDisplay {
 		};
 		function checkExpr(e:Expr):Void switch e.expr {
 			case ECall({expr: EConst(Ident("version")), pos: p}, _):
-				var t = core.TType.T.TFun({args: [{name: "s", optional: false, type: com.basic.tstring}], ret: tSemver});
+				var t = core.TType.T.TFun({args: vector({name: "s", optional: false, type: com.basic.tstring}), ret: tSemver});
 				if (checkPosition(p)) context.display.DisplayException.sendHoverRaise(com, core.display.CompletionItem.makeCiClassField({
 					field: {
 						cfName: "version",
@@ -361,7 +361,7 @@ so it should be avoided if backwards-compatibility with earlier versions is need
 @see https://semver.org/"),
 						cfMeta: [],
 						cfKind: Method(MethNormal),
-						cfParams: [],
+						cfParams: vector(),
 						cfExpr: null,
 						cfExprUnoptimized: null,
 						cfOverloads: [],

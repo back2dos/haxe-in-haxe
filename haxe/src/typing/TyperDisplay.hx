@@ -34,8 +34,8 @@ using core.ds.VectorTools;
 
 class TyperDisplay {
 	public static function convertFunctionSignature(ctx:TyperContext, values:haxe.ds.StringMap<Expr>,
-			args:Array<{name:String, optional:Bool, type:T}>,
-			ret:T):{args:Array<{name:String, optional:Bool, type:T}>, ret:T, ctf:CtFunction} {
+			args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>,
+			ret:T):{args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, ret:T, ctf:CtFunction} {
 		return switch CompletionType.fromType(Display.getImportStatus.bind(ctx), values, TFun({args: args, ret: ret})) {
 			case CTFunction(ctf): {args: args, ret: ret, ctf: ctf};
 			case _: throw new core.Globals.InternalCompilerError("typerDisplay.ml: function signature expected", "");
@@ -123,7 +123,7 @@ class TyperDisplay {
 					}
 				case TTypeExpr(TClassDecl({clKind: KAbstractImpl(a)})):
 					Display.mergeCoreDoc(ctx, TAbstractDecl(a));
-					var t = TType(abstractModuleType(a, extractParamTypes(a.aParams)), []);
+					var t = TType(abstractModuleType(a, extractParamTypes(a.aParams)), vector());
 					var t = tpair(ctx, t);
 					CompletionItem.makeCiType(CompletionModuleType.ofModuleType(TAbstractDecl(a)), Imported, t);
 				case TTypeExpr(mt):
@@ -221,7 +221,7 @@ class TyperDisplay {
 	public static function displayDollarType(ctx:TyperContext, p:Pos, makeType:T->TPair):TExpr {
 		var mono = Typecore.spawnMonomorph(ctx, p);
 		var doc = Ast.docFromString("Outputs type of argument as a warning and uses argument as value");
-		var arg = [{name: "expression", optional: false, type: mono}];
+		var arg = vector({name: "expression", optional: false, type: mono});
 		return switch ctx.com.display.dmsKind {
 			case DMSignature:
 				DisplayException.sendSignaturesRaise(ctx.com, [
@@ -243,7 +243,7 @@ class TyperDisplay {
 		var p = eAst.pos;
 		function handleCall(tl:Array<{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}>, el:haxe.ds.Vector<Expr>, p0:Pos):TExpr {
 			function followWithCallable(x:{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}):{
-				args:Array<{name:String, optional:Bool, type:T}>,
+				args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>,
 				ret:T,
 				doc:Documentation,
 				values:haxe.ds.StringMap<Expr>
@@ -329,7 +329,7 @@ class TyperDisplay {
 		function findConstructorTypes(t:T):Array<{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}> {
 			return switch follow(t) {
 				case TInst(c = {clKind: KTypeParameter(ttp)}, _):
-					function loop(tl:Array<T>):T {
+					function loop(tl:core.TType.TParams):T {
 						for (t in tl) switch follow(t) {
 							case TAbstract({aPath: {pack: ["haxe"], name: "Constructible"}}, [t]):
 								return t;
@@ -406,7 +406,7 @@ class TyperDisplay {
 				switch follow(e1.etype) {
 					case TInst({clPath: {pack: [], name: "Array"}}, [t]):
 						var res = convertFunctionSignature(ctx, new haxe.ds.StringMap(),
-							[{name: "index", optional: false, type: ctx.t.tint}], t);
+							vector({name: "index", optional: false, type: ctx.t.tint}), t);
 						DisplayException.sendSignaturesRaise(ctx.com, [{sig: res, doc: Ast.docFromString("The array index")}], 0, 0,
 							SKCall);
 					case TAbstract(a, tl):
@@ -723,7 +723,7 @@ class TyperDisplay {
 				displayDollarType(ctx, p, tpair_);
 			case [{expr: EConst(Ident("trace"))}, _]:
 				var doc = Ast.docFromString("Print given arguments");
-				var arg = [{name: "value", optional: false, type: tDynamic}];
+				var arg = vector({name: "value", optional: false, type: tDynamic});
 				var ret = ctx.com.basic.tvoid;
 				var p = eAst.pos;
 				switch ctx.com.display.dmsKind {

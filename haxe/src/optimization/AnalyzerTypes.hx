@@ -27,6 +27,7 @@ import core.TFunctions.NotFound;
 import core.TPrinting;
 import context.SafeCom;
 import optimization.AnalyzerConfig;
+import core.ds.VectorTools.vector;
 
 /*
 	A BasicBlock represents a node in the control flow. It has expression elements similar to TBlock in the AST,
@@ -413,7 +414,7 @@ class Graph {
 		};
 		g.gVarInfos.push(vi);
 		var i = g.gVarInfos.length - 1;
-		v.vExtra = varExtra([], mk(TConst(TInt(i)), tDynamic, Globals.nullPos));
+		v.vExtra = varExtra(vector(), mk(TConst(TInt(i)), tDynamic, Globals.nullPos));
 		return vi;
 	}
 

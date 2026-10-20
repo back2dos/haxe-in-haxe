@@ -1213,12 +1213,10 @@ class Common {
 		return {name: path.name, cls: c, expr: com.main.mainExpr};
 	}
 
-	public static function expandCoroType(basic:BasicTypes, args:Array<{name:String, optional:Bool, type:T}>, ret:T):TSignature {
-		var args = [
-			{name: "_hx_continuation", optional: false, type: basic.tcoro.continuation.force()}
-		].concat(args);
+	public static function expandCoroType(basic:BasicTypes, args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, ret:T):TSignature {
+		var args = core.ds.VectorTools.cons({name: "_hx_continuation", optional: false, type: basic.tcoro.continuation.force()}, args);
 		if (ExtType.isVoid(follow(ret))) ret = basic.tunit;
-		return {args: args, ret: TInst(basic.tcoro.suspensionResultClass.force(), [ret])};
+		return {args: args, ret: TInst(basic.tcoro.suspensionResultClass.force(), vector(ret))};
 	}
 
 	// port: hxmc's persistent module cache (hxmc/src/hxmc/ModuleCache.hx) wraps the lazy typings here, to know

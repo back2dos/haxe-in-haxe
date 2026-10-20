@@ -44,6 +44,8 @@ import core.Error.ErrorMsg;
 import core.ds.VectorTools.vector;
 import haxe.ds.Vector;
 
+using core.ds.VectorTools;
+
 @:structInit class TypePatch {
 	public var tpType:Null<ComplexType>;
 	public var tpRemove:Bool;
@@ -530,7 +532,7 @@ class TyperManager {
 	};
 
 	public static function cloneForModule(ctx:Typer, m:TyperModule):Typer {
-		var out = create(ctx, m, ctx.c, ctx.f, ctx.e, PBuildModule, []);
+		var out = create(ctx, m, ctx.c, ctx.f, ctx.e, PBuildModule, vector());
 		out.allowTransform = true;
 		out.allowInline = true;
 		return out;
@@ -1065,8 +1067,9 @@ class Typecore {
 		case _: false;
 	};
 
-	public static function isEmptyOrPosInfos(args:Array<{name:String, optional:Bool, type:T}>):Bool return args.length == 0
-		|| (args.length == 1 && args[0].optional && isPosInfos(args[0].type));
+	// port: args from pos on (the list's tail, without the copy)
+	public static function isEmptyOrPosInfos(args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, pos = 0):Bool return args.length == pos
+		|| (args.length == pos + 1 && args[pos].optional && isPosInfos(args[pos].type));
 
 	static var storedTypedExprUid = 0;
 

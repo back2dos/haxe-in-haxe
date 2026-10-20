@@ -1380,7 +1380,7 @@ class MacroApiImpl {
 	}
 
 	public static function encodeTypeParams(tl:TypeParams):Value {
-		return encodeArrayV(tl.mapToVector(tp -> {
+		return encodeArrayV(tl.map(tp -> {
 			var defaultType = tp.ttpDefault == null ? vnull : encodeType(tp.ttpDefault);
 			var t = encodeType(tp.ttpType);
 			var name = encodeString(tp.ttpName);
@@ -1619,14 +1619,14 @@ class MacroApiImpl {
 		return switch s {
 			case Closed: encodeEnum(IAnonStatus, 0, vector());
 			case Const: encodeEnum(IAnonStatus, 2, vector());
-			case Extend(tl): encodeEnum(IAnonStatus, 3, vector(encodeRef(tl, tl -> encodeArrayV(tl.mapToVector(encodeType)), () -> "<extended types>")));
+			case Extend(tl): encodeEnum(IAnonStatus, 3, vector(encodeRef(tl, tl -> encodeArrayV(tl.map(encodeType)), () -> "<extended types>")));
 			case ClassStatics(cl): encodeEnum(IAnonStatus, 4, vector(encodeClref(cl)));
 			case EnumStatics(en): encodeEnum(IAnonStatus, 5, vector(encodeEnref(en)));
 			case AbstractStatics(ab): encodeEnum(IAnonStatus, 6, vector(encodeAbref(ab)));
 		}
 	}
 
-	public static function encodeTparams(pl:TParams):Value return encodeArrayV(pl.mapToVector(encodeType));
+	public static function encodeTparams(pl:TParams):Value return encodeArrayV(pl.map(encodeType));
 
 	public static function encodeClref(c:TClass):Value return encodeRef(c, encodeTclass, () -> MacroApi.sTypePath(c.clPath));
 
@@ -1667,7 +1667,7 @@ class MacroApiImpl {
 						encodeObj([fld("name", n), fld("opt", o), fld("t", t)]);
 					});
 					var ret = encodeType(sig.ret);
-					{tag: 4, pl: vector(encodeArray(pl), ret)};
+					{tag: 4, pl: vector(encodeArrayV(pl), ret)};
 				case TAnon(a):
 					{tag: 5, pl: vector(encodeRef(a, encodeTanon, () -> "<anonymous>"))};
 				case TDynamic(null):
@@ -1718,11 +1718,11 @@ class MacroApiImpl {
 	public static function decodeType(t:Value):T {
 		return switch decodeEnum(t) {
 			case {index: 0, args: [r]}: T.TMono(decodeRef(r));
-			case {index: 1, args: [e, pl]}: T.TEnum(decodeRef(e), decodeArray(pl).map(decodeType));
-			case {index: 2, args: [c, pl]}: T.TInst(decodeRef(c), decodeArray(pl).map(decodeType));
-			case {index: 3, args: [t, pl]}: T.TType(decodeRef(t), decodeArray(pl).map(decodeType));
+			case {index: 1, args: [e, pl]}: T.TEnum(decodeRef(e), mapDecodedArray(pl, decodeType));
+			case {index: 2, args: [c, pl]}: T.TInst(decodeRef(c), mapDecodedArray(pl, decodeType));
+			case {index: 3, args: [t, pl]}: T.TType(decodeRef(t), mapDecodedArray(pl, decodeType));
 			case {index: 4, args: [pl, r]}:
-				var args = decodeArray(pl).map(p -> {
+				var args = mapDecodedArray(pl, p -> {
 					name: decodeString(field(p, "name")),
 					optional: decodeBool(field(p, "opt")),
 					type: decodeType(field(p, "t"))
@@ -1731,7 +1731,7 @@ class MacroApiImpl {
 			case {index: 5, args: [a]}: T.TAnon(decodeRef(a));
 			case {index: 6, args: [t]}: if (isNull(t)) tDynamic else T.TDynamic(decodeType(t));
 			case {index: 7, args: [f]}: T.TLazy(decodeLazytype(f));
-			case {index: 8, args: [a, pl]}: T.TAbstract(decodeRef(a), decodeArray(pl).map(decodeType));
+			case {index: 8, args: [a, pl]}: T.TAbstract(decodeRef(a), mapDecodedArray(pl, decodeType));
 			case _: throw InvalidExpr.raise();
 		}
 	}
@@ -1791,7 +1791,7 @@ class MacroApiImpl {
 	public static function encodeTfunc(func:TFunc):Value {
 		var expr = encodeTexpr(func.tfExpr);
 		var t = encodeType(func.tfType);
-		var args = encodeArrayV(func.tfArgs.mapToVector(a -> {
+		var args = encodeArrayV(func.tfArgs.map(a -> {
 			var value = a.defaultValue == null ? vnull : encodeTexpr(a.defaultValue);
 			var v = encodeTvar(a.variable);
 			encodeObj([fld("v", v), fld("value", value)]);
@@ -2005,14 +2005,14 @@ class MacroApiImpl {
 		return switch decodeEnum(v) {
 			case {index: 0, args: [c, tl, cf]}:
 				var c:TClass = decodeRef(c);
-				FInstance(c, decodeArray(tl).map(decodeType), decodeRef(cf));
+				FInstance(c, mapDecodedArray(tl, decodeType), decodeRef(cf));
 			case {index: 1, args: [c, cf]}: FStatic(decodeRef(c), decodeRef(cf));
 			case {index: 2, args: [cf]}: FAnon(decodeRef(cf));
 			case {index: 3, args: [s]}: FDynamic(decodeString(s));
 			case {index: 4, args: [co, cf]}:
 				var co = if (isNull(co)) null else {
 					cls: (decodeRef(field(co, "c")) : TClass),
-					params: decodeArray(field(co, "params")).map(decodeType)
+					params: mapDecodedArray(field(co, "params"), decodeType)
 				};
 				FClosure(co, decodeRef(cf));
 			case {index: 5, args: [e, ef]}: FEnum(decodeRef(e), decodeEfield(ef));
@@ -2031,8 +2031,7 @@ class MacroApiImpl {
 	}
 
 	public static function decodeTfunc(v:Value):TFunc {
-		var tfArgs = decodeArray(field(v,
-			"args")).map(v -> {variable: decodeTvar(field(v, "v")), defaultValue: opt(decodeTexpr, field(v, "value"))});
+		var tfArgs = mapDecodedArray(field(v, "args"), v -> {variable: decodeTvar(field(v, "v")), defaultValue: opt(decodeTexpr, field(v, "value"))});
 		var tfType = decodeType(field(v, "t"));
 		var tfExpr = decodeTexpr(field(v, "expr"));
 		return {
@@ -2072,7 +2071,7 @@ class MacroApiImpl {
 				}));
 			case {index: 8, args: [vl]}: TArrayDecl(mapDecodedArray(vl, loop));
 			case {index: 9, args: [v1, vl]}: TCall(loop(v1), mapDecodedArray(vl, loop));
-			case {index: 10, args: [c, tl, vl]}: TNew(decodeRef(c), decodeArray(tl).map(decodeType), mapDecodedArray(vl, loop));
+			case {index: 10, args: [c, tl, vl]}: TNew(decodeRef(c), mapDecodedArray(tl, decodeType), mapDecodedArray(vl, loop));
 			case {index: 11, args: [op, pf, v1]}: TUnop(decodeUnop(op), if (decodeBool(pf)) Postfix else Prefix, loop(v1));
 			case {index: 12, args: [f]}: TFunction(decodeTfunc(f));
 			case {index: 13, args: [v, eo]}: TExprDef.TVar(decodeTvar(v), opt(loop, eo));
@@ -3167,8 +3166,8 @@ class MacroApiImpl {
 			{
 				name: "apply_params",
 				value: vfun3((tpl, tl, t) -> {
-					var tl = decodeArray(tl).map(decodeType);
-					var tpl = decodeArray(tpl).map(v -> {
+					var tl = mapDecodedArray(tl, decodeType);
+					var tpl = mapDecodedArray(tpl, v -> {
 						var t = decodeType(field(v, "t"));
 						var defaultType:Null<T> = null; // we don't care here
 						var c = switch t {
@@ -3184,7 +3183,7 @@ class MacroApiImpl {
 						return switch t {
 							case TInst({clKind: KTypeParameter(_)}, _):
 								// use non-physical equality check here to make apply_params work
-								var found = Lambda.find(tpl, tp2 -> core.TUnification.TUnification.typeIseq(t, tp2.ttpType));
+								var found = tpl.find(tp2 -> core.TUnification.TUnification.typeIseq(t, tp2.ttpType));
 								if (found != null) extractParamType(found) else TFunctions.map(map, t);
 							case _:
 								TFunctions.map(map, t);

@@ -172,10 +172,10 @@ class TLazy {
 }
 
 @:structInit class TSignature {
-	public var args:Array<{var name:String; var optional:Bool; var type:T;}>;
+	public var args:Vector<{var name:String; var optional:Bool; var type:T;}>;
 	public var ret:T;
 
-	public inline function new(args:Array<{var name:String; var optional:Bool; var type:T;}>, ret:T) {
+	public inline function new(args:Vector<{var name:String; var optional:Bool; var type:T;}>, ret:T) {
 		this.args = args;
 		this.ret = ret;
 	}
@@ -183,7 +183,7 @@ class TLazy {
 	public inline function clone():TSignature return new TSignature(args, ret);
 }
 
-typedef TParams = Array<T>;
+typedef TParams = Vector<T>;
 // port: `(tclass * tparams)`, as in `cl_super`/`cl_implements`.
 typedef ClassAndParams = {var cls:TClass; var params:TParams;};
 
@@ -198,11 +198,11 @@ typedef AbstractCastField = {var abs:TAbstract; var params:TParams; var field:Ca
 	public var ttpClass:TClass;
 	public var ttpHost:TypeParamHost;
 	public var ttpType:T;
-	public var ttpConstraints:Null<AtomicLazy<Array<T>>>;
+	public var ttpConstraints:Null<AtomicLazy<TParams>>;
 	public var ttpDefault:Null<T>;
 
 	public inline function new(ttpName:String, ttpClass:TClass, ttpHost:TypeParamHost, ttpType:T,
-			ttpConstraints:Null<AtomicLazy<Array<T>>>, ttpDefault:Null<T>) {
+			ttpConstraints:Null<AtomicLazy<TParams>>, ttpDefault:Null<T>) {
 		this.ttpName = ttpName;
 		this.ttpClass = ttpClass;
 		this.ttpHost = ttpHost;
@@ -215,7 +215,7 @@ typedef AbstractCastField = {var abs:TAbstract; var params:TParams; var field:Ca
 		ttpDefault);
 }
 
-typedef TypeParams = Array<TypedTypeParam>;
+typedef TypeParams = Vector<TypedTypeParam>;
 
 enum TConstant {
 	TInt(value:Int);
@@ -283,11 +283,11 @@ enum TVarKind {
 }
 
 @:structInit class TFunc {
-	public var tfArgs:Array<{var variable:TVar; var defaultValue:Null<TExpr>;}>;
+	public var tfArgs:Vector<{var variable:TVar; var defaultValue:Null<TExpr>;}>;
 	public var tfType:T;
 	public var tfExpr:TExpr;
 
-	public inline function new(tfArgs:Array<{var variable:TVar; var defaultValue:Null<TExpr>;}>, tfType:T, tfExpr:TExpr) {
+	public inline function new(tfArgs:Vector<{var variable:TVar; var defaultValue:Null<TExpr>;}>, tfType:T, tfExpr:TExpr) {
 		this.tfArgs = tfArgs;
 		this.tfType = tfType;
 		this.tfExpr = tfExpr;
@@ -299,7 +299,7 @@ enum TVarKind {
 enum AnonStatus {
 	Closed;
 	Const;
-	Extend(types:Array<T>);
+	Extend(types:TParams);
 	ClassStatics(cls:TClass);
 	EnumStatics(en:TEnum);
 	AbstractStatics(abs:TAbstract);

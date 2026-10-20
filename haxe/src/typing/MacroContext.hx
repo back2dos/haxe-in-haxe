@@ -75,7 +75,7 @@ using core.ds.VectorTools;
 // applied to EvalDataApi's readers/writers.
 // port: the macro context's engine calls (create, init, addTypes, callPath, doReuse,
 // setError) go through macros.MacroEngine.engine, Eval unless a host installs another.
-typedef MacroMethod = {args:Array<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
+typedef MacroMethod = {args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, ret:T, cls:TClass, field:TClassField};
 
 typedef LoadedMacro = {meth:MacroMethod, module:ModuleDef};
 
@@ -530,7 +530,7 @@ class MacroContext {
 				if (ctx.c.curclass == nullClass)
 					return null;
 				else
-					return TInst(ctx.c.curclass, []);
+					return TInst(ctx.c.curclass, vector());
 			}
 		};
 		api.getExpectedType = function() {
@@ -1085,7 +1085,7 @@ class MacroContext {
 				var last = margs[margs.length - 1];
 				switch follow(last.type) {
 					case TAbstract({aPath: {pack: ["haxe"], name: "Rest"}}, [t1]):
-						margs.slice(0, margs.length - 1).concat([{name: last.name, optional: last.optional, type: mctx.t.tarray(t1)}]);
+						VectorTools.withLast(margs, {name: last.name, optional: last.optional, type: mctx.t.tarray(t1)});
 					case _:
 						margs;
 				}
@@ -1170,7 +1170,7 @@ class MacroContext {
 			/*
 				force default parameter types to haxe.macro.Expr, and if success allow to pass any value type since it will be encoded
 			 */
-			var eargs:Array<{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType}> = margs.map(function(a):{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType} {
+			var eargs:Vector<{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType}> = margs.map(function(a):{arg:{name:String, optional:Bool, type:T}, kind:MacroArgType} {
 				try {
 					Typecore.unifyRaise(a.type, expr, p);
 					return {arg: {name: a.name, optional: a.optional, type: tDynamic}, kind: MAExpr};
@@ -1306,7 +1306,7 @@ class MacroContext {
 		return e;
 	}
 
-	public static function callMacro(mctx:TyperContext, args:Vector<Expr>, margs:Array<{name:String, optional:Bool, type:T}>,
+	public static function callMacro(mctx:TyperContext, args:Vector<Expr>, margs:Vector<{name:String, optional:Bool, type:T}>,
 			call:Array<Value>->Null<Value>, p:Pos):Null<Value> {
 		var el = CallUnification.unifyCallArgs(mctx, args, margs, tDynamic, p, false, false, false);
 		return call(el.mapToArray(function(e) return try MacroApiImpl.makeConst(e) catch (_:Exit)

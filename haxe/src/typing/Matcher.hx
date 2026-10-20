@@ -77,7 +77,7 @@ class Matcher {
 					case _: false;
 				})):
 					var typed = el.mapToArray(function(e) return typeExpr(ctx, e, WithTypeTools.value));
-					{type: ExprToPattern.tupleType(typed.map(function(e) return e.etype)), subjects: typed};
+					{type: ExprToPattern.tupleType(typed.mapToVector(function(e) return e.etype)), subjects: typed};
 				case EParenthesis(e): loop(e);
 				case _:
 					var e = typeExpr(ctx, e, WithTypeTools.value);

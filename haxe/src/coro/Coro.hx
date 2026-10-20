@@ -27,7 +27,7 @@ import haxe.ds.Vector;
 
 using core.ds.VectorTools;
 
-typedef CoroCls = {var params:TypeParams; var paramTypes:Array<T>; var clsT:T; var resultType:T; var contType:T;}
+typedef CoroCls = {var params:TypeParams; var paramTypes:TParams; var clsT:T; var resultType:T; var contType:T;}
 // inside = inside the continuation class
 // outside = in the original function
 typedef CoroClass = {var cls:TClass; var namePos:Pos; var inside:CoroCls; var outside:CoroCls; var typeParamSubst:Array<{param:TypedTypeParam, t:T}>; var coroType:CoroFor; var continuationApi:ContinuationApi;}
@@ -75,7 +75,7 @@ class ContinuationClassBuilder {
 		var po = extractParamTypes(outside);
 		var subst = [for (i in 0...outside.length) {param: outside[i], t: pi[i]}];
 		var ri = Coro.substituteTypeParams(subst, result);
-		cls.clSuper = {cls: api.baseContinuationClass, params: [ri]};
+		cls.clSuper = {cls: api.baseContinuationClass, params: vector(ri)};
 		return {
 			cls: cls,
 			namePos: p,
@@ -84,14 +84,14 @@ class ContinuationClassBuilder {
 				paramTypes: pi,
 				clsT: TInst(cls, pi),
 				resultType: ri,
-				contType: TInst(api.baseContinuationClass, [ri])
+				contType: TInst(api.baseContinuationClass, vector(ri))
 			},
 			outside: {
 				params: outside,
 				paramTypes: po,
 				clsT: TInst(cls, po),
 				resultType: result,
-				contType: TInst(api.baseContinuationClass, [result])
+				contType: TInst(api.baseContinuationClass, vector(result))
 			},
 			typeParamSubst: subst,
 			coroType: ctx.coroType,
@@ -135,8 +135,8 @@ class ContinuationClassBuilder {
 			funArgs.push({name: capture.v.vName, optional: false, type: capture.v.vType});
 			args.push({variable: capture.v, defaultValue: null});
 		}
-		var field = mkField("new", TFun({args: funArgs, ret: basic.tvoid}), p, p);
-		var expr = mk(TFunction({tfType: basic.tvoid, tfArgs: args, tfExpr: b.voidBlock(Vector.fromArrayCopy(el))}), field.cfType, p);
+		var field = mkField("new", TFun({args: Vector.fromArrayCopy(funArgs), ret: basic.tvoid}), p, p);
+		var expr = mk(TFunction({tfType: basic.tvoid, tfArgs: Vector.fromArrayCopy(args), tfExpr: b.voidBlock(Vector.fromArrayCopy(el))}), field.cfType, p);
 		field.cfExpr = expr;
 		field.cfKind = Method(MethNormal);
 		if (ctx.config.debug) Sys.println(core.TPrinting.sExprDebug(expr));
@@ -148,7 +148,7 @@ class ContinuationClassBuilder {
 		var basic:BasicTypes = ctx.typer.t;
 		var b = ctx.builder;
 		var p = cc.namePos;
-		var ret = TInst((basic.tcoro.suspensionResultClass).force(), [cc.inside.resultType]);
+		var ret = TInst((basic.tcoro.suspensionResultClass).force(), vector(cc.inside.resultType));
 		var ethis = b.makeThis(cc.inside.clsT, p);
 		function subst(t:T):T return Coro.substituteTypeParams(cc.typeParamSubst, t);
 		var vars:Map<Int, TVar> = [];
@@ -170,8 +170,8 @@ class ContinuationClassBuilder {
 		el.push(b.varInitNull(vtmpError));
 		if ((vtmpErrorUnwrapped).isVal()) el.push(b.varInitNull((vtmpErrorUnwrapped).force()));
 		el.push(eloop);
-		var expr = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: mapLoop(b.voidBlock(Vector.fromArrayCopy(el)))}), basic.tvoid, p);
-		var field = mkField("invokeResume", TFun({args: [], ret: ret}), p, p);
+		var expr = mk(TFunction({tfType: ret, tfArgs: vector(), tfExpr: mapLoop(b.voidBlock(Vector.fromArrayCopy(el)))}), basic.tvoid, p);
+		var field = mkField("invokeResume", TFun({args: vector(), ret: ret}), p, p);
 		addClassFieldFlag(field, CfOverride);
 		field.cfExpr = expr;
 		field.cfKind = Method(MethNormal);
@@ -183,11 +183,11 @@ class ContinuationClassBuilder {
 		var basic:BasicTypes = ctx.typer.t;
 		var b = ctx.builder;
 		var p = cc.namePos;
-		var ret = TInst((basic.tcoro.suspensionResultClass).force(), [cc.inside.resultType]);
+		var ret = TInst((basic.tcoro.suspensionResultClass).force(), vector(cc.inside.resultType));
 		var ethis = b.makeThis(cc.inside.clsT, p);
 		var access = b.instanceField(ethis, cc.cls, cc.inside.paramTypes, captured, captured.cfType);
-		var expr = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: b.voidBlock(vector(b.makeReturn(b.call(access, vector(), ret))))}), basic.tvoid, p);
-		var field = mkField("invokeResume", TFun({args: [], ret: ret}), p, p);
+		var expr = mk(TFunction({tfType: ret, tfArgs: vector(), tfExpr: b.voidBlock(vector(b.makeReturn(b.call(access, vector(), ret))))}), basic.tvoid, p);
+		var field = mkField("invokeResume", TFun({args: vector(), ret: ret}), p, p);
 		addClassFieldFlag(field, CfOverride);
 		field.cfExpr = expr;
 		field.cfKind = Method(MethNormal);
@@ -240,7 +240,7 @@ class Coro {
 	}
 
 	public static function coroToStateMachine(ctx:CoroCtx, cc:CoroClass, root:CoroBlock, exprs:CoroToTexprExprs,
-			args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, vtmpResult:AtomicLazy<TVar>, vtmpError:TVar,
+			args:Vector<{variable:TVar, defaultValue:Null<TExpr>}>, vtmpResult:AtomicLazy<TVar>, vtmpError:TVar,
 			vtmpErrorUnwrapped:AtomicLazy<TVar>, vcompletion:TVar, vcontinuation:TVar, mode:CoroGenMode, stack:Pos->TExpr,
 			startException:TExpr->TExpr):TExpr {
 		var b = ctx.builder;
@@ -281,7 +281,7 @@ class Coro {
 				// on the result — no intermediate variable, no separate field assignments.
 				var ctorArgs = Vector.fromArrayCopy([exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat(captured == null ? [] : [captured.e]));
 				var tnew = mk(TNew(cc.cls, cc.outside.paramTypes, ctorArgs), cc.outside.clsT, cc.namePos);
-				var einvoke = b.instanceField(tnew, cc.cls, cc.outside.paramTypes, invoke, TFun({args: [], ret: ret}));
+				var einvoke = b.instanceField(tnew, cc.cls, cc.outside.paramTypes, invoke, TFun({args: vector(), ret: ret}));
 				b.makeReturn(b.call(einvoke, vector(), ret));
 			case GenThunk(_):
 				// Thunk path: build the closure that captures outer locals, allocate the continuation
@@ -294,8 +294,8 @@ class Coro {
 				el.push(b.varInitNull(vtmpError));
 				if ((vtmpErrorUnwrapped).isVal()) el.push(b.varInitNull((vtmpErrorUnwrapped).force()));
 				el.push(eloop);
-				var thunkType = TFun({args: [], ret: ret});
-				var ethunk = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: b.voidBlock(Vector.fromArrayCopy(el))}), thunkType, cc.namePos);
+				var thunkType = TFun({args: vector(), ret: ret});
+				var ethunk = mk(TFunction({tfType: ret, tfArgs: vector(), tfExpr: b.voidBlock(Vector.fromArrayCopy(el))}), thunkType, cc.namePos);
 				var vthunk = allocVar(VGenerated, "_hx_thunk", thunkType, cc.namePos);
 				var ctorArgs = Vector.fromArrayCopy([exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat([b.local(vthunk, cc.namePos)]));
 				var tnew = mk(TNew(cc.cls, cc.outside.paramTypes, ctorArgs), cc.outside.clsT, cc.namePos);
@@ -329,7 +329,7 @@ class Coro {
 				case Coro({args: args, ret: ret}): Common.expandCoroType(basic, args, ret);
 				case NotCoro(_): throw "super helper: expected Coro type";
 			};
-			var vars = [for (a in expanded.args) allocVar(VGenerated, a.name, a.type, p)];
+			var vars = expanded.args.map(a -> allocVar(VGenerated, a.name, a.type, p));
 			// Expand the super field type so the TCall type-checks
 			var ecall = mk(TCall({
 				var recordCopy3 = core.ds.Record.copy(superExpr);
@@ -338,7 +338,7 @@ class Coro {
 					ret: expanded.ret
 				});
 				recordCopy3;
-			}, vars.mapToVector(function(v) return b.local(v, p))), expanded.ret, p);
+			}, vars.map(function(v) return b.local(v, p))), expanded.ret, p);
 			cf.cfExpr = mk(TFunction({
 				tfArgs: vars.map(function(v) return {variable: v, defaultValue: null}),
 				tfType: expanded.ret,
@@ -394,7 +394,7 @@ class Coro {
 			p));
 		var etmpErrorUnwrapped = AtomicLazy.fromFun(function() return b.local((vtmpErrorUnwrapped).force(), p));
 		var expr:TExpr;
-		var args:Array<{variable:TVar, defaultValue:Null<TExpr>}>;
+		var args:Vector<{variable:TVar, defaultValue:Null<TExpr>}>;
 		var name:String;
 		switch ctx.coroType {
 			case ClassField(_, cf, f, _):
@@ -437,7 +437,7 @@ class Coro {
 					GenInline({e: b.makeThis(ctx.typer.c.tthis, p), cf: captured});
 				}
 			case LocalFunc(_, _) if (!ctx.capturesThis && !ctx.hasCaptureVars): GenInline(null);
-			case LocalFunc(_, v): GenThunk(mkField("_hx_captured", TFun({args: [], ret: retInside}), v.vPos, v.vPos));
+			case LocalFunc(_, v): GenThunk(mkField("_hx_captured", TFun({args: vector(), ret: retInside}), v.vPos, v.vPos));
 		};
 		var vcompletion = allocVar(VGenerated, "_hx_completion", cont.continuation, p);
 		var ecompletion = b.local(vcompletion, p);
@@ -448,12 +448,12 @@ class Coro {
 		var vcontinuation = allocVar(VGenerated, "_hx_continuation", contType, p);
 		var econtinuation = b.local(vcontinuation, p);
 		inline function resultField(cf:TClassField,
-				t:T):TExpr return b.instanceField(econtinuation, cont.suspensionResultClass, [basic.tany], cf, t);
+				t:T):TExpr return b.instanceField(econtinuation, cont.suspensionResultClass, vector(basic.tany), cf, t);
 		var estate = resultField(cont.state, cont.suspensionState);
 		var eresult = resultField(cont.result, basic.tnull(basic.tany));
 		var eerror = resultField(cont.error, basic.tnull(basic.texception));
 		inline function continuationField(cf:TClassField,
-				t:T):TExpr return b.instanceField(econtinuation, cont.baseContinuationClass, [basic.tany], cf, t);
+				t:T):TExpr return b.instanceField(econtinuation, cont.baseContinuationClass, vector(basic.tany), cf, t);
 		var egoto = continuationField(cont.gotoLabel, basic.tint);
 		var etmpError = b.local(vtmpError, p);
 		var exprs:CoroToTexprExprs = {
@@ -541,7 +541,7 @@ class Coro {
 		// thunk (built inside coro_to_state_machine) can capture `_hx_this` via closure, making
 		// the original class instance accessible throughout the state machine.
 		if ((vgthis).isVal()) tfExpr = b.voidBlock(vector(b.varInit((vgthis).force(), b.makeThis(ctx.typer.c.tthis, p)), tfExpr));
-		var tfArgs = [{variable: vcompletion, defaultValue: null}].concat(args);
+		var tfArgs = VectorTools.cons({variable: vcompletion, defaultValue: (null : Null<TExpr>)}, args);
 		// I'm not sure what this should be, but let's stick to the widest one for now.
 		// Cpp dies if I try to use coro_class.outside.cls_t here, which might be something
 		// to investigate independently.

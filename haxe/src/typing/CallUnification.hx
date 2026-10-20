@@ -56,7 +56,7 @@ enum OverloadKind {
 }
 
 class CallUnification {
-	public static function unifyCallArgs(ctx:TyperContext, el:Vector<Expr>, args:Array<CallParameter>, r:T, callp:Pos, isInline:Bool,
+	public static function unifyCallArgs(ctx:TyperContext, el:Vector<Expr>, args:Vector<CallParameter>, r:T, callp:Pos, isInline:Bool,
 			forceInline:Bool, inOverload:Bool, ?callFieldP:Pos):Vector<TExpr> {
 		if (callFieldP == null) callFieldP = callp;
 		inline function callError(err:core.Error.CallError, p:Pos):Dynamic return raiseErrorMsg(CallError(err), p);
@@ -111,19 +111,19 @@ class CallUnification {
 				}
 			}
 		}
-		// port: `loop` walks `el` from `ei` on (upstream: its tail) and returns the typed arguments
-		// in reverse order (upstream: `x :: loop ...`), made a Vector once at the end.
+		// port: `loop` walks `el` from `ei` and `args` from `ai` on (upstream: their tails) and returns the typed
+		// arguments in reverse order (upstream: `x :: loop ...`), made a Vector once at the end.
 		inline function reversed(l:Array<TExpr>):Array<TExpr> {
 			l.reverse();
 			return l;
 		}
-		function loop(ei:Int, args:Array<CallParameter>):Array<TExpr> {
-			if (ei == el.length && args.length == 0) {
+		function loop(ei:Int, ai:Int):Array<TExpr> {
+			if (ei == el.length && ai == args.length) {
 				if (invalidSkips.length > 0) callError(CannotSkipNonNullable(invalidSkips[invalidSkips.length - 1]), callp);
 				return [];
 			}
-			if (args.length == 1 && !args[0].optional) {
-				var name = args[0].name, t = args[0].type;
+			if (args.length - ai == 1 && !args[ai].optional) {
+				var name = args[ai].name, t = args[ai].type;
 				switch t {
 					case TAbstract({aPath: {pack: ["cpp"], name: "Rest"}}, [element]):
 						return reversed(restError(() -> [for (i in ei...el.length) typeAgainst(name, element, el[i])], name));
@@ -179,13 +179,13 @@ class CallUnification {
 				});
 			}
 			if (ei == el.length) {
-				var arg = args[0], tail = args.slice(1);
+				var arg = args[ai];
 				if (!arg.optional) {
 					var tailP = core.ds.Record.copy(callp);
 					tailP.pmin = callFieldP.pmin;
-					return callError(NotEnoughArguments(args), tailP);
+					return callError(NotEnoughArguments(ai == 0 ? args : args.slice(ai)), tailP);
 				}
-				var rest = loop(ei, tail);
+				var rest = loop(ei, ai + 1);
 				if (!ctx.allowTransform) return [];
 				if (rest.length == 0
 					&& !(isInline && (ctx.com.doinline || forceInline))
@@ -193,18 +193,18 @@ class CallUnification {
 				rest.push(defaultValue(arg.name, arg.type));
 				return rest;
 			}
-			if (args.length == 0) {
+			if (ai == args.length) {
 				if (skipped.length == 0) {
 					if (ctx.m.isDisplayFile && !context.display.Diagnostics.errorInDiagnosticsRun(ctx.com, el[ei].pos)) {
 						typeExpr(ctx, el[ei], WithTypeTools.value);
-						loop(ei + 1, []);
+						loop(ei + 1, args.length);
 					}
 					return callError(TooManyArguments, el[ei].pos);
 				}
 				var first = skipped[skipped.length - 1];
 				return argError(first.error, first.name, true);
 			}
-			var e = el[ei], arg = args[0], tailArgs = args.slice(1), name = arg.name, opt = arg.optional,
+			var e = el[ei], arg = args[ai], tailLength = args.length - ai - 1, name = arg.name, opt = arg.optional,
 				t = arg.type;
 			var bodyCapture = resetCallArgBodyCapture(ctx),
 				restoreMonos:Void->Void = opt ? monomorphTransaction(ctx) : function() {},
@@ -218,8 +218,8 @@ class CallUnification {
 			inline function drop():Void {
 				committed = true;
 			}
-			var mightSkip = opt && el.length - ei - 1 < tailArgs.length,
-				optFollowedByRest = opt && tailArgs.length == 1 && ExtType.isRest(follow(tailArgs[0].type));
+			var mightSkip = opt && el.length - ei - 1 < tailLength,
+				optFollowedByRest = opt && tailLength == 1 && ExtType.isRest(follow(args[ai + 1].type));
 			inline function maybeRaiseCapturedError():Void {
 				if (mightSkip || optFollowedByRest) for (cm in bodyCapture.value) if (Message.severity(cm) == MessageSeverity.Error)
 					throw new context.Typecore.WithTypeError(makeError(Custom(cm.cmMessage), cm.cmPos));
@@ -231,7 +231,7 @@ class CallUnification {
 					var typed = typeAgainst(name, t, e);
 					maybeRaiseCapturedError();
 					commit();
-					result = loop(ei + 1, tailArgs);
+					result = loop(ei + 1, ai + 1);
 					result.push(typed);
 				} catch (exc:Dynamic) {
 					switch exc {
@@ -240,7 +240,7 @@ class CallUnification {
 								drop();
 								restoreMonos();
 								var def = skip(name, ul, t);
-								var rest = loop(ei, tailArgs);
+								var rest = loop(ei, ai + 1);
 								rest.push(def);
 								return rest;
 							}
@@ -252,7 +252,7 @@ class CallUnification {
 								commit();
 								restoreMonos();
 								var def = defaultValue(name, t);
-								var rest = loop(ei + 1, tailArgs);
+								var rest = loop(ei + 1, ai + 1);
 								rest.push(def);
 								return rest;
 							}
@@ -272,7 +272,7 @@ class CallUnification {
 		}
 		var restore = enterCallArgs(ctx, inOverload);
 		try {
-			var result = VectorTools.ofArrayReversed(loop(0, args));
+			var result = VectorTools.ofArrayReversed(loop(0, 0));
 			restore();
 			return result;
 		} catch (exc:haxe.Exception) {
@@ -288,9 +288,8 @@ class CallUnification {
 		Returns a tuple of a part of `args` covered by `el_typed`, and a part of `args`
 		not used for `el_typed` unification.
 	*/
-	public static function unifyTypedArgs(tmap:T->T, args:Array<CallParameter>, typed:Vector<TExpr>,
-			callPos:Pos):{typed:Array<CallParameter>, remaining:Array<CallParameter>} {
-		var consumed = [];
+	public static function unifyTypedArgs(tmap:T->T, args:Vector<CallParameter>, typed:Vector<TExpr>,
+			callPos:Pos):{typed:Vector<CallParameter>, remaining:Vector<CallParameter>} {
 		for (i in 0...typed.length) {
 			if (i >= args.length) raiseErrorMsg(CallError(TooManyArguments), callPos);
 			var e = typed[i], arg = args[i];
@@ -309,10 +308,13 @@ class CallUnification {
 						throw exc;
 				}
 			}
-			consumed.push(arg);
 			tmap = t -> t;
 		}
-		return {typed: consumed, remaining: args.slice(typed.length)};
+		// port: the covered part is the first typed.length args (none: no copies)
+		return typed.length == 0 ? {typed: vector(), remaining: args} : {
+			typed: args.slice(0, typed.length),
+			remaining: args.slice(typed.length)
+		};
 	}
 
 	public static function ensureCoroAvailability(com:CommonContext):Void {
@@ -336,9 +338,9 @@ class CallUnification {
 		};
 		var cf = c.clFields.get("resolveTo");
 		if (cf == null) throw core.ds.NotFound.raise();
-		var type = applyParams(c.clParams, [param], cf.cfType);
+		var type = applyParams(c.clParams, vector(param), cf.cfType);
 		inline function resolve(call:TExpr,
-				cont:TExpr):TExpr return b.call(b.instanceField(call, c, [param], cf, type), vector(cont), basic.tvoid);
+				cont:TExpr):TExpr return b.call(b.instanceField(call, c, vector(param), cf, type), vector(cont), basic.tvoid);
 		switch econt.eexpr {
 			case TLocal(_) | TConst(_):
 				return resolve(ecall, econt);
@@ -432,14 +434,14 @@ class CallUnification {
 		inline function attempt(cf:TClassField, inOverload:Bool):FieldCallCandidateData<CallAttemptData> {
 			var monos = Monomorph.spawnConstrainedMonos(map, cf.cfParams),
 				t = map(applyParams(cf.cfParams, monos, cf.cfType));
-			inline function make(args:Array<CallParameter>, ret:T, coro:Bool):FieldCallCandidateData<CallAttemptData> {
+			inline function make(args:Vector<CallParameter>, ret:T, coro:Bool):FieldCallCandidateData<CallAttemptData> {
 				var split = unifyTypedArgs(tmap, args, elTyped, p),
 					typed:Vector<TExpr>;
 				typed = try unifyCallArgs(ctx, el, split.remaining, ret, p, isInline, forced, inOverload,
 					fa.faFieldPos) catch (de:context.display.DisplayException) raiseAugmentedDisplay(cf, de.kind);
 				// here
 				if (elTyped.length > 0) typed = elTyped.concat(typed);
-				args = split.typed.concat(split.remaining);
+				// port: args_typed @ args is args again
 				var tf = coro ? ctx.t.tcoro.tcoro.force()({args: args, ret: ret}) : TFun({args: args, ret: ret});
 				function makeCall():TExpr {
 					var ef = mk(TField(fa.faOn, FieldAccess.applyFa(cf, fa.faHost)), t, fa.faPos);
@@ -536,12 +538,12 @@ class CallUnification {
 				switch exc {
 					case(core.ds.ExceptionTools.typing(_) => Some(_)) if (Common.ignoreError(ctx.com)):
 						checkDisplayArgs();
-						var tf = TFun({args: el.mapToArray(_ -> {name: "", optional: false, type: tDynamic}), ret: tDynamic});
+						var tf = TFun({args: el.map(_ -> {name: "", optional: false, type: tDynamic}), ret: tDynamic});
 						function call():TExpr {
 							var ef = mk(TField(fa.faOn, FieldAccess.applyFa(fa.faField, fa.faHost)), tf, fa.faPos);
 							return mk(TCall(ef, vector()), tDynamic, p);
 						}
-						return makeFieldCallCandidate(vector(), tDynamic, [], tf, fa.faField, call);
+						return makeFieldCallCandidate(vector(), tDynamic, vector(), tf, fa.faField, call);
 					case _:
 						throw exc;
 				}
@@ -713,7 +715,7 @@ class CallDispatcher {
 			}
 			return mk(TCall(e, all), ret, p);
 		}
-		inline function make(args:Array<CallParameter>, ret:T):TExpr {
+		inline function make(args:Vector<CallParameter>, ret:T):TExpr {
 			var split = CallUnification.unifyTypedArgs(t -> t, args, typed, p);
 			var all = CallUnification.unifyCallArgs(ctx, el, split.remaining, ret, p, false, false, false);
 			return mk(TCall(e, typed.concat(all)), ret, p);
@@ -740,7 +742,7 @@ class CallDispatcher {
 			case NotCoro(TMono(_)):
 				var ret = mkMono(),
 					all = typed.concat(el.map(e -> typeExpr(ctx, e, WithTypeTools.value)));
-				Typecore.unify(ctx, tfun(all.mapToArray(e -> e.etype), ret), e.etype, e.epos);
+				Typecore.unify(ctx, tfun(all.map(e -> e.etype), ret), e.etype, e.epos);
 				mk(TCall(e, all), ret, p);
 			case NotCoro(t): defaultCall(t);
 		};
@@ -762,7 +764,7 @@ class CallDispatcher {
 				!typeIseqStrict(t, e.etype) ? mk(TCast(e, null), t, e.epos) : e;
 			case AccessorAnon:
 				var e = fa.faOn, t = FieldAccess.getMapFunction(fa)(fa.faField.cfType),
-					all = typed.concat(el.map(e -> typeExpr(ctx, e, WithTypeTools.value))), tf = tfun(all.mapToArray(e -> e.etype), t),
+					all = typed.concat(el.map(e -> typeExpr(ctx, e, WithTypeTools.value))), tf = tfun(all.map(e -> e.etype), t),
 					name = (isSet ? "set" : "get") + "_" + fa.faField.cfName;
 				Calls.makeCall(ctx, mk(TField(e, quickFieldDynamic(e.etype, name)), tf, p), all, t, p);
 			case _: raiseTypingError("Could not resolve accessor", p);

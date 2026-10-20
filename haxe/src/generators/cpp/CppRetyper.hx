@@ -20,6 +20,7 @@ import generators.cpp.CppError.CppErrorKind;
 import generators.cpp.filters.CppFilterValueType;
 import generators.cpp.filters.CppFilterAutoCast;
 import haxe.ds.Vector;
+import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
 
@@ -57,51 +58,47 @@ typedef ValueTypeHandler = Void->MarshalTypeState;
 
 class CppRetyper {
 	/* TODO : Not have this basically be a duplicated unify_cf */
-	public static function unifyCf2(mapType:T->T, c:TClass, cf:TClassField, elArgs:Array<TExpr>,
+	public static function unifyCf2(mapType:T->T, c:TClass, cf:TClassField, elArgs:Vector<TExpr>,
 			elRet:TExpr):Null<typing.FieldCallCandidate.FieldCallCandidateData<typing.OverloadResolution.ResolvedOverload>> {
 		var monos = cf.cfParams.map(function(_) return mkMono());
 		return switch follow(applyParams(cf.cfParams, monos, mapType(cf.cfType))) {
 			case tf = TFun({args: tl2, ret: ret}):
 				core.TUnification.unify(elRet.etype, ret);
-				function loop2(acc:Array<TExpr>, el:Array<TExpr>, tl:Array<{name:String, optional:Bool, type:T}>) {
-					return switch [el, tl] {
-						case [_.length > 0 => true, _.length > 0 => true]:
-							var e = el[0], t = tl[0].type;
-							var elRest = el.slice(1), tlRest = tl.slice(1);
-							var unified = try {
-								core.TUnification.unify(e.etype, t);
-								true;
-							} catch (_:Dynamic) false;
-							if (unified) loop2([e].concat(acc), elRest, tlRest) else {
-								if (core.TOther.ExtType.isRest(follow(t))) {
-									switch [follow(t), tlRest] {
-										case [TAbstract({aPath: {pack: ["haxe"], name: "Rest"}}, [t]), []]:
-											try {
-												var el = elRest.map(function(e) {
-													core.TUnification.unify(t, e.etype);
-													return e;
-												});
-												var rev = acc.copy();
-												rev.reverse();
-												var fcc = typing.FieldCallCandidate.makeFieldCallCandidate(Vector.fromArrayCopy(rev.concat(el)), ret, monos, tf, cf,
-													({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
-												fcc;
-											} catch (_:Dynamic) null;
-										case _:
-											die("", "cppRetyper.ml");
-									}
-								} else null;
-							}
-						case [[], []]:
-							var rev = acc.copy();
-							rev.reverse();
-							typing.FieldCallCandidate.makeFieldCallCandidate(Vector.fromArrayCopy(rev), ret, monos, tf, cf,
-								({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
-						case _:
-							null;
-					}
+				// port: elArgs and tl2 walked in lockstep from i on (upstream: their tails), acc being elArgs' first i elements
+				function loop2(i:Int) {
+					return if (i < elArgs.length && i < tl2.length) {
+						var e = elArgs[i], t = tl2[i].type;
+						var unified = try {
+							core.TUnification.unify(e.etype, t);
+							true;
+						} catch (_:Dynamic) false;
+						if (unified) loop2(i + 1) else {
+							if (core.TOther.ExtType.isRest(follow(t))) {
+								switch [follow(t), tl2.length - i - 1] {
+									case [TAbstract({aPath: {pack: ["haxe"], name: "Rest"}}, [t]), 0]:
+										try {
+											var args = new Vector<TExpr>(elArgs.length - 1);
+											Vector.blit(elArgs, 0, args, 0, i);
+											for (j in i + 1...elArgs.length) {
+												var e = elArgs[j];
+												core.TUnification.unify(t, e.etype);
+												args[j - 1] = e;
+											}
+											var fcc = typing.FieldCallCandidate.makeFieldCallCandidate(args, ret, monos, tf, cf,
+												({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
+											fcc;
+										} catch (_:Dynamic) null;
+									case _:
+										die("", "cppRetyper.ml");
+								}
+							} else null;
+						}
+					} else if (i == elArgs.length && i == tl2.length) {
+						typing.FieldCallCandidate.makeFieldCallCandidate(elArgs.copy(), ret, monos, tf, cf,
+							({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
+					} else null;
 				}
-				loop2([], elArgs, tl2);
+				loop2(0);
 			case t:
 				null;
 		}
@@ -170,15 +167,15 @@ class CppRetyper {
 								case TMono(r):
 									r.tmType == null ? false : find(s, r.tmType);
 								case TEnum(_, tl) | TInst(_, tl):
-									Lambda.exists(tl, function(x) return find(s, x));
+									tl.exists(function(x) return find(s, x));
 								case TAbstract(abs, tl):
 									if (!Meta.has(Meta.CoreType, abs.aMeta) && find(s, core.Abstract.getUnderlyingType(abs, tl, true))) true else
-										Lambda.exists(tl, function(x) return find(s, x));
+										tl.exists(function(x) return find(s, x));
 								case TType(tdef, tl):
 									find(s, applyTypedef(tdef, tl));
 								case TFun(sig):
 									if (find(s, sig.ret)) true else {
-										Lambda.exists(sig.args, function(a) return find(s, a.type));
+										sig.args.exists(function(a) return find(s, a.type));
 									}
 								case TLazy(f):
 									find(s, lazyType(f));
@@ -193,7 +190,7 @@ class CppRetyper {
 						cppTypeFromPathStack(stack, basic, typeDef.tPath, params, valueTypeHandler,
 							function() return cppTypeOfStack(stack, basic, valueTypeHandler, applyTypedef(typeDef, params)));
 				case TFun(sig):
-					var retypedArguments = sig.args.map(function(a) return cppTfunArgTypeOfStack(stack, basic, a.optional, withReferenceValueType, a.type));
+					var retypedArguments = sig.args.mapToArray(function(a) return cppTfunArgTypeOfStack(stack, basic, a.optional, withReferenceValueType, a.type));
 					var retypedReturn = cppTypeOfStack(stack, basic, withStackValueType, sig.ret);
 					TCppCallable(retypedArguments, retypedReturn);
 				case TAnon(_): TCppObject;
@@ -333,7 +330,7 @@ class CppRetyper {
 					return if (a.optional) cppTypeOfNullStack(stack, basic, valueTypeHandler, a.type) else
 						cppTypeOfStack(stack, basic, valueTypeHandler, a.type);
 				}
-				{args: sig.args.map(cppArgTypeOf), ret: cppTypeOfStack(stack, basic, valueTypeHandler, sig.ret)};
+				{args: sig.args.mapToArray(cppArgTypeOf), ret: cppTypeOfStack(stack, basic, valueTypeHandler, sig.ret)};
 			case _:
 				/* ? */
 				{args: [TCppVoid], ret: TCppVoid};
@@ -346,20 +343,20 @@ class CppRetyper {
 				TCppNativePointer(klass) else if (hasClassFlag(klass, CInterface)) TCppInterface(klass) else
 				if (hasClassFlag(klass, CExtern) && !isInternalClass(klass.clPath)) {
 					if (isMarshallingNativeValueClass(klass)) {
-						var tcppParams = params.map(function(p) return cppTypeOfStack(stack, basic, withStackValueType, p));
+						var tcppParams = params.mapToArray(function(p) return cppTypeOfStack(stack, basic, withStackValueType, p));
 						TCppMarshalNativeType(ValueClass(klass, tcppParams), valueTypeHandler());
 					} else if (isMarshallingNativePointer(klass)) {
-						var tcppParams = params.map(function(p) return cppTypeOfStack(stack, basic, withStackValueType, p));
+						var tcppParams = params.mapToArray(function(p) return cppTypeOfStack(stack, basic, withStackValueType, p));
 						TCppMarshalNativeType(Pointer(klass, tcppParams), valueTypeHandler());
 					} else if (isMarshallingManagedClass(klass)) {
-						var tcppParams = params.map(function(p) return cppTypeOfStack(stack, basic, valueTypeHandler, p));
+						var tcppParams = params.mapToArray(function(p) return cppTypeOfStack(stack, basic, valueTypeHandler, p));
 						TCppMarshalManagedType(klass, tcppParams);
 					} else {
-						var tcppParams = params.map(function(p) return cppTypeOfStack(stack, basic, valueTypeHandler, p));
+						var tcppParams = params.mapToArray(function(p) return cppTypeOfStack(stack, basic, valueTypeHandler, p));
 						TCppInst(klass, tcppParams);
 					}
 				} else {
-					var tcppParams = params.map(function(p) return cppTypeOfStack(stack, basic, valueTypeHandler, p));
+					var tcppParams = params.mapToArray(function(p) return cppTypeOfStack(stack, basic, valueTypeHandler, p));
 					TCppInst(klass, tcppParams);
 				}
 		}
@@ -491,7 +488,7 @@ class CppRetyper {
 		function createFunction(field:TClassField, func:TFunc):TcppClassFunction return {
 			tcfField: field,
 			tcfName: nativeFieldNameRemap(field),
-			tcfArgs: func.tfArgs.map(function(a) return ({v: retypeFuncArg(basic, a.variable, a.defaultValue), o: a.defaultValue} : TcppArg)),
+			tcfArgs: func.tfArgs.mapToArray(function(a) return ({v: retypeFuncArg(basic, a.variable, a.defaultValue), o: a.defaultValue} : TcppArg)),
 			tcfFunc: func,
 			tcfIsVirtual: !Meta.has(Meta.NonVirtual, field.cfMeta),
 			tcfIsReflective: reflective(classDef, field),
@@ -520,7 +517,7 @@ class CppRetyper {
 		}
 
 		function createDynamicFuncVariable(field:TClassField, func:TFunc):TcppClassVariable {
-			var args = func.tfArgs.map(function(a) return retypeFuncArg(basic, a.variable, a.defaultValue)).map(function(v) return v.tcppvType);
+			var args = func.tfArgs.mapToArray(function(a) return retypeFuncArg(basic, a.variable, a.defaultValue)).map(function(v) return v.tcppvType);
 			var ret = cppTypeOf(basic, withStackValueType, func.tfType);
 			var tcpp = TCppCallable(args, ret);
 			var f = field.clone();
@@ -810,7 +807,7 @@ class CppRetyper {
 					var retyped:TcppInterfaceFunction = {
 						iffField: field,
 						iffName: nativeFieldNameRemap(field),
-						iffArgs: sig.args.map(function(a) return retypeArg(basic, handler, a)),
+						iffArgs: sig.args.mapToArray(function(a) return retypeArg(basic, handler, a)),
 						iffReturn: cppTypeOf(basic, handler, sig.ret),
 						iffScriptSlot: InterfaceSlots.findOpt(field.cfName, slots)
 					};
@@ -885,10 +882,10 @@ class CppRetyper {
 		}
 		function retypeArgs(t:T, pos:Pos):Null<Array<TcppTfunArg>> {
 			return switch t {
-				case TFun(sig) if (Lambda.exists(sig.args, function(a) return stackOnlyChecker(a.type))):
+				case TFun(sig) if (sig.args.exists(function(a) return stackOnlyChecker(a.type))):
 					CppError.cppAbort(PromotedStackOnlyValueType, pos);
 				case TFun(sig):
-					sig.args.map(function(a) return retypeArg(basic, withPromotedValueType, a));
+					sig.args.mapToArray(function(a) return retypeArg(basic, withPromotedValueType, a));
 				case _:
 					null;
 			}
@@ -1332,7 +1329,7 @@ private class ExpressionRetyper {
 			case TFunction(func):
 				/* TODO - this_dynamic ? */
 				var newCtx = retyperCtx.copy();
-				newCtx.declarations = IntPMap.ofList(func.tfArgs.map(function(a) return {
+				newCtx.declarations = IntPMap.ofList(func.tfArgs.mapToArray(function(a) return {
 					key: a.variable.vId,
 					value: CppRetyper.retypeFuncArg(basic, a.variable, a.defaultValue)
 				}));
@@ -1349,7 +1346,7 @@ private class ExpressionRetyper {
 					closeId: retyperCtx.closureId,
 					closeUndeclared: newCtx.undeclared,
 					closeType: newCtx.functionReturnType,
-					closeArgs: func.tfArgs.map(function(a) return ({v: CppRetyper.retypeFuncArg(basic, a.variable, a.defaultValue), o: a.defaultValue} : TcppArg)),
+					closeArgs: func.tfArgs.mapToArray(function(a) return ({v: CppRetyper.retypeFuncArg(basic, a.variable, a.defaultValue), o: a.defaultValue} : TcppArg)),
 					closeThis: newCtx.usesThis
 				};
 				var newUndeclared = retyperCtx.undeclared;
@@ -1684,7 +1681,7 @@ private class ExpressionRetyper {
 				var c = rr.ctx;
 				var baseStr = tcppToString(baseCpp.cpptype);
 				var defaultReturnType = if (returnType.match(TCppUnchanged)) cppTypeOf(expr.etype) else returnType;
-				var returnType = CppRetyper.cppTypeFromPath(basic, tPath(t), [], CppRetyper.withReferenceValueType, function() return defaultReturnType);
+				var returnType = CppRetyper.cppTypeFromPath(basic, tPath(t), vector(), CppRetyper.withReferenceValueType, function() return defaultReturnType);
 				var returnStr = tcppToString(returnType);
 
 				if (baseStr == returnStr) res(c, baseCpp.cppexpr, baseCpp.cpptype /* nothing to do */) else switch returnType {
@@ -2080,7 +2077,7 @@ private class ExpressionRetyper {
 				case CppFunction(func = FuncInstance(_, _, {cfType: TFun({args: argTypes})}, _), returnType) |
 					CppFunction(func = FuncStatic(_, _, {cfType: TFun({args: argTypes})}, _), returnType) |
 					CppFunction(func = FuncThis({cfType: TFun({args: argTypes})}, _), returnType):
-					var argTypes = argTypes.map(function(a) return CppRetyper.cppTfunArgTypeOf(basic, a.optional, CppRetyper.withReferenceValueType, a.type));
+					var argTypes = argTypes.mapToArray(function(a) return CppRetyper.cppTfunArgTypeOf(basic, a.optional, CppRetyper.withReferenceValueType, a.type));
 					/* retype args specifically (not just CppDynamic) */
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					res(ra.ctx, CppCall(func, ra.args), returnType);

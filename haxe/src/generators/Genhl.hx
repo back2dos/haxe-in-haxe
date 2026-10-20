@@ -383,7 +383,7 @@ class Genhl {
 
 	static function memberFun(c:TClass, t:T):T {
 		return switch follow(t) {
-			case TFun(s): TFun({args: [{name: "this", optional: false, type: TInst(c, [])}].concat(s.args), ret: s.ret});
+			case TFun(s): TFun({args: VectorTools.cons({name: "this", optional: false, type: TInst(c, vector())}, s.args), ret: s.ret});
 			case _: die("", "genhl.ml");
 		}
 	}
@@ -450,7 +450,7 @@ class Genhl {
 		if (fakeTnullCache == null) {
 			var a = nullAbstract.clone();
 			a.aPath = {pack: [], name: "Null"};
-			a.aParams = [mkTypeParam(nullClass, TPHType, null, null)];
+			a.aParams = vector(mkTypeParam(nullClass, TPHType, null, null));
 			fakeTnullCache = a;
 		}
 		return fakeTnullCache;
@@ -574,9 +574,9 @@ class Genhl {
 						case ["", "Bool"]: HBool;
 						case ["", "Dynamic"]: HDyn;
 						case ["", "Class"]:
-							classType(ctx, ctx.baseClass, [], false);
+							classType(ctx, ctx.baseClass, vector(), false);
 						case ["", "Enum"]:
-							classType(ctx, ctx.baseType, [], false);
+							classType(ctx, ctx.baseType, vector(), false);
 						case ["", "EnumValue"]: HDyn;
 						case ["hl", "Ref"]: HRef(toType(ctx, pl[0]));
 						case ["hl", "Bytes" | "BytesAccess"]: HBytes;
@@ -656,8 +656,7 @@ class Genhl {
 						case [TFun(s), TFun(s2)]:
 							if (s.args.length != s2.args.length) throw new core.ds.InvalidArgument("List.map2");
 							TFun({
-								args: [
-									for (i in 0...s.args.length) {
+								args: VectorTools.init(s.args.length, i -> {
 										var a = s.args[i];
 										var a2 = s2.args[i];
 										switch [a.type, a2.type] {
@@ -675,12 +674,11 @@ class Genhl {
 													case FInstance(_, _, {cfKind: Var(_) | Method(MethDynamic)}): false;
 													case _: true;
 												})):
-												{name: a.name, optional: a.optional, type: TAbstract(fakeTnull(), [t])};
+												{name: a.name, optional: a.optional, type: TAbstract(fakeTnull(), vector(t))};
 											case _:
 												a;
 										}
-									}
-								],
+									}),
 								ret: s.ret
 							});
 						case _: ft;
@@ -741,7 +739,7 @@ class Genhl {
 			if (statics) die("", "genhl.ml");
 			p.pnfields = 1;
 		}
-		var tsup = if (c.clSuper != null && !statics) classType(ctx, c.clSuper.cls, [], statics) else if (statics) classType(ctx, ctx.baseClass, [], false) else null;
+		var tsup = if (c.clSuper != null && !statics) classType(ctx, c.clSuper.cls, vector(), statics) else if (statics) classType(ctx, ctx.baseClass, vector(), false) else null;
 		var startField:Int, virtuals:Vector<Int>;
 		switch tsup {
 			case null:
@@ -824,7 +822,7 @@ class Genhl {
 						t;
 					});
 					for (si in i.clImplements) {
-						var spl = [for (t in si.params) applyParams(i.clParams, pl, t)];
+						var spl = si.params.map(t -> applyParams(i.clParams, pl, t));
 						addInterface(si.cls, spl);
 					}
 				}
@@ -872,7 +870,7 @@ class Genhl {
 			var f = e.eConstrs.get(n);
 			if (f == null) throw NotFound.raise();
 			var args:Vector<Ttype> = switch f.efType {
-				case TFun(s): s.args.mapToVector(a -> toType(ctx, a.type));
+				case TFun(s): s.args.map(a -> toType(ctx, a.type));
 				case _: vector();
 			}
 			({name: f.efName, nid: allocString(ctx, f.efName), args: args} : EField);
@@ -895,7 +893,7 @@ class Genhl {
 		p.pnfields = -1;
 		var t = HObj(p);
 		ctx.cachedTypes.set(keyPath, t);
-		var psuper = switch classType(ctx, ctx.baseEnum, [], false) {
+		var psuper = switch classType(ctx, ctx.baseEnum, vector(), false) {
 			case HObj(o): o;
 			case _: die("", "genhl.ml");
 		}
@@ -966,7 +964,7 @@ class Genhl {
 		var isStatic = c != ctx.baseClass;
 		var c = if (resolve && isArrayClass(sTypePath(c.clPath))) ctx.arrayImpl.abase else c;
 		var c = resolveClass(ctx, c, extractParamTypes(c.clParams), isStatic);
-		var t = classType(ctx, c, [], isStatic);
+		var t = classType(ctx, c, vector(), isStatic);
 		return {g: allocGlobal(ctx, "$" + sTypePath(c.clPath), t), t: t};
 	}
 
@@ -1254,7 +1252,7 @@ class Genhl {
 			case TClassDecl(c):
 				return classGlobal(ctx, c);
 			case TAbstractDecl(a):
-				var rt = classType(ctx, ctx.baseType, [], false);
+				var rt = classType(ctx, ctx.baseType, vector(), false);
 				var g = switch [a.aPath.pack.join("."), a.aPath.name] {
 					case ["", "Int"]: allocGlobal(ctx, "$Int", rt);
 					case ["", "Float"]: allocGlobal(ctx, "$Float", rt);
@@ -1649,7 +1647,7 @@ class Genhl {
 						case TAbstract(a, pl):
 							return loop(core.Abstract.getUnderlyingType(a, pl));
 						case _:
-							var a = evalTo(ctx, a, classType(ctx, ctx.arrayImpl.adyn, [], false));
+							var a = evalTo(ctx, a, classType(ctx, ctx.arrayImpl.adyn, vector(), false));
 							op(ctx, ONullCheck(a));
 							hold(ctx, a);
 							var i = evalTo(ctx, i, HI32);
@@ -2073,7 +2071,7 @@ class Genhl {
 			case TCall({eexpr: TField(_, FStatic(c, {cfName: "instance" | "downcast"}))}, [v, vt]) if (isPath(c.clPath, [], "Std")):
 				var r = evalExpr(ctx, v);
 				hold(ctx, r);
-				var c = evalTo(ctx, vt, classType(ctx, ctx.baseType, [], false));
+				var c = evalTo(ctx, vt, classType(ctx, ctx.baseType, vector(), false));
 				hold(ctx, c);
 				var rv = allocTmp(ctx, toType(ctx, e.etype));
 				var rd = allocTmp(ctx, HDyn);
@@ -2173,7 +2171,7 @@ class Genhl {
 					return defRet;
 			case TField(ec, FInstance(c, [t], {cfName: "length"})) if (isPath(c.clPath, [], "Array") && tEq(toType(ctx, t), HDyn)):
 				var r = allocTmp(ctx, HI32);
-				var a = evalTo(ctx, ec, classType(ctx, ctx.arrayImpl.adyn, [], false));
+				var a = evalTo(ctx, ec, classType(ctx, ctx.arrayImpl.adyn, vector(), false));
 				op(ctx, ONullCheck(a));
 				op(ctx, OCall1(r, allocFunPath(ctx, {pack: ["hl", "types"], name: "ArrayDyn"}, "get_length"), a));
 				return r;
@@ -2228,14 +2226,11 @@ class Genhl {
 							}
 							var ct = ctx.com.basic;
 							var p = ef.efPos;
-							var eargs = [
-								for (a in eargs)
-									{
-										variable: TFunctions.allocVar(VGenerated, a.name, a.type, en.ePos),
-										defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null
-									}
-							];
-							var ecall = mk(TCall(e, eargs.mapToVector(a -> mk(TLocal(a.variable), a.variable.vType, p))), et, p);
+							var eargs = eargs.map(a -> ({
+								variable: TFunctions.allocVar(VGenerated, a.name, a.type, en.ePos),
+								defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null
+							} : {variable:TVar, defaultValue:Null<TExpr>}));
+							var ecall = mk(TCall(e, eargs.map(a -> mk(TLocal(a.variable), a.variable.vType, p))), et, p);
 							var f:TFunc = {
 								tfArgs: eargs,
 								tfType: et,
@@ -2826,7 +2821,7 @@ class Genhl {
 							op(ctx, OSetArray(a, regInt(ctx, i), r));
 						}
 						free(ctx, a);
-						var tmp = if (tEq(et, HDyn)) allocTmp(ctx, classType(ctx, ctx.arrayImpl.aobj, [], false)) else r;
+						var tmp = if (tEq(et, HDyn)) allocTmp(ctx, classType(ctx, ctx.arrayImpl.aobj, vector(), false)) else r;
 						op(ctx, OCall1(tmp, allocFunPath(ctx, {pack: ["hl", "types"], name: "ArrayObj"}, "alloc"), a));
 						if (tmp != r) {
 							var re = allocTmp(ctx, HBool);
@@ -3064,7 +3059,7 @@ class Genhl {
 				if (safeCast(rtype(ctx, re), t)) op(ctx, OMov(rt, re)) else switch core.Abstract.followWithAbstracts(e.etype) {
 					case TInst(c, _) if (hasClassFlag(c, CInterface)):
 						hold(ctx, re);
-						var c = evalTo(ctx, {eexpr: TTypeExpr(TClassDecl(c)), epos: e.epos, etype: tDynamic}, classType(ctx, ctx.baseType, [], false));
+						var c = evalTo(ctx, {eexpr: TTypeExpr(TClassDecl(c)), epos: e.epos, etype: tDynamic}, classType(ctx, ctx.baseType, vector(), false));
 						hold(ctx, c);
 						var rb = allocTmp(ctx, HBool);
 						op(ctx, OCall2(rb, allocFunPath(ctx, {pack: ["hl"], name: "BaseType"}, "check"), c, re));
@@ -3357,7 +3352,7 @@ class Genhl {
 				var t = classType(ctx, switch tdef {
 					case TClassDecl(c): c;
 					case _: die("", "genhl.ml");
-				}, [], false);
+				}, vector(), false);
 				var res:Array<{k:String, v:haxe.io.Bytes}> = ctx.com.resources.fold((k, v, acc:Array<{k:String, v:haxe.io.Bytes}>) -> {
 					acc.unshift({k: k, v: v});
 					acc;
@@ -3698,7 +3693,7 @@ class Genhl {
 		setCurpos(ctx, f.tfExpr.epos);
 
 		var tthis = if (cthis == null) null else {
-			var t = toType(ctx, TInst(cthis, []));
+			var t = toType(ctx, TInst(cthis, vector()));
 			hold(ctx, allocTmp(ctx, t)); /* index 0 */
 			t;
 		}
@@ -3717,7 +3712,7 @@ class Genhl {
 				var t = toType(ctx, v.vType);
 				var r = allocVar(ctx, if (o == null) v else {
 					var v2 = v.clone();
-					v2.vType = if (!isNullable(t)) TAbstract(ctx.refAbstract, [v.vType]) else v.vType;
+					v2.vType = if (!isNullable(t)) TAbstract(ctx.refAbstract, vector(v.vType)) else v.vType;
 					v2;
 				}, true);
 				addAssign(ctx, v, true); /* record var name */
@@ -3929,12 +3924,10 @@ class Genhl {
 								tl = die("", "genhl.ml");
 								tr = null;
 						}
-						var args = [
-							for (a in tl) {
-								var v = TFunctions.allocVar(VGenerated, a.name, a.type, nullPos);
-								{variable: v, defaultValue: if (a.optional) mk(TConst(TNull), a.type, nullPos) else null};
-							}
-						];
+						var args = tl.map(a -> {
+							var v = TFunctions.allocVar(VGenerated, a.name, a.type, nullPos);
+							({variable: v, defaultValue: if (a.optional) mk(TConst(TNull), a.type, nullPos) else null} : {variable:TVar, defaultValue:Null<TExpr>});
+						});
 						{
 							tfArgs: args,
 							tfType: tr,
@@ -3990,14 +3983,14 @@ class Genhl {
 							cstr = die("", "genhl.ml");
 							cfBytes = null;
 					}
-					var ebytes = mk(TField(vstr, FInstance(cstr, [], cfBytes)), cfBytes.cfType, p);
+					var ebytes = mk(TField(vstr, FInstance(cstr, vector(), cfBytes)), cfBytes.cfType, p);
 					var econd = mk(TBinop(OpEq, vstr, mk(TConst(TNull), basic.tstring, p)), basic.tbool, p);
 					var efun = mk(TBlock(vector(
 						mk(TVar(vtmp, tstr), basic.tvoid, p),
 						mk(TReturn(mk(TIf(econd, mk(TConst(TNull), cfBytes.cfType, p), ebytes), cfBytes.cfType, p)), cfBytes.cfType, p)
 					)), basic.tvoid, p);
 					makeFun(ctx, {fst: sTypePath(c.clPath), snd: "__string"}, allocFunPath(ctx, c.clPath, "__string"),
-						{tfExpr: efun, tfArgs: [], tfType: cfBytes.cfType}, c, null);
+						{tfExpr: efun, tfArgs: vector(), tfType: cfBytes.cfType}, c, null);
 				}
 		}
 	}
@@ -4107,7 +4100,7 @@ class Genhl {
 							var rname = allocTmp(ctx, HBytes);
 							op(ctx, OString(rname, allocString(ctx, sTypePath(path))));
 
-							var rc = allocTmp(ctx, classType(ctx, ctx.baseClass, [], false));
+							var rc = allocTmp(ctx, classType(ctx, ctx.baseClass, vector(), false));
 							op(ctx, OCall3(rc, allocFunPath(ctx, {pack: [], name: "Type"}, if (isExcluded(c)) "loadClass" else "initClass"), rct, rt, rname));
 							hold(ctx, rc);
 							free(ctx, rct);
@@ -4135,7 +4128,7 @@ class Genhl {
 						op(ctx, OType(rt, HType));
 						var ra = allocArray(ctx, regInt(ctx, l.length), HType);
 						for (i in 0...l.length) {
-							op(ctx, OType(rt, toType(ctx, TInst(l[i], []))));
+							op(ctx, OType(rt, toType(ctx, TInst(l[i], vector()))));
 							op(ctx, OSetArray(ra, regInt(ctx, i), rt));
 						}
 						op(ctx, OSetField(rc, index("__implementedBy__"), ra));
@@ -4165,7 +4158,7 @@ class Genhl {
 					hold(ctx, ret);
 					var rt = allocTmp(ctx, HType);
 					op(ctx, OType(rt, t));
-					var r = allocTmp(ctx, classType(ctx, ctx.baseEnum, [], false));
+					var r = allocTmp(ctx, classType(ctx, ctx.baseEnum, vector(), false));
 					var etr = allocTmp(ctx, et);
 					op(ctx, OCall2(r, allocFunPath(ctx, {pack: [], name: "Type"}, "initEnum"), ret, rt));
 					free(ctx, ret);
@@ -4211,7 +4204,7 @@ class Genhl {
 					switch name {
 						case "Int" | "Float" | "Dynamic" | "Bool":
 							var isBool = name == "Bool";
-							var t = classType(ctx, if (isBool) ctx.coreEnum else ctx.coreType, [], false);
+							var t = classType(ctx, if (isBool) ctx.coreEnum else ctx.coreType, vector(), false);
 
 							function index(name:String):Int {
 								return switch t {
@@ -4287,7 +4280,7 @@ class Genhl {
 		var fid = lookupAlloc(ctx.cfids, true);
 		var exprs = initExprs.concat(exprs);
 		var initpos = fakePos("fun$init");
-		var f:TFunc = {tfExpr: mk(TBlock(Vector.fromArrayCopy(exprs)), tVoid, initpos), tfArgs: [], tfType: tVoid};
+		var f:TFunc = {tfExpr: mk(TBlock(Vector.fromArrayCopy(exprs)), tVoid, initpos), tfArgs: vector(), tfType: tVoid};
 		function genContent() generateStaticContent(ctx, types, f);
 		makeFun(ctx, {fst: "", snd: ""}, fid, f, null, null, genContent);
 		return fid;
@@ -4712,7 +4705,7 @@ class Genhl {
 		ctx.refAbstract = getAbstract("Ref");
 		ctx.tstring = toType(ctx, ctx.com.basic.tstring);
 		allocString(ctx, "");
-		classType(ctx, ctx.baseClass, [], false);
+		classType(ctx, ctx.baseClass, vector(), false);
 		return ctx;
 	}
 
@@ -4756,7 +4749,7 @@ class Genhl {
 							for (f in c.clOrderedFields) {
 								switch f.cfKind {
 									case Method(MethInline):
-									case _: loop({cls: c, params: []}, f);
+									case _: loop({cls: c, params: vector()}, f);
 								}
 							}
 							if (c.clSuper != null) loopCl(c.clSuper.cls);

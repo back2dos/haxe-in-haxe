@@ -16,11 +16,11 @@ import core.TPrinting;
 	// The class field being called.
 	public var fcField:TClassField;
 	// The field monomorphs that were created for this call.
-	public var fcMonos:Array<T>;
+	public var fcMonos:core.TType.TParams;
 	// The custom data associated with this call.
 	public var fcData:A;
 
-	public inline function new(fcArgs:haxe.ds.Vector<TExpr>, fcRet:T, fcType:T, fcField:TClassField, fcMonos:Array<T>, fcData:A) {
+	public inline function new(fcArgs:haxe.ds.Vector<TExpr>, fcRet:T, fcType:T, fcField:TClassField, fcMonos:core.TType.TParams, fcData:A) {
 		this.fcArgs = fcArgs;
 		this.fcRet = fcRet;
 		this.fcType = fcType;
@@ -34,7 +34,7 @@ import core.TPrinting;
 }
 
 class FieldCallCandidate {
-	public static function makeFieldCallCandidate<A>(args:haxe.ds.Vector<TExpr>, ret:T, monos:Array<T>, t:T, cf:TClassField,
+	public static function makeFieldCallCandidate<A>(args:haxe.ds.Vector<TExpr>, ret:T, monos:core.TType.TParams, t:T, cf:TClassField,
 			data:A):FieldCallCandidateData<A> {
 		return {
 			fcArgs: args,

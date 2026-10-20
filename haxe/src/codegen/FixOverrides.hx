@@ -7,6 +7,7 @@ import core.TUnification;
 import core.TOther.*;
 import context.Common;
 import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 using core.ds.VectorTools;
 
@@ -65,7 +66,7 @@ class FixOverrides {
 			};
 			var changed:Array<{original:TVar, replacement:TVar}> = [];
 			if (fd.tfArgs.length != signature.args.length) throw "Invalid_argument: List.map2";
-			var nargs = [];
+			var nargs = new Vector(fd.tfArgs.length);
 			for (i in 0...fd.tfArgs.length) {
 				var cur = fd.tfArgs[i],
 					v = cur.variable,
@@ -87,7 +88,7 @@ class FixOverrides {
 					changed.unshift({original: v, replacement: v2});
 					next = {variable: v2, defaultValue: cur.defaultValue};
 				}
-				nargs.push(next);
+				nargs[i] = next;
 			}
 			changed.reverse();
 			var expr = fd.tfExpr;

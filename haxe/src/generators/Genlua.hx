@@ -283,7 +283,7 @@ class Genlua {
 		return mk(TCall(luaLocal, VectorTools.cons(codeConst, args)), t, pos);
 	}
 
-	static function injectRestArgs(ctx:LuaCtx, args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, e:TExpr):TExpr {
+	static function injectRestArgs(ctx:LuaCtx, args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>, e:TExpr):TExpr {
 		if (args.length > 0 && ExtType.isRest(follow(args[args.length - 1].variable.vType))) {
 			var v = args[args.length - 1].variable;
 			var rest = mk(TLocal(v), v.vType, v.vPos);
@@ -381,7 +381,7 @@ class Genlua {
 	/* from genphp */
 	static function isStringType(t:T):Bool {
 		return switch follow(t) {
-			case TInst({clKind: KTypeParameter(ttp)}, _): Lambda.exists(getConstraints(ttp), isStringType);
+			case TInst({clKind: KTypeParameter(ttp)}, _): getConstraints(ttp).exists(isStringType);
 			case TInst({clPath: {pack: [], name: "String"}}, _): true;
 			case TAnon(a):
 				switch a.aStatus {
@@ -851,7 +851,7 @@ class Genlua {
 	static function checkMultireturnParam(ctx:LuaCtx, t:T, pos:Pos):Void {
 		switch t {
 			case TAbstract(_, p) | TInst(_, p):
-				if (Lambda.exists(p, ttypeMultireturn)) raiseTypingError("MultiReturns must not be type parameters", pos) else {}
+				if (p.exists(ttypeMultireturn)) raiseTypingError("MultiReturns must not be type parameters", pos) else {}
 			case _:
 		}
 	}
@@ -1508,7 +1508,7 @@ class Genlua {
 		switch e {
 			case {eexpr: TFunction(f)}:
 				withFunctionScope(ctx, function() {
-					print(ctx, "function(" + ["self"].concat(f.tfArgs.map(luaArgName)).join(",") + ") ");
+					print(ctx, "function(" + ["self"].concat(f.tfArgs.mapToArray(luaArgName)).join(",") + ") ");
 					var fblock = funBlock(ctx, f, e.epos);
 					switch fblock.eexpr {
 						case TBlock(el):
@@ -1644,7 +1644,7 @@ class Genlua {
 				withFunctionScope(ctx, function() {
 					genExpr(ctx, e1);
 					spr(ctx, " = ");
-					var fnArgs = f.tfArgs.map(argName).map(ident);
+					var fnArgs = f.tfArgs.mapToArray(argName).map(ident);
 					print(ctx, "function(" + (if (isDotAccess(e3, ci)) fnArgs else ["self"].concat(fnArgs)).join(",") + ") ");
 					var fblock = funBlock(ctx, f, e1.epos);
 					switch fblock.eexpr {
@@ -1945,7 +1945,7 @@ class Genlua {
 					case TFunction(f2):
 						withFunctionScope(ctx, function() {
 							print(ctx, " = function");
-							print(ctx, "(" + ["self"].concat(f2.tfArgs.map(luaArgName)).join(",") + ") ");
+							print(ctx, "(" + ["self"].concat(f2.tfArgs.mapToArray(luaArgName)).join(",") + ") ");
 							var fblock = funBlock(ctx, f2, e.epos);
 							switch fblock.eexpr {
 								case TBlock(el):
@@ -1993,7 +1993,7 @@ class Genlua {
 						switch e.eexpr {
 							case TFunction(f):
 								withFunctionScope(ctx, function() {
-									var args = f.tfArgs.map(luaArgName);
+									var args = f.tfArgs.mapToArray(luaArgName);
 									print(ctx, "function(" + args.join(",") + ") ");
 									var fblock = funBlock(ctx, f, e.epos);
 									switch fblock.eexpr {
@@ -2573,11 +2573,11 @@ class Genlua {
 					vector(e, luvRun);
 				}
 				var fn:TFunc = {
-					tfArgs: [],
+					tfArgs: vector(),
 					tfType: com.basic.tvoid,
 					tfExpr: mk(TBlock(mainBlock), com.basic.tvoid, e.epos),
 				};
-				genValue(ctx, {eexpr: TFunction(fn), etype: TFun({args: [], ret: com.basic.tvoid}), epos: e.epos});
+				genValue(ctx, {eexpr: TFunction(fn), etype: TFun({args: vector(), ret: com.basic.tvoid}), epos: e.epos});
 				println(ctx, ", _hx_handle_error)");
 				println(ctx, "if not success then _G.error(err) end");
 		}

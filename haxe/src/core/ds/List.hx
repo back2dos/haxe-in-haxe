@@ -1,6 +1,7 @@
 package core.ds;
 
 import haxe.ds.Vector;
+
 // port: array-backed OCaml List operations; paired operations reject unequal lengths.
 // Inline: HashLink passes an Array<T> of a type parameter as a boxed ArrayDyn
 // (an allocation and dynamic element access per call); inlining keeps the

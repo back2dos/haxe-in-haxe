@@ -15,6 +15,7 @@ import core.Error;
 import core.Meta;
 import haxe.ds.StringMap;
 import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 using core.ds.VectorTools;
 
@@ -108,7 +109,7 @@ class UnifyMin {
 				case TFun(s): s;
 				case _: throw core.ds.FastThrow.of(new UnifyMinExit());
 			};
-			var args = signature.args.copy(), arity = args.length;
+			var args:Vector<{name:String, optional:Bool, type:T}> = signature.args.copy(), arity = args.length;
 			var rets:Array<T> = [];
 			for (i in 1...el.length) switch follow(el[i].etype) {
 				case TFun(s):

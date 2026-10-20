@@ -6,6 +6,7 @@ import core.Ast.Unop;
 import core.TType;
 import core.MetaList.StrictMeta;
 import core.TFunctions;
+import core.ds.VectorTools.vector;
 
 using core.TFunctions;
 
@@ -1096,7 +1097,7 @@ class Lower {
 		prog.funcs.push(fi);
 		if (c.clConstructor == null) {
 			// no constructor: the parent's, or nothing
-			signature(fi, {tfArgs: [], tfType: null, tfExpr: null}, TRef(RObj(ci)));
+			signature(fi, {tfArgs: vector(), tfType: null, tfExpr: null}, TRef(RObj(ci)));
 			fi.ret = TVoid;
 			return fi;
 		}

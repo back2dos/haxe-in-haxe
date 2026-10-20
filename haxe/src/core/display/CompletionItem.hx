@@ -319,7 +319,7 @@ class CompletionModuleType {
 			moduleName: infos.mtModule.mPath.name,
 			pos: infos.mtPos,
 			isPrivate: infos.mtPrivate,
-			params: infos.mtParams.mapToVector(convertTypeParam),
+			params: infos.mtParams.map(convertTypeParam),
 			meta: infos.mtMeta,
 			doc: infos.mtDoc,
 			isExtern: info.isExtern,
@@ -443,10 +443,10 @@ enum PackageContentKind {
 	public var ctPack:Array<String>;
 	public var ctTypeName:String;
 	public var ctModuleName:String;
-	public var ctParams:Array<CompletionTypeKind>;
+	public var ctParams:haxe.ds.Vector<CompletionTypeKind>;
 	public var ctImportStatus:ImportStatus;
 
-	public inline function new(ctPack:Array<String>, ctTypeName:String, ctModuleName:String, ctParams:Array<CompletionTypeKind>,
+	public inline function new(ctPack:Array<String>, ctTypeName:String, ctModuleName:String, ctParams:haxe.ds.Vector<CompletionTypeKind>,
 			ctImportStatus:ImportStatus) {
 		this.ctPack = ctPack;
 		this.ctTypeName = ctTypeName;
@@ -471,10 +471,10 @@ enum PackageContentKind {
 }
 
 @:structInit class CtFunction {
-	public var ctArgs:Array<CtFunctionArgument>;
+	public var ctArgs:haxe.ds.Vector<CtFunctionArgument>;
 	public var ctReturn:CompletionTypeKind;
 
-	public inline function new(ctArgs:Array<CtFunctionArgument>, ctReturn:CompletionTypeKind) {
+	public inline function new(ctArgs:haxe.ds.Vector<CtFunctionArgument>, ctReturn:CompletionTypeKind) {
 		this.ctArgs = ctArgs;
 		this.ctReturn = ctReturn;
 	}
@@ -594,7 +594,7 @@ class CompletionType {
 	public static function fromType(getImportStatus:GlobalTypePath->ImportStatus, ?values:haxe.ds.StringMap<Expr>, t:T):CompletionTypeKind {
 		var empty = new haxe.ds.StringMap<Expr>();
 		// port: OCaml evaluates record fields right to left: the parameters are converted before the import status is looked up.
-		function ppath(mpath:GlobalTypePath, tpath:GlobalTypePath, tl:Array<T>):CtPathWithParams {
+		function ppath(mpath:GlobalTypePath, tpath:GlobalTypePath, tl:core.TType.TParams):CtPathWithParams {
 			var params = tl.map(t -> fromType_(empty, t));
 			var is = getImportStatus(tpath);
 			return {
@@ -625,7 +625,7 @@ class CompletionType {
 						ctModuleName: c.clModule.mPath.name,
 						ctTypeName: c.clPath.name,
 						ctImportStatus: Imported,
-						ctParams: []
+						ctParams: vector()
 					});
 				case TInst(c, tl):
 					CTInst(ppath(c.clModule.mPath, c.clPath, tl));

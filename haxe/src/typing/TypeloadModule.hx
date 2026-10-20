@@ -208,7 +208,7 @@ class TypeloadModule {
 						aPos: p,
 						aNamePos: d.name.pos,
 						aDoc: d.doc,
-						aParams: [],
+						aParams: vector(),
 						aUsing: [],
 						aRestore: function() {},
 						aMeta: d.meta.copy(),
@@ -409,8 +409,7 @@ class TypeloadModule {
 		if (c.ecArgs.length > 0) {
 			isFlat.value = false;
 			var names = new haxe.ds.StringMap<Bool>();
-			var args = [
-				for (arg in c.ecArgs) {
+			var args = c.ecArgs.map(arg -> {
 					switch arg.type.type {
 						case CTPath({path: {tpackage: [], tname: "Void"}}):
 							Error.raiseTypingError("Arguments of type Void are not allowed in enum constructors", arg.type.pos);
@@ -426,8 +425,7 @@ class TypeloadModule {
 						optional: arg.optional,
 						type: Typeload.loadTypeHint(local, c.ecPos, LoadNormal, arg.type, arg.optional)
 					};
-				}
-			];
+				});
 			type = TFun({args: args, ret: ret});
 		}
 		var f:TEnumField = {
@@ -526,7 +524,7 @@ class TypeloadModule {
 				f.efMeta)) delay(local.g, PConnectField, function() InheritDoc.buildEnumFieldDoc(local, f));
 		}
 		e.eNames = names;
-		Typecore.unify(local, TType(enumModuleType(e), []), e.eType, p);
+		Typecore.unify(local, TType(enumModuleType(e), vector()), e.eType, p);
 		if (flat.value) e.eMeta = [({meta: MetaTag.FlatEnum, exprs: vector(), pos: nullPos} : MetadataEntry)].concat(e.eMeta);
 		if (MetadataTools.has(MetaTag.InheritDoc, e.eMeta)) delay(local.g, PConnectField, function() InheritDoc.buildEnumDoc(local, e));
 		if (local.com.platform == Jvm && !hasEnumFlag(e, EnExtern)) delay(local.g, PTypeField, function() {

@@ -227,7 +227,7 @@ class ModuleCache {
 						case _:
 					}
 					for (n in names) {
-						var f = try core.TFunctions.rawClassField(cf -> cf.cfType, cl, [for (_ in cl.clParams) core.TFunctions.tDynamic], n).field catch (_:Dynamic) null;
+						var f = try core.TFunctions.rawClassField(cf -> cf.cfType, cl, cl.clParams.map(_ -> core.TFunctions.tDynamic), n).field catch (_:Dynamic) null;
 						if (f != null) s.liveMarks.push({maker: maker, cf: f});
 					}
 				case _:
@@ -2480,7 +2480,7 @@ class Skeletons {
 					nodes.push(mk(TTypeExpr(mt)));
 				case 1:
 					switch findType(com, i) {
-						case TClassDecl(c): nodes.push(mk(TNew(c, [], vector())));
+						case TClassDecl(c): nodes.push(mk(TNew(c, vector(), vector())));
 						case _: return null;
 					}
 				case _:

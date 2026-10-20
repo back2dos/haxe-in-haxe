@@ -768,11 +768,11 @@ class CachedLower extends Lower {
 			case TInst(c, ps):
 				switch c.clKind {
 					case KTypeParameter(_): t;
-					case _: TInst(tc(c), [for (p in ps) tt(p)]);
+					case _: TInst(tc(c), ps.map(p -> tt(p)));
 				}
-			case TEnum(e, ps): TEnum(te(e), [for (p in ps) tt(p)]);
-			case TAbstract(a, ps): TAbstract(ta(a), [for (p in ps) tt(p)]);
-			case TFun(s): TFun(new TSignature([for (a in s.args) {name: a.name, optional: a.optional, type: tt(a.type)}], tt(s.ret)));
+			case TEnum(e, ps): TEnum(te(e), ps.map(p -> tt(p)));
+			case TAbstract(a, ps): TAbstract(ta(a), ps.map(p -> tt(p)));
+			case TFun(s): TFun(new TSignature(s.args.map(a -> {name: a.name, optional: a.optional, type: tt(a.type)}), tt(s.ret)));
 			case f: f;
 		}
 	}

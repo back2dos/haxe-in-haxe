@@ -49,7 +49,7 @@ class TexprBuilder {
 	public function ifThenElse(eif:TExpr, ethen:TExpr, eelse:TExpr,
 			t:T):TExpr return mk(TIf(eif, ethen, eelse), t, core.Ast.punion(eif.epos, eelse.epos));
 
-	public function instanceField(e:TExpr, c:TClass, params:Array<T>, cf:TClassField,
+	public function instanceField(e:TExpr, c:TClass, params:core.TType.TParams, cf:TClassField,
 			t:T):TExpr return mk(TField(e, FInstance(c, params, cf)), t, e.epos);
 
 	public function int(i:Int, p:Pos):TExpr return mk(TConst(TInt(i)), basic.tint, p);

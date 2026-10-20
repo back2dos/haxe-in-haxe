@@ -11,6 +11,8 @@ import core.ds.VectorTools;
 import core.ds.VectorTools.vector;
 import haxe.ds.Vector;
 
+using core.ds.VectorTools;
+
 class Tre {
 	public static function collectNewArgsValues(ctx:context.SafeCom.SafeContext, args:Vector<TExpr>, declarations:Array<TExpr>,
 			values:Array<TExpr>, n:Int):{
@@ -26,17 +28,18 @@ class Tre {
 		return {declarations: declarations, values: values};
 	}
 
-	public static function assignArgs(vars:Array<{variable:TVar, defaultValue:Null<TExpr>}>, exprs:Array<TExpr>):Array<TExpr> {
-		if (vars.length == 0) {
-			if (exprs.length != 0) throw "tre: argument arity";
-			return [];
-		}
-		var arg = vars[0];
-		var e = exprs.length == 0 ? arg.defaultValue : exprs[0];
-		if (e == null) throw "tre: missing argument";
-		var lhs = TypeOps.mk(TLocal(arg.variable), e.etype, e.epos);
-		return [TypeOps.mk(TBinop(OpAssign, lhs, e), e.etype,
-			e.epos)].concat(assignArgs(vars.slice(1), exprs.length == 0 ? exprs : exprs.slice(1)));
+	// port: the list walk as a loop: the i-th expression, else the argument's default value
+	public static function assignArgs(vars:Vector<{variable:TVar, defaultValue:Null<TExpr>}>, exprs:Array<TExpr>):Array<TExpr> {
+		if (exprs.length > vars.length) throw "tre: argument arity";
+		return [
+			for (i in 0...vars.length) {
+				var arg = vars[i];
+				var e = i < exprs.length ? exprs[i] : arg.defaultValue;
+				if (e == null) throw "tre: missing argument";
+				var lhs = TypeOps.mk(TLocal(arg.variable), e.etype, e.epos);
+				TypeOps.mk(TBinop(OpAssign, lhs, e), e.etype, e.epos);
+			}
+		];
 	}
 
 	public static function replacementForTReturn(ctx:context.SafeCom.SafeContext, fn:TFunc, args:Vector<TExpr>, p:Pos):TExpr {
@@ -100,7 +103,7 @@ class Tre {
 			body.epos));
 	}
 
-	public static function fnArgsVars(fn:TFunc):Array<TVar> return fn.tfArgs.map(a -> a.variable);
+	public static function fnArgsVars(fn:TFunc):Array<TVar> return fn.tfArgs.mapToArray(a -> a.variable);
 
 	public static function isRecursiveNamedLocalCall(fnVar:TVar, callee:TExpr, args:Vector<TExpr>):Bool return switch callee.eexpr {
 		// named local function

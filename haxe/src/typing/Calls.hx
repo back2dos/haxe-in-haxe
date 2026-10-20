@@ -284,7 +284,7 @@ class Calls {
 						var p = sea.seAccess.faPos, args = allArgs.slice(1);
 						unify(ctx, abstractUsingParamType(sea), allArgs[0].type, e.epos);
 						var callbackType = TFun({args: args, ret: ret}),
-							wrapperType = TFun({args: [{name: "_e", optional: false, type: e.etype}], ret: callbackType});
+							wrapperType = TFun({args: vector({name: "_e", optional: false, type: e.etype}), ret: callbackType});
 						// arguments might not have names in case of variable fields of function types, so we generate one (issue #2495)
 						var vars = args.map(function(arg) {
 							var t = arg.optional ? ctx.t.tnull(arg.type) : arg.type;
@@ -294,7 +294,7 @@ class Calls {
 							};
 						});
 						var ve = allocVar(VGenerated, "_e", e.etype, e.epos);
-						var call = makeCall(ctx, field, [ve].concat(vars.map(a -> a.variable)).mapToVector(v -> mk(TLocal(v), v.vType, p)), ret, p);
+						var call = makeCall(ctx, field, VectorTools.cons(mk(TLocal(ve), ve.vType, p), vars.map(a -> mk(TLocal(a.variable), a.variable.vType, p))), ret, p);
 						var body = switch follow(ret) {
 							case TAbstract({aPath: {pack: [], name: "Void"}}, _): call;
 							case _: mk(TReturn(call), tDynamic, p);
@@ -308,7 +308,7 @@ class Calls {
 							tfExpr: body
 						}), callbackType, p);
 						var wrapper = mk(TFunction({
-							tfArgs: [{variable: ve, defaultValue: null}],
+							tfArgs: vector({variable: ve, defaultValue: null}),
 							tfType: callbackType,
 							tfExpr: mk(TReturn(callback), tDynamic, p)
 						}), wrapperType, p);
@@ -472,14 +472,14 @@ class Calls {
 		} else body = makeCall(ctx, e, Vector.fromArrayCopy(ordered), ret, p);
 		if (!ExtType.isVoid(follow(ret))) body = mk(TReturn(body), ret, p);
 		var fn = ({
-			tfArgs: missing.map(arg -> {
+			tfArgs: missing.mapToVector(arg -> {
 				variable: arg.variable,
 				defaultValue: arg.optional ? Texpr.Builder.makeNull(arg.variable.vType, Globals.nullPos) : null
 			}),
 			tfType: ret,
 			tfExpr: body
 		} : core.TType.TFunc);
-		var t = TFun({args: missing.map(arg -> {name: arg.variable.vName, optional: arg.optional, type: arg.variable.vType}), ret: ret});
+		var t = TFun({args: missing.mapToVector(arg -> {name: arg.variable.vName, optional: arg.optional, type: arg.variable.vType}), ret: ret});
 		declarations.push(mk(TFunction(fn), t, p));
 		return mk(TBlock(Vector.fromArrayCopy(declarations)), t, p);
 	}

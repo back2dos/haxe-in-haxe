@@ -265,7 +265,7 @@ class TypeloadFunction {
 							return arg;
 					}
 				}
-				var args:Array<{variable:TVar, defaultValue:Null<TExpr>}> = switch cfsup.cfExpr {
+				var args:Vector<{variable:TVar, defaultValue:Null<TExpr>}> = switch cfsup.cfExpr {
 					case {eexpr: TFunction(f)}: f.tfArgs.map(mapArg);
 					case _:
 						var values = getValueMeta(cfsup.cfMeta);
@@ -283,7 +283,7 @@ class TypeloadFunction {
 								});
 							case t:
 								displayError(ctxC.com, "Unexpected constructor type: " + sTypeKind(t), cfsup.cfNamePos);
-								[];
+								vector();
 						}
 				};
 				var cp = c.clPos;
@@ -293,7 +293,7 @@ class TypeloadFunction {
 					defaultValue: arg.defaultValue
 				});
 				var superCall = mk(TCall(mk(TConst(TSuper), TInst(csup, cparams), cp),
-					vars.mapToVector(arg -> mk(TLocal(arg.variable), arg.variable.vType, cp))),
+					vars.map(arg -> mk(TLocal(arg.variable), arg.variable.vType, cp))),
 					ctx.t.tvoid, cp);
 				var constr = mk(TFunction({tfArgs: vars, tfType: ctx.t.tvoid, tfExpr: superCall}), TFun({
 					args: vars.map(arg -> {name: arg.variable.vName, optional: arg.defaultValue != null, type: arg.variable.vType}),
@@ -307,8 +307,8 @@ class TypeloadFunction {
 			cf.cfType = TLazy(r);
 			c.clConstructor = cf;
 		} else if (forceConstructor) {
-			var constr = mk(TFunction({tfArgs: [], tfType: ctxC.t.tvoid, tfExpr: mk(TBlock(vector()), ctxC.t.tvoid, p)}),
-				tfun([], ctxC.t.tvoid), p);
+			var constr = mk(TFunction({tfArgs: vector(), tfType: ctxC.t.tvoid, tfExpr: mk(TBlock(vector()), ctxC.t.tvoid, p)}),
+				tfun(vector(), ctxC.t.tvoid), p);
 			var cf = mkField("new", constr.etype, p, Globals.nullPos);
 			cf.cfExpr = constr;
 			cf.cfType = constr.etype;

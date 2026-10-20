@@ -40,6 +40,8 @@ import typing.FieldAccess;
 import typing.FieldAccess.*;
 import core.ds.VectorTools.vector;
 
+using core.ds.VectorTools;
+
 class TypeFieldConfig {
 	public var allowResolve:Bool = true;
 	public var allowDynamic:Bool = true;
@@ -73,6 +75,13 @@ class Fields {
 	}
 
 	static function byList<V>(f:V->AccessKind, list:Array<V>):AccessKind {
+		for (x in list) try return f(x)
+		catch (_:NotFound) {}
+		throw NotFound.raise();
+	}
+
+	// port: by_list on a list kept as a Vector
+	static function byVector<V>(f:V->AccessKind, list:haxe.ds.Vector<V>):AccessKind {
 		for (x in list) try return f(x)
 		catch (_:NotFound) {}
 		throw NotFound.raise();
@@ -357,7 +366,7 @@ class Fields {
 				try classAccess(e, c, tl).access catch (err:Dynamic) {
 					if (!Std.isOfType(err, NotFound)) throw err;
 					try switch c.clKind {
-						case KTypeParameter(ttp): byList(function(t) return switch follow(t) {
+						case KTypeParameter(ttp): byVector(function(t) return switch follow(t) {
 								case TAbstract(_): byE(byType, mkCast(e, t, p));
 								case _: throw NotFound.raise();
 							}, getConstraints(ttp));
@@ -470,9 +479,9 @@ class Fields {
 					try {
 						var monos = Monomorph.spawnConstrainedMonos(t -> t, cf.cfParams),
 							cft = follow(applyParams(cf.cfParams, monos, cf.cfType));
-						var args:Array<{name:String, optional:Bool, type:T}> = switch followWithCoro(cft) {
+						var args:haxe.ds.Vector<{name:String, optional:Bool, type:T}> = switch followWithCoro(cft) {
 							case NotCoro(TFun({args: args, ret: _})) | Coro({args: args}): args;
-							case _: [];
+							case _: vector();
 						};
 						if (args.length == 0) return next();
 						var t0 = switch args[0].type {
@@ -663,7 +672,7 @@ class Fields {
 			inline function paramInfo(name:String):Null<String> return javadoc == null ? null : javadoc.getParamInfo(name);
 			switch follow(cf.cfType) {
 				case TFun({args: list, ret: _}):
-					args = list.map(function(arg) {
+					args = list.mapToArray(function(arg) {
 						var name = arg.name,
 							t = applyParams(c.clParams, tl, arg.type),
 							p = cf.cfNamePos,

@@ -145,7 +145,7 @@ class Codegen {
 
 class UnificationCallback {
 	public static function checkCallParams(f:TExpr->T->TExpr, el:Vector<TExpr>,
-			tl:Array<{name:String, optional:Bool, type:T}>):Vector<TExpr> {
+			tl:Vector<{name:String, optional:Bool, type:T}>):Vector<TExpr> {
 		var result = new Vector<TExpr>(el.length);
 		for (i in 0...el.length) result[i] = i < tl.length ? f(el[i], tl[i].type) : el[i];
 		return result;

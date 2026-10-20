@@ -426,7 +426,7 @@ class ForLoop {
 			};
 		var cp = getClass(e1);
 		var c:TClass = cp.c;
-		var tl:Array<T> = cp.tl;
+		var tl:core.TType.TParams = cp.tl;
 		var hasNext:TClassField;
 		try {
 			hasNext = rawClassField(function(cf) return applyParams(c.clParams, tl, cf.cfType), c, tl, "hasNext").field;
@@ -437,14 +437,14 @@ class ForLoop {
 		var it = TInst(c, tl);
 		var tmp = genLocal(ctx, it, e1.epos);
 		var eit = mk(TLocal(tmp), it, p);
-		var eh = makeCall(ctx, mk(TField(eit, FInstance(c, tl, hasNext)), TFun({args: [], ret: ctx.t.tbool}), p), vector(), ctx.t.tbool, p);
+		var eh = makeCall(ctx, mk(TField(eit, FInstance(c, tl, hasNext)), TFun({args: vector(), ret: ctx.t.tbool}), p), vector(), ctx.t.tbool, p);
 		var next;
 		try {
 			next = FInstance(c, tl, rawClassField(function(cf) return applyParams(c.clParams, tl, cf.cfType), c, tl, "next").field);
 		} catch (ex:NotFound) {
 			next = quickFieldDynamic(eit.etype, "next");
 		}
-		var en = mk(TVar(v, makeCall(ctx, mk(TField(eit, next), TFun({args: [], ret: v.vType}), p), vector(), v.vType, p)), ctx.t.tvoid, p);
+		var en = mk(TVar(v, makeCall(ctx, mk(TField(eit, next), TFun({args: vector(), ret: v.vType}), p), vector(), v.vType, p)), ctx.t.tvoid, p);
 		var block = switch e2.eexpr {
 			case TBlock(el): core.ds.Record.withFields(e2, {eexpr: TBlock(VectorTools.cons(en, el))});
 			case _: mk(TBlock(vector(en, e2)), ctx.t.tvoid, p);

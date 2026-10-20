@@ -60,9 +60,9 @@ class ExprToPattern {
 	static function displayExprDeferred(ctx:Typer, e:Expr, typed:TExpr, kind:DisplayKind, mode:AccessMode, withType:WithTypeValue,
 			p:Pos):Void typing.TyperDisplay.displayExpr(ctx, e, typed, kind, mode, withType, p);
 
-	public static var fakeTupleType:T = TInst(mkClass(nullModule, {pack: [], name: "-Tuple"}, nullPos, nullPos), []);
+	public static var fakeTupleType:T = TInst(mkClass(nullModule, {pack: [], name: "-Tuple"}, nullPos, nullPos), vector());
 
-	public static function tupleType(tl:Array<T>):T return tfun(tl, fakeTupleType);
+	public static function tupleType(tl:core.TType.TParams):T return tfun(tl, fakeTupleType);
 
 	public static function typeFieldAccess(ctx:Typer, e:TExpr, name:String,
 			resume:Bool = false):TExpr return Calls.accGet(ctx,
@@ -91,7 +91,7 @@ class ExprToPattern {
 
 	public static function unifyTypePattern(ctx:Typer, mt:ModuleType, t:T, p:Pos):Void switch getGeneralModuleType(ctx, mt, p) {
 		case TAbstract(a, _):
-			unify(ctx, TAbstract(a, [spawnMonomorph(ctx, p)]), t, p);
+			unify(ctx, TAbstract(a, vector(spawnMonomorph(ctx, p))), t, p);
 		case _:
 			throw "assert";
 	};
@@ -280,7 +280,7 @@ class ExprToPattern {
 				};
 				PatConstructor({kind: ConConst(constant), pos: e.pos}, []);
 			case EConst(Ident(i)): switch follow(t) {
-					case TFun(s) if (s.ret == fakeTupleType): if (i == "_") PatTuple(s.args.map(function(_) return ({
+					case TFun(s) if (s.ret == fakeTupleType): if (i == "_") PatTuple(s.args.mapToArray(function(_) return ({
 							kind: PatAny,
 							pos: e.pos
 						} : typing.matcher.Pattern.PatternData))); else
@@ -392,7 +392,7 @@ class ExprToPattern {
 							collectField(cf, cf.cfType, filter);
 						}
 					case TInst(c, tl):
-						function loopClass(c:TClass, tl:Array<T>):Void {
+						function loopClass(c:TClass, tl:core.TType.TParams):Void {
 							if (c.clSuper != null) loopClass(c.clSuper.cls,
 								c.clSuper.params.map(function(t) return applyParams(c.clParams, tl, t)));
 							for (cf in c.clOrderedFields) if (canAccess(ctx, c, cf,

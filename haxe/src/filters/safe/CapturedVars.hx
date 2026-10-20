@@ -125,12 +125,12 @@ class CapturedVars {
 					};
 					e = loop(e);
 					var fn:TFunc = {
-						tfArgs: newVars.map(a -> {variable: a.variable, defaultValue: null}),
+						tfArgs: newVars.mapToVector(a -> ({variable: a.variable, defaultValue: null} : {variable:TVar, defaultValue:Null<TExpr>})),
 						tfType: e.etype,
 						tfExpr: TypeOps.mkBlock(TypeOps.mk(TReturn(e), e.etype, e.epos))
 					};
 					var ft = TFun({
-						args: newVars.map(a -> {name: a.variable.vName, optional: false, type: a.variable.vType}),
+						args: newVars.mapToVector(a -> {name: a.variable.vName, optional: false, type: a.variable.vType}),
 						ret: e.etype
 					});
 					return TypeOps.mk(TCall(Texpr.Builder.mkParent(TypeOps.mk(TFunction(fn), ft, e.epos)),

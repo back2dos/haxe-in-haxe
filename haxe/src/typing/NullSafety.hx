@@ -306,7 +306,7 @@ class NullSafety {
 						case _: empty();
 					}
 				} catch (ex:NotFound) empty();
-			case TFunction(fn) if (fn.tfArgs.length == count): fn.tfArgs.map(function(a) return a.variable.vMeta);
+			case TFunction(fn) if (fn.tfArgs.length == count): fn.tfArgs.mapToArray(function(a) return a.variable.vMeta);
 			case _: empty();
 		};
 	}
@@ -583,7 +583,7 @@ class Unificator {
 		}
 	}
 
-	function unifyClassToAnon(a:TClass, params:Array<T>, b:TAnon):Void {
+	function unifyClassToAnon(a:TClass, params:core.TType.TParams, b:TAnon):Void {
 		var names = [for (n in b.aFields.keys()) n];
 		names.sort(core.ds.Key.compareStrings);
 		for (n in names) {
@@ -1602,7 +1602,7 @@ class ExprChecker {
 	/**
 		Check if specified expressions can be passed to a call which expects `types`.
 	*/
-	function checkArgs(callee:TExpr, args:haxe.ds.Vector<TExpr>, types:Array<{name:String, optional:Bool, type:T}>):Void {
+	function checkArgs(callee:TExpr, args:haxe.ds.Vector<TExpr>, types:haxe.ds.Vector<{name:String, optional:Bool, type:T}>):Void {
 		var meta = NullSafety.getArgumentsMeta(callee, types.length);
 		var count = Std.int(Math.min(args.length, Math.min(types.length, meta.length)));
 		for (i in 0...count) {

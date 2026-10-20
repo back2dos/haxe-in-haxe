@@ -548,7 +548,7 @@ class Transformer {
 				case _: die("", "genpy.ml Transformer.transform_string_switch");
 			};
 			var cfLength = core.ds.PMap.find("length", cString.clFields);
-			var ef = mk(TField(e1, FInstance(cString, [], cfLength)), tInt, e1.epos);
+			var ef = mk(TField(e1, FInstance(cString, vector(), cfLength)), tInt, e1.epos);
 			var resVar = allocVar(ae.aNextId(), ef.etype, ef.epos);
 			var resLocal = withExpr(ef, TLocal(resVar));
 			var varExpr = withExpr(ef, TVar(resVar, ef));
@@ -677,7 +677,7 @@ class Transformer {
 							mk(TBlock(Vector.fromArrayCopy(block)), last.etype, base.aExpr.epos);
 					}
 			};
-			var f1 = new TFunc([], TFun({args: [], ret: ex.etype}), ex);
+			var f1 = new TFunc(vector(), TFun({args: vector(), ret: ex.etype}), ex);
 			var fexpr = mk(TFunction(f1), ex.etype, ex.epos);
 			var fvar = toTvar(name, fexpr.etype, fexpr.epos);
 			var f = addNonLocalsToFunc(fexpr);
@@ -747,7 +747,7 @@ class Transformer {
 						tr = e.etype;
 				}
 				var myBlock = transformExprsToBlock(block, tr, false, ae.aExpr.epos, ae.aNextId);
-				var fn = mk(TFunction(new TFunc([], tr, myBlock.aExpr)), ae.aExpr.etype, ae.aExpr.epos);
+				var fn = mk(TFunction(new TFunc(vector(), tr, myBlock.aExpr)), ae.aExpr.etype, ae.aExpr.epos);
 				var tVar = allocVar(name, ae.aExpr.etype, ae.aExpr.epos);
 				var f = addNonLocalsToFunc(fn);
 				var fnAssign = mk(TVar(tVar, f), ae.aExpr.etype, ae.aExpr.epos);
@@ -1214,7 +1214,7 @@ class Printer {
 		case _: e;
 	};
 
-	static function printArgs(pctx:PrintContext, args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, p:Pos):String {
+	static function printArgs(pctx:PrintContext, args:Vector<{variable:TVar, defaultValue:Null<TExpr>}>, p:Pos):String {
 		var hadValue = false;
 		var hadVarArgs = false;
 		var hadKwArgs = false;
@@ -2070,7 +2070,7 @@ class Generator {
 					var el = es.slice(0, es.length - 1);
 					var newLast = new TExpr(TReturn(eLast), eLast.etype, eLast.epos);
 					var newBlock = new TExpr(TBlock(el.snoc(newLast)), expr2.etype, expr2.epos);
-					var vName = core.TFunctions.allocVar(VGenerated, name, tfun([], eLast.etype), eLast.epos);
+					var vName = core.TFunctions.allocVar(VGenerated, name, tfun(vector(), eLast.etype), eLast.epos);
 					var fName = mk(TLocal(vName), vName.vType, eLast.epos);
 					var callF = mk(TCall(fName, vector()), eLast.etype, eLast.epos);
 					{e1: newBlock, e2: callF};
@@ -2102,7 +2102,7 @@ class Generator {
 				var args = if (addSelf) {
 					var v = core.TFunctions.allocVar(VGenerated, "self", tDynamic, p);
 					v.vMeta = [({meta: Meta.This, exprs: vector(), pos: p} : MetadataEntry)].concat(v.vMeta);
-					[{variable: v, defaultValue: null}].concat(f.tfArgs);
+					VectorTools.cons({variable: v, defaultValue: (null : Null<TExpr>)}, f.tfArgs);
 				} else
 					f.tfArgs;
 				new TExpr(TFunction(new TFunc(args, f.tfType, f.tfExpr)), e.etype, e.epos);
@@ -2157,7 +2157,7 @@ class Generator {
 				var memberData:Array<TExpr> = [];
 				for (cf in memberInits) {
 					if (assignedFields.indexOf(cf) == -1) {
-						var ef = mk(TField(ethis, FInstance(c, [], cf)), cf.cfType, cf.cfPos); /* TODO */
+						var ef = mk(TField(ethis, FInstance(c, vector(), cf)), cf.cfType, cf.cfPos); /* TODO */
 						var e = mk(TBinop(OpAssign, ef, nullExpr(ef.etype, ef.epos)), ef.etype, ef.epos);
 						memberData.unshift(e);
 					}
@@ -2420,7 +2420,7 @@ class Generator {
 						var name = handleKeywords(hxName);
 						return if (name == pName) pName + "_" + name else name;
 					}
-					function printArgs(args:Array<{name:String, optional:Bool, type:T}>) {
+					function printArgs(args:Vector<{name:String, optional:Bool, type:T}>) {
 						var hadOptional = false;
 						var sl = [
 							for (a in args) {

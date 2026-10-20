@@ -927,8 +927,8 @@ class Run {
 			case _:
 				// Wrap expression in a function so we don't have to treat it as a special case throughout.
 				var ret = e.etype;
-				tf = {tfArgs: [], tfType: ret, tfExpr: mk(TReturn(e), tDynamic, e.epos)};
-				t = tfun([], ret);
+				tf = {tfArgs: vector(), tfType: ret, tfExpr: mk(TReturn(e), tDynamic, e.epos)};
+				t = tfun(vector(), ret);
 				real = false;
 		}
 		optimization.Analyzer.Run.timed(actx, ["->", "from-texpr"], function() AnalyzerTexprTransformer.fromTfunction(actx, tf, t, e.epos));
@@ -1087,8 +1087,8 @@ class Run {
 		context.Parallel.ParallelArray.iter(pool, function(cf) runOnFieldInternal(com, out, config, c, cf), fields);
 		var init = core.TOther.TClassTools.getClInit(c);
 		if (init != null) {
-			var tf:TFunc = {tfArgs: [], tfType: init.etype, tfExpr: init};
-			var e = mk(TFunction(tf), tfun([], init.etype), init.epos);
+			var tf:TFunc = {tfArgs: vector(), tfType: init.etype, tfExpr: init};
+			var e = mk(TFunction(tf), tfun(vector(), init.etype), init.epos);
 			var config:AnalyzerConfigData = core.ds.Record.copy(config);
 			config.optimize = false;
 			var actx = createAnalyzerContext(com, config, Globals.sTypePath(c.clPath) + ".__init__", e);

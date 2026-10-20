@@ -19,9 +19,9 @@ using core.ds.VectorTools;
 @:structInit class ResolvedOverload {
 	public var cls:TClass;
 	public var field:TClassField;
-	public var monos:Array<T>;
+	public var monos:core.TType.TParams;
 
-	public inline function new(cls:TClass, field:TClassField, monos:Array<T>) {
+	public inline function new(cls:TClass, field:TClassField, monos:core.TType.TParams) {
 		this.cls = cls;
 		this.field = field;
 		this.monos = monos;
@@ -60,27 +60,31 @@ class OverloadResolution {
 		var tf = follow(applyParams(cf.cfParams, monos, mapType(cf.cfType)));
 		return switch tf {
 			case TFun(signature):
-				function loop2(acc:Array<TExpr>, expressions:Vector<TExpr>,
-						tl:Array<{name:String, optional:Bool, type:T}>):Null<FieldCallCandidateData<ResolvedOverload>> {
-					if (expressions.length > 0 && tl.length > 0) {
-						var e = expressions[0], rest = expressions.slice(1), t = tl[0].type;
+				// port: el and tl'' walked in lockstep from i on (upstream: their tails), acc being el's first i elements
+				var tl = signature.args;
+				function loop2(i:Int):Null<FieldCallCandidateData<ResolvedOverload>> {
+					if (i < el.length && i < tl.length) {
+						var e = el[i], t = tl[i].type;
 						try {
 							try unify(e.etype, t)
 							catch (error:Unify_error) {
 								if (!tryFunctionalInterfaceMatch(t, e.etype)) throw error;
 							}
-							return loop2([e].concat(acc), rest, tl.slice(1));
+							return loop2(i + 1);
 						} catch (_:Dynamic) {
 							if (ExtType.isRest(follow(t))) return switch follow(t) {
 								case TAbstract(a, [element])
-									if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Rest" && tl.length == 1):
+									if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Rest" && tl.length - i == 1):
 									try {
 										// port: upstream also continues with the tail after the failed argument.
-										var tail = rest.map(function(e) {
+										var args = new Vector<TExpr>(el.length - 1);
+										Vector.blit(el, 0, args, 0, i);
+										for (j in i + 1...el.length) {
+											var e = el[j];
 											unify(element, e.etype);
-											return e;
-										});
-										FieldCallCandidate.makeFieldCallCandidate(VectorTools.ofArrayReversed(acc).concat(tail), signature.ret, monos, tf, cf,
+											args[j - 1] = e;
+										}
+										FieldCallCandidate.makeFieldCallCandidate(args, signature.ret, monos, tf, cf,
 											({cls: c, field: cf, monos: monos} : ResolvedOverload));
 									} catch (_:Dynamic) {
 										null;
@@ -90,13 +94,13 @@ class OverloadResolution {
 							return null;
 						}
 					}
-					if (expressions.length == 0 && tl.length == 0) {
-						return FieldCallCandidate.makeFieldCallCandidate(VectorTools.ofArrayReversed(acc), signature.ret, monos, tf, cf,
+					if (i == el.length && i == tl.length) {
+						return FieldCallCandidate.makeFieldCallCandidate(el.copy(), signature.ret, monos, tf, cf,
 							({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
 					}
 					return null;
 				}
-				loop2([], el, signature.args);
+				loop2(0);
 			case _: null;
 		};
 	}

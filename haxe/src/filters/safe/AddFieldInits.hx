@@ -44,9 +44,9 @@ class AddFieldInits {
 			if (needThis) el.unshift(TypeOps.mk(TVar(v, ethis), ethis.etype, ethis.epos));
 			var cf:TClassField;
 			if (c.clConstructor == null) {
-				var ct = TFun({args: [], ret: scom.basic.tvoid});
+				var ct = TFun({args: vector(), ret: scom.basic.tvoid});
 				var ce = TypeOps.mk(TFunction({
-					tfArgs: [],
+					tfArgs: vector(),
 					tfType: scom.basic.tvoid,
 					tfExpr: TypeOps.mk(TBlock(haxe.ds.Vector.fromArrayCopy(el)), scom.basic.tvoid, c.clPos)
 				}), ct, c.clPos);

@@ -61,7 +61,7 @@ class CoroFromTexpr {
 		return CoroConfig.ofMetaList(meta).outcome;
 	}
 
-	public static function checkCaptures(ctx:CoroCtx, args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, expr:TExpr):Void {
+	public static function checkCaptures(ctx:CoroCtx, args:Vector<{variable:TVar, defaultValue:Null<TExpr>}>, expr:TExpr):Void {
 		var vars:Map<Int, Bool> = [];
 		inline function declare(v:TVar):Void vars.set(v.vId, true);
 		for (a in args) declare(a.variable);
@@ -138,7 +138,7 @@ class CoroFromTexpr {
 					r.e == eNoValue ? {e: eNoValue, ret: RMapExpr(r.ret, f)} : {e: f(r.e), ret: r.ret};
 				case _: {e: eNoValue, ret: ret};
 			};
-		inline function scopeAllowsSuspensionCallOn(e1:TExpr, args:Array<{name:String, optional:Bool, type:T}>, el:Vector<TExpr>):Bool {
+		inline function scopeAllowsSuspensionCallOn(e1:TExpr, args:Vector<{name:String, optional:Bool, type:T}>, el:Vector<TExpr>):Bool {
 			if (scope == null || !scope.restrictedSuspension) return true;
 			function isScopeLocalExpr(e:TExpr):Bool return switch Texpr.skip(e).eexpr {
 				case TLocal(v) if (v == scope.scopeVar): true;

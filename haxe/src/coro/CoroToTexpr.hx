@@ -75,7 +75,7 @@ class SuspensionCalls {
 	// Returns (esubject, eres, eerror) field accesses on ecororesult
 	public static function unpackResultFields(ctx:CoroCtx, cont:ContinuationApi, result:TExpr):{subject:TExpr, result:TExpr, error:TExpr} {
 		inline function base(cf:TClassField,
-				t:T):TExpr return ctx.builder.instanceField(result, cont.suspensionResultClass, [ctx.typer.com.basic.tany], cf, t);
+				t:T):TExpr return ctx.builder.instanceField(result, cont.suspensionResultClass, vector(ctx.typer.com.basic.tany), cf, t);
 		return {
 			subject: base(cont.state, cont.state.cfType),
 			result: base(cont.result, ctx.typer.com.basic.tany),
@@ -119,7 +119,7 @@ class SuspensionCalls {
 	public static function makeSuspendingTailCall(ctx:CoroCtx, cont:ContinuationApi, exprs:CoroToTexprExprs,
 			call:CoroSuspend):{call:TExpr, check:TExpr} {
 		var b = ctx.builder;
-		var completion = b.instanceField(exprs.econtinuation, cont.baseContinuationClass, [ctx.typer.com.basic.tany], cont.completion,
+		var completion = b.instanceField(exprs.econtinuation, cont.baseContinuationClass, vector(ctx.typer.com.basic.tany), cont.completion,
 			exprs.ecompletion.etype);
 		var assigned = makeSuspensionCallAndAssign(ctx, cont, call, completion);
 		return {call: assigned.call, check: b.makeReturn(assigned.result)};
@@ -174,8 +174,8 @@ class CoroToTexpr {
 			cont.suspensionResult(basic.tany), call.csPos);
 	}
 
-	public static function handleLocals(ctx:CoroCtx, cls:TClass, params:Array<T>, states:Array<CoroState>,
-			tfArgs:Array<{variable:TVar, defaultValue:Null<TExpr>}>, econtinuation:TExpr):Array<TClassField> {
+	public static function handleLocals(ctx:CoroCtx, cls:TClass, params:core.TType.TParams, states:Array<CoroState>,
+			tfArgs:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>, econtinuation:TExpr):Array<TClassField> {
 		var b = ctx.builder;
 		var first = states[0];
 		var argStates = new CoroIntSet().add(first.csId);
@@ -310,12 +310,12 @@ class CoroToTexpr {
 		var b = ctx.builder;
 		if (!ctx.typer.com.debug) return b.voidBlockAt(vector(), p);
 		var cf = PMap.find("buildCallStack", cont.baseContinuationClass.clFields);
-		return mk(TCall(b.instanceField(econtinuation, cont.baseContinuationClass, [ctx.typer.t.tany], cf, cf.cfType), vector()),
+		return mk(TCall(b.instanceField(econtinuation, cont.baseContinuationClass, vector(ctx.typer.t.tany), cf, cf.cfType), vector()),
 			ctx.typer.t.tvoid, p);
 	}
 
-	public static function blockToTexprCoroutine(ctx:CoroCtx, root:CoroBlock, cont:ContinuationApi, cls:TClass, params:Array<T>,
-			tfArgs:Array<{
+	public static function blockToTexprCoroutine(ctx:CoroCtx, root:CoroBlock, cont:ContinuationApi, cls:TClass, params:core.TType.TParams,
+			tfArgs:haxe.ds.Vector<{
 			variable:TVar,
 			defaultValue:Null<TExpr>
 		}>, exprs:CoroToTexprExprs, p:Pos,
@@ -353,7 +353,7 @@ class CoroToTexpr {
 		switch (com.basic.texception : T) {
 			case TInst(c, _):
 				var cf = PMap.find("unwrap", c.clFields);
-				unwrap = function(e) return b.call(b.instanceField(e, c, [], cf, cf.cfType), vector(), com.basic.tany);
+				unwrap = function(e) return b.call(b.instanceField(e, c, vector(), cf, cf.cfType), vector(), com.basic.tany);
 				getCaught = function(e) return Builder.resolveAndMakeStaticCall(c, "caught", vector(e), e.epos);
 			case _:
 				throw "assert";

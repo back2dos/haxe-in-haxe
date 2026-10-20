@@ -24,20 +24,20 @@ class TExprToExpr {
 		case TMono(r):
 			if (r.tmType == null) throw new TypeExit();
 			convertType(r.tmType);
-		case TInst(c, tl) if (c.clPrivate): Ast.makePtpCt(Ast.mkTypePath([], c.clPath.name, tl.mapToVector(tparam)), Globals.nullPos);
-		case TEnum(e, tl) if (e.ePrivate): Ast.makePtpCt(Ast.mkTypePath([], e.ePath.name, tl.mapToVector(tparam)), Globals.nullPos);
-		case TType(td, tl) if (td.tPrivate): Ast.makePtpCt(Ast.mkTypePath([], td.tPath.name, tl.mapToVector(tparam)), Globals.nullPos);
-		case TAbstract(a, tl) if (a.aPrivate): Ast.makePtpCt(Ast.mkTypePath([], a.aPath.name, tl.mapToVector(tparam)), Globals.nullPos);
-		case TEnum(e, pl): tpath(e.ePath, e.eModule.mPath, pl.mapToVector(tparam));
+		case TInst(c, tl) if (c.clPrivate): Ast.makePtpCt(Ast.mkTypePath([], c.clPath.name, tl.map(tparam)), Globals.nullPos);
+		case TEnum(e, tl) if (e.ePrivate): Ast.makePtpCt(Ast.mkTypePath([], e.ePath.name, tl.map(tparam)), Globals.nullPos);
+		case TType(td, tl) if (td.tPrivate): Ast.makePtpCt(Ast.mkTypePath([], td.tPath.name, tl.map(tparam)), Globals.nullPos);
+		case TAbstract(a, tl) if (a.aPrivate): Ast.makePtpCt(Ast.mkTypePath([], a.aPath.name, tl.map(tparam)), Globals.nullPos);
+		case TEnum(e, pl): tpath(e.ePath, e.eModule.mPath, pl.map(tparam));
 		case TInst(c,
 			pl) if (c.clKind.match(KExpr(_)) || c.clKind.match(KTypeParameter(_))): tpath({pack: [], name: c.clPath.name},
-				{pack: [], name: c.clPath.name}, pl.mapToVector(tparam));
-		case TInst(c, pl): tpath(c.clPath, c.clModule.mPath, pl.mapToVector(tparam));
+				{pack: [], name: c.clPath.name}, pl.map(tparam));
+		case TInst(c, pl): tpath(c.clPath, c.clModule.mPath, pl.map(tparam));
 		// recurse on type-type
 		case TType(td,
-			pl): StringTools.startsWith(td.tPath.name, "#") ? convertType(follow(t)) : tpath(td.tPath, td.tModule.mPath, pl.mapToVector(tparam));
-		case TAbstract(a, pl): tpath(a.aPath, a.aModule.mPath, pl.mapToVector(tparam));
-		case TFun(s): CTFunction(s.args.mapToVector(function(arg):TypeHint {
+			pl): StringTools.startsWith(td.tPath.name, "#") ? convertType(follow(t)) : tpath(td.tPath, td.tModule.mPath, pl.map(tparam));
+		case TAbstract(a, pl): tpath(a.aPath, a.aModule.mPath, pl.map(tparam));
+		case TFun(s): CTFunction(s.args.map(function(arg):TypeHint {
 					var ct = convertTypeHint(arg.type);
 					if (arg.name != "") ct = {type: CTNamed({name: arg.name, pos: Globals.nullPos}, ct), pos: Globals.nullPos};
 					return arg.optional ? {type: CTOptional(ct), pos: Globals.nullPos} : ct;
@@ -71,7 +71,7 @@ class TExprToExpr {
 									null);
 							case [Method(_), TFun(s)]: FFun({
 									fParams: vector(),
-									fArgs: s.args.mapToVector(arg -> ({
+									fArgs: s.args.map(arg -> ({
 											name: {name: arg.name, pos: Globals.nullPos},
 											optional: arg.optional,
 											meta: [],
@@ -130,7 +130,7 @@ class TExprToExpr {
 			case TArrayDecl(el): EArrayDecl(el.map(convertExpr));
 			case TCall(e, el): ECall(convertExpr(e), el.map(convertExpr));
 			case TNew(c, pl, el):
-				var ct = try convertType(TInst(c, pl)) catch (_:TypeExit) convertType(TInst(c, []));
+				var ct = try convertType(TInst(c, pl)) catch (_:TypeExit) convertType(TInst(c, vector()));
 				var path = switch ct {
 					case CTPath(ptp): ptp;
 					case _: throw "Expected constructor type path";
@@ -139,7 +139,7 @@ class TExprToExpr {
 			case TUnop(op, p, e): EUnop(op, p, convertExpr(e));
 			case TFunction(f): EFunction(FKAnonymous, {
 					fParams: vector(),
-					fArgs: f.tfArgs.mapToVector(arg -> ({
+					fArgs: f.tfArgs.map(arg -> ({
 							name: {name: arg.variable.vName, pos: arg.variable.vPos},
 							optional: false,
 							meta: arg.variable.vMeta,
@@ -187,10 +187,10 @@ class TExprToExpr {
 			case TCast(e, t):
 				var ct = if (t == null) null else {
 					var t = switch t {
-						case TClassDecl(c): TInst(c, []);
-						case TEnumDecl(e): TEnum(e, []);
-						case TTypeDecl(t): TType(t, []);
-						case TAbstractDecl(a): TAbstract(a, []);
+						case TClassDecl(c): TInst(c, vector());
+						case TEnumDecl(e): TEnum(e, vector());
+						case TTypeDecl(t): TType(t, vector());
+						case TAbstractDecl(a): TAbstract(a, vector());
 					};
 					try convertTypeHint(t)
 					catch (_:TypeExit) throw "Unconvertible cast type";
@@ -276,7 +276,7 @@ class TOther {
 		eNamePos: namePos,
 		eDoc: null,
 		eMeta: [],
-		eParams: [],
+		eParams: vector(),
 		eUsing: [],
 		eRestore: function() {},
 		ePrivate: false,
@@ -293,7 +293,7 @@ class TOther {
 		aPos: pos,
 		aNamePos: namePos,
 		aDoc: null,
-		aParams: [],
+		aParams: vector(),
 		aUsing: [],
 		aRestore: function() {},
 		aMeta: [],

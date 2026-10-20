@@ -41,6 +41,7 @@ import core.Meta;
 import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
+import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
 
@@ -182,19 +183,20 @@ class DisplayToplevel {
 		WARNING: Merging types from boths contexts like this is dangerous. The resuling type must never be
 		persisted on the compilation server, or else the compiler gets COVID.
 	**/
-	public static function performTypeVoodoo(t:T, tl_:Array<{name:String, optional:Bool, type:T}>, tr_:T):T {
+	public static function performTypeVoodoo(t:T, tl_:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, tr_:T):T {
 		return switch t {
 			case TFun(s):
 				var tl = s.args, tr = s.ret;
-				var acc = [];
-				var i = 0;
-				while (i < tl.length && i < tl_.length) {
-					var a1 = tl[i], a1_ = tl_[i];
-					acc.push(a1.type == tDynamic ? a1_ : a1);
-					i++;
+				// port: the merged pairs, then the rest of tl': always as long as tl'
+				var acc = new haxe.ds.Vector(tl_.length);
+				for (i in 0...tl_.length) {
+					var a1_ = tl_[i];
+					acc[i] = if (i < tl.length) {
+						var a1 = tl[i];
+						a1.type == tDynamic ? a1_ : a1;
+					} else a1_;
 				}
-				var tl = acc.concat(tl_.slice(i));
-				TFun({args: tl, ret: tr == tDynamic ? tr_ : tr});
+				TFun({args: acc, ret: tr == tDynamic ? tr_ : tr});
 			case _:
 				TFun({args: tl_, ret: tr_});
 		};
@@ -545,7 +547,7 @@ class DisplayToplevel {
 
 					// builtins
 					add(CompletionItem.makeCiLiteral("trace",
-						tpair(TFun({args: [{name: "value", optional: false, type: tDynamic}], ret: ctx.com.basic.tvoid}))),
+						tpair(TFun({args: vector({name: "value", optional: false, type: tDynamic}), ret: ctx.com.basic.tvoid}))),
 						"trace");
 					return null;
 				}, null);

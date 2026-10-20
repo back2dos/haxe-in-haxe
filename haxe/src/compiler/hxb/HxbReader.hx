@@ -61,11 +61,11 @@ function createFieldReaderContext(p:Pos, ts:Vector<T>, vars:Vector<TVar>, tthis:
 
 // port: module ClassFieldInfo
 @:structInit class ClassFieldInfo {
-	public var typeParameters:Array<TypedTypeParam>;
+	public var typeParameters:core.TType.TypeParams;
 
-	public inline function new(typeParameters:Array<TypedTypeParam>) this.typeParameters = typeParameters;
+	public inline function new(typeParameters:core.TType.TypeParams) this.typeParameters = typeParameters;
 
-	public static function create(params:Array<TypedTypeParam>):ClassFieldInfo return {typeParameters: params};
+	public static function create(params:core.TType.TypeParams):ClassFieldInfo return {typeParameters: params};
 }
 
 // port: module ClassFieldInfos
@@ -223,9 +223,9 @@ class HxbReader {
 	var classFields = new Vector<AtomicLazy<TClassField>>(0);
 	var enumFields = new Vector<AtomicLazy<TEnumField>>(0);
 
-	var typeTypeParameters:Array<TypedTypeParam> = [];
-	var fieldTypeParameters:Array<TypedTypeParam> = [];
-	var localTypeParameters:Array<TypedTypeParam> = [];
+	var typeTypeParameters:core.TType.TypeParams = vector();
+	var fieldTypeParameters:core.TType.TypeParams = vector();
+	var localTypeParameters:core.TType.TypeParams = vector();
 
 	var fieldTypeParameterOffset = 0;
 	final emptyAnon:T = mkAnon(Closed);
@@ -892,81 +892,81 @@ class HxbReader {
 			case 12:
 				var a = readAbstractRef();
 				// self#make_lazy_type_dynamic (fun () ->
-				TType(abstractModuleType(a.force(), []), []);
+				TType(abstractModuleType(a.force(), vector()), vector());
 				// )
 			case 13:
 				var e = readExpr();
 				var c = TFunctions.nullClass.clone();
 				c.clKind = KExpr(e);
 				c.clModule = currentModule;
-				TInst(c, []);
+				TInst(c, vector());
 			case 20:
-				TFun({args: [], ret: api.basicTypes().tvoid});
+				TFun({args: vector(), ret: api.basicTypes().tvoid});
 			case 21:
 				var arg1 = readFunArg();
-				TFun({args: [arg1], ret: api.basicTypes().tvoid});
+				TFun({args: vector(arg1), ret: api.basicTypes().tvoid});
 			case 22:
 				var arg1 = readFunArg();
 				var arg2 = readFunArg();
-				TFun({args: [arg1, arg2], ret: api.basicTypes().tvoid});
+				TFun({args: vector(arg1, arg2), ret: api.basicTypes().tvoid});
 			case 23:
 				var arg1 = readFunArg();
 				var arg2 = readFunArg();
 				var arg3 = readFunArg();
-				TFun({args: [arg1, arg2, arg3], ret: api.basicTypes().tvoid});
+				TFun({args: vector(arg1, arg2, arg3), ret: api.basicTypes().tvoid});
 			case 24:
 				var arg1 = readFunArg();
 				var arg2 = readFunArg();
 				var arg3 = readFunArg();
 				var arg4 = readFunArg();
-				TFun({args: [arg1, arg2, arg3, arg4], ret: api.basicTypes().tvoid});
+				TFun({args: vector(arg1, arg2, arg3, arg4), ret: api.basicTypes().tvoid});
 			case 29:
-				var args = readList(readFunArg);
+				var args = readVector(readFunArg);
 				TFun({args: args, ret: api.basicTypes().tvoid});
 			case 30:
 				var ret = readTypeInstance();
-				TFun({args: [], ret: ret});
+				TFun({args: vector(), ret: ret});
 			case 31:
 				var arg1 = readFunArg();
 				var ret = readTypeInstance();
-				TFun({args: [arg1], ret: ret});
+				TFun({args: vector(arg1), ret: ret});
 			case 32:
 				var arg1 = readFunArg();
 				var arg2 = readFunArg();
 				var ret = readTypeInstance();
-				TFun({args: [arg1, arg2], ret: ret});
+				TFun({args: vector(arg1, arg2), ret: ret});
 			case 33:
 				var arg1 = readFunArg();
 				var arg2 = readFunArg();
 				var arg3 = readFunArg();
 				var ret = readTypeInstance();
-				TFun({args: [arg1, arg2, arg3], ret: ret});
+				TFun({args: vector(arg1, arg2, arg3), ret: ret});
 			case 34:
 				var arg1 = readFunArg();
 				var arg2 = readFunArg();
 				var arg3 = readFunArg();
 				var arg4 = readFunArg();
 				var ret = readTypeInstance();
-				TFun({args: [arg1, arg2, arg3, arg4], ret: ret});
+				TFun({args: vector(arg1, arg2, arg3, arg4), ret: ret});
 			case 39:
-				var args = readList(readFunArg);
+				var args = readVector(readFunArg);
 				var ret = readTypeInstance();
 				TFun({args: args, ret: ret});
 			case 40:
 				var c = readClassRef();
 				var c = c.force();
-				TInst(c, []);
+				TInst(c, vector());
 			case 41:
 				var c = readClassRef();
 				var t1 = readTypeInstance();
 				var c = c.force();
-				TInst(c, [t1]);
+				TInst(c, vector(t1));
 			case 42:
 				var c = readClassRef();
 				var t1 = readTypeInstance();
 				var t2 = readTypeInstance();
 				var c = c.force();
-				TInst(c, [t1, t2]);
+				TInst(c, vector(t1, t2));
 			case 49:
 				var c = readClassRef();
 				var tl = readTypes();
@@ -974,32 +974,32 @@ class HxbReader {
 				TInst(c, tl);
 			case 50:
 				var en = readEnumRef();
-				makeLazyTypeDynamic(function() return TEnum(en.force(), []));
+				makeLazyTypeDynamic(function() return TEnum(en.force(), vector()));
 			case 51:
 				var en = readEnumRef();
 				var t1 = readTypeInstance();
-				makeLazyTypeDynamic(function() return TEnum(en.force(), [t1]));
+				makeLazyTypeDynamic(function() return TEnum(en.force(), vector(t1)));
 			case 52:
 				var en = readEnumRef();
 				var t1 = readTypeInstance();
 				var t2 = readTypeInstance();
-				makeLazyTypeDynamic(function() return TEnum(en.force(), [t1, t2]));
+				makeLazyTypeDynamic(function() return TEnum(en.force(), vector(t1, t2)));
 			case 59:
 				var e = readEnumRef();
 				var tl = readTypes();
 				makeLazyTypeDynamic(function() return TEnum(e.force(), tl));
 			case 60:
 				var td = readTypedefRef();
-				makeLazyTypeDynamic(function() return TType(td.force(), []));
+				makeLazyTypeDynamic(function() return TType(td.force(), vector()));
 			case 61:
 				var td = readTypedefRef();
 				var t1 = readTypeInstance();
-				makeLazyTypeDynamic(function() return TType(td.force(), [t1]));
+				makeLazyTypeDynamic(function() return TType(td.force(), vector(t1)));
 			case 62:
 				var td = readTypedefRef();
 				var t1 = readTypeInstance();
 				var t2 = readTypeInstance();
-				makeLazyTypeDynamic(function() return TType(td.force(), [t1, t2]));
+				makeLazyTypeDynamic(function() return TType(td.force(), vector(t1, t2)));
 			case 69:
 				var t = readTypedefRef();
 				var tl = readTypes();
@@ -1007,20 +1007,20 @@ class HxbReader {
 			case 70:
 				var a = readAbstractRef();
 				// self#make_lazy_type_dynamic (fun () ->
-				TAbstract(a.force(), []);
+				TAbstract(a.force(), vector());
 				// )
 			case 71:
 				var a = readAbstractRef();
 				var t1 = readTypeInstance();
 				// self#make_lazy_type_dynamic (fun () ->
-				TAbstract(a.force(), [t1]);
+				TAbstract(a.force(), vector(t1));
 				// )
 			case 72:
 				var a = readAbstractRef();
 				var t1 = readTypeInstance();
 				var t2 = readTypeInstance();
 				// self#make_lazy_type_dynamic (fun () ->
-				TAbstract(a.force(), [t1, t2]);
+				TAbstract(a.force(), vector(t1, t2));
 				// )
 			case 79:
 				var a = readAbstractRef();
@@ -1049,14 +1049,15 @@ class HxbReader {
 		}
 	}
 
-	public function readTypes():Array<T> {
-		return readList(readTypeInstance);
+	public function readTypes():core.TType.TParams {
+		return readVector(readTypeInstance);
 	}
 
-	public function readTypeParametersForward():Array<TypedTypeParam> {
+	public function readTypeParametersForward():core.TType.TypeParams {
 		var length = uleb();
-		return [
-			for (_ in 0...length) {
+		var a = new haxe.ds.Vector<TypedTypeParam>(length);
+		for (i in 0...length) {
+			a[i] = {
 				var path = readPath();
 				var pos = readPos();
 				var host = switch readByte() {
@@ -1071,10 +1072,11 @@ class HxbReader {
 				var c = mkClass(currentModule, path, pos, pos);
 				mkTypeParam(c, host, null, null);
 			}
-		];
+		}
+		return a;
 	}
 
-	public function readTypeParametersData(a:Array<TypedTypeParam>):Void {
+	public function readTypeParametersData(a:core.TType.TypeParams):Void {
 		for (ttp in a) {
 			var meta = readMetadata();
 			var constraints = readTypes();
@@ -1170,7 +1172,7 @@ class HxbReader {
 		function declareLocal():TVar {
 			var v = fctx.vars[uleb()];
 			v.vExtra = readOption(function():TVarExtra {
-				var params = readList(function() {
+				var params = readVector(function() {
 					var i = uleb();
 					return localTypeParameters[i];
 				});
@@ -1303,7 +1305,7 @@ class HxbReader {
 						var cto = readOption(loop);
 						return {variable: v, defaultValue: cto};
 					}
-					var args = readList(readTfunctionArg);
+					var args = readVector(readTfunctionArg);
 					var r = readTypeInstance();
 					var e1 = loop();
 					e = TFunction({
@@ -1593,7 +1595,7 @@ class HxbReader {
 		cf.cfOverloads = overloads;
 		cf.cfMeta = cfMeta;
 		// port: fresh list values: Haxe arrays are mutable, OCaml lists are not.
-		cf.cfParams = [];
+		cf.cfParams = vector();
 		return cf;
 	}
 
@@ -1619,7 +1621,7 @@ class HxbReader {
 		return createFieldReaderContext(readPos(), ts, vars, tthis);
 	}
 
-	public function readFieldTypeParameters():Array<TypedTypeParam> {
+	public function readFieldTypeParameters():core.TType.TypeParams {
 		var numParams = uleb();
 		switch readByte() {
 			case 0:
@@ -1631,9 +1633,8 @@ class HxbReader {
 			case i:
 				Globals.die("", "hxbReader.ml read_field_type_parameters");
 		}
-		var params = [
-			for (offset in 0...numParams) fieldTypeParameters[fieldTypeParameterOffset + offset]
-		];
+		var params = new haxe.ds.Vector<TypedTypeParam>(numParams);
+		for (offset in 0...numParams) params[offset] = fieldTypeParameters[fieldTypeParameterOffset + offset];
 		fieldTypeParameterOffset = fieldTypeParameterOffset + numParams;
 		return params;
 	}
@@ -2133,7 +2134,7 @@ class HxbReader {
 		for (i in 0...l) {
 			var e = enums[i].force();
 			readEnumFields(e);
-			TUnification.unify(TType(enumModuleType(e), []), e.eType);
+			TUnification.unify(TType(enumModuleType(e), vector()), e.eType);
 		}
 	}
 
@@ -2313,7 +2314,7 @@ class HxbReader {
 						ef.efNamePos = pp.p2;
 						ef.efIndex = index;
 						// port: fresh list values: Haxe arrays are mutable, OCaml lists are not.
-						ef.efParams = [];
+						ef.efParams = vector();
 						ef.efMeta = [];
 						return ef;
 					}

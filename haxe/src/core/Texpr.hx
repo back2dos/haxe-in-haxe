@@ -1189,9 +1189,9 @@ class Texpr {
 		var t = AbstractTools.followWithAbstracts(etype);
 		var fa = try quickField(t,
 			"hasNext") catch (_:NotFound) Error.raiseTypingError(sType(printContext(), t) + " has no field hasNext()", p);
-		var hasNext = mk(TField(ev, fa), tfun([], b.tbool), e1.epos);
+		var hasNext = mk(TField(ev, fa), tfun(vector(), b.tbool), e1.epos);
 		hasNext = mk(TCall(hasNext, vector()), b.tbool, hasNext.epos);
-		var next = mk(TField(ev, quickField(t, "next")), tfun([], v.vType), e1.epos);
+		var next = mk(TField(ev, quickField(t, "next")), tfun(vector(), v.vType), e1.epos);
 		next = mk(TCall(next, vector()), v.vType, e1.epos);
 		var assign = mk(TVar(v, next), b.tvoid, p);
 		var body = concat(assign, e2);
@@ -1530,7 +1530,7 @@ class Builder {
 		var t = switch resolveTypedef(mt) {
 			case TClassDecl(c): c.clType;
 			case TEnumDecl(e): e.eType;
-			case TAbstractDecl(a): TType(abstractModuleType(a, []), []);
+			case TAbstractDecl(a): TType(abstractModuleType(a, vector()), vector());
 			case _: throw "Texpr.makeTypeexpr";
 		};
 		return mk(TTypeExpr(mt), t, p);
@@ -1570,7 +1570,7 @@ class Builder {
 	}
 
 	public static function fcall(e:TExpr, name:String, el:Vector<TExpr>, ret:T,
-			p:Pos):TExpr return mk(TCall(field(e, name, tfun(VectorTools.mapToArray(el, e -> e.etype), ret), p), el), ret, p);
+			p:Pos):TExpr return mk(TCall(field(e, name, tfun(el.map(e -> e.etype), ret), p), el), ret, p);
 
 	public static function mkParent(e:TExpr):TExpr return mk(TParenthesis(e), e.etype, e.epos);
 

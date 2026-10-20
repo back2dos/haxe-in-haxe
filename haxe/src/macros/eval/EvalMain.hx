@@ -697,7 +697,7 @@ class EvalMain {
 							var ef = en.eConstrs.get(en.eNames[ev.eindex]);
 							if (ef == null) throw NotFound.raise();
 							f(ef.efName);
-							function loop2(first:Bool, tl:Array<{name:String, optional:Bool, type:T}>, vl:haxe.ds.Vector<Value>, i:Int) {
+							function loop2(first:Bool, tl:haxe.ds.Vector<{name:String, optional:Bool, type:T}>, vl:haxe.ds.Vector<Value>, i:Int) {
 								if (i >= vl.length || i >= tl.length) return;
 								if (!first) f(", ");
 								loop(tabs, tl[i].type, vl[i]);

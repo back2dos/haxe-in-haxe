@@ -908,7 +908,7 @@ class Genjs {
 		var oldInValue = ctx.inValue, oldInLoop = ctx.inLoop;
 		ctx.inValue = null;
 		ctx.inLoop = false;
-		function mkNonRestArgNames(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>):Array<String> {
+		function mkNonRestArgNames(args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>):Array<String> {
 			return [
 				for (a in args) {
 					checkVarDeclaration(a.variable);

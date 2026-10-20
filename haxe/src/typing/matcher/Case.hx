@@ -19,6 +19,7 @@ import context.Typecore;
 import context.AbstractCast;
 import typing.matcher.Pattern;
 import typing.matcher.Bind;
+import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
 
@@ -152,7 +153,7 @@ class Case {
 			case _: map(subst, ty);
 		};
 		function rebindUnrefined():Void {
-			for (entry in tpMemo) if (entry.mono.tmType == null) Monomorph.doBind(entry.mono, TInst(entry.original, []));
+			for (entry in tpMemo) if (entry.mono.tmType == null) Monomorph.doBind(entry.mono, TInst(entry.original, vector()));
 		}
 		function unsubst(ty:T):T {
 			return switch ty {
@@ -161,7 +162,7 @@ class Case {
 						// Physical equality (==) for monomorph identity
 						var original:Null<T> = null;
 						for (entry in tpMemo) if (m == entry.mono) {
-							original = TInst(entry.original, []);
+							original = TInst(entry.original, vector());
 							break;
 						}
 						if (original == null) for (entry in fmMemo) if (m == entry.mono) {

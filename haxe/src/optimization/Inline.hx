@@ -250,8 +250,8 @@ class Inline {
 					}
 					if (main == null) throw NotFound.raise();
 					var t = switch [follow(edecl.etype), main] {
-						case [TInst({clPath: {pack: [], name: "Array"}}, [t]), TClassDecl(cl)]: TInst(cl, [t]);
-						case [TInst({clPath: {pack: [], name: "Array"}}, [t]), TAbstractDecl(a)]: TAbstract(a, [t]);
+						case [TInst({clPath: {pack: [], name: "Array"}}, [t]), TClassDecl(cl)]: TInst(cl, vector(t));
+						case [TInst({clPath: {pack: [], name: "Array"}}, [t]), TAbstractDecl(a)]: TAbstract(a, vector(t));
 						case _: throw "Inline.vector";
 					};
 					var call = mkUntypedCall("__array__", p, args);
@@ -276,14 +276,14 @@ class Inline {
 		function loop(t:T):{params:TypeParams, types:TParams}
 			return switch follow(t) {
 				case TInst({clKind: KTypeParameter(ttp)}, _):
-					var acc:{params:TypeParams, types:TParams} = {params: [], types: []};
+					var acc:{params:TypeParams, types:TParams} = {params: vector(), types: vector()};
 					for (t in getConstraints(ttp)) {
 						var r = loop(t);
 						acc = {params: r.params.concat(acc.params), types: r.types.concat(acc.types)};
 					}
 					acc;
 				case TInst(c, pl): getParams(c, pl);
-				case _: {params: [], types: []};
+				case _: {params: vector(), types: vector()};
 			};
 		var config = loop(t);
 		var monos = config.types.concat(cf.cfParams.map(_ -> mkMono()));
@@ -541,13 +541,11 @@ class Inline {
 			};
 		}
 		var e = map(true, false, f.tfExpr);
-		var tl = [];
-		var pi = 0;
-		for (arg in f.tfArgs) {
-			if (pi < params.length) tl.push({name: "", optional: false, type: params[pi++].etype});
-			else if (arg.defaultValue != null) tl.push({name: "", optional: true, type: mkMono()});
-			else break;
-		}
+		// port: the arguments with a param or a default value, up to the first without
+		var n = 0;
+		while (n < f.tfArgs.length && (n < params.length || f.tfArgs[n].defaultValue != null)) n++;
+		var tl = new Vector(n);
+		for (i in 0...n) tl[i] = i < params.length ? {name: "", optional: false, type: params[i].etype} : {name: "", optional: true, type: mkMono()};
 		e = state.finalize(e, tl, tret, hasParams, mapType, p);
 		if (ictx.typer != null && Meta.has(Custom(":debug.inline"), ictx.typer.f.meta)) {
 			function se(tabs:String,
@@ -584,42 +582,46 @@ class Inline {
 
 	public static function inlineRestParams(ctx:context.Typecore.Typer, f:TFunc, params:Vector<TExpr>, mapType:T->T, p:Pos):Vector<TExpr> {
 		if (!ctx.com.config.pfSupportsRestArgs) return params;
-		function loop(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, params:Vector<TExpr>):Vector<TExpr> {
-			// last argument expects rest parameters
-			if (args.length == 1 && core.TOther.ExtType.isRest(follow(args[0].variable.vType))) {
-				switch params {
-					// In case of `...rest` just use `rest`
-					case [{eexpr: TUnop(Spread, Prefix, e)}]:
-						return vector(e);
-					case _:
-				}
-				// In other cases: `haxe.Rest.of([param1, param2, ...])`
-				var v = args[0].variable;
-				return switch follow(mapType(v.vType)) {
-					case TAbstract(a = {aPath: {pack: ["haxe"], name: "Rest"}, aImpl: c}, [t]) if (c != null):
-						var cf = c.clStatics.get("of");
-						if (cf == null) throw "Can't find haxe.Rest.of function";
-						var pos = punionEl(p, params);
-						// [param1, param2, ...]
-						// If we don't know the type (e.g. the rest argument is a field type parameter) then we need
-						// to find a common type via unify_min.
-						var paramType = switch follow(t) {
-							case TMono(_): context.Typecore.unifyMin(ctx, params);
-							case _: t;
-						};
-						var array = mk(TArrayDecl(params), ctx.t.tarray(paramType), pos);
-						vector(
-							// haxe.Rest.of(array)
-							typing.CallUnification.makeStaticCallBetter(ctx, c, cf, [t], vector(array), TAbstract(a, [paramType]), pos)
-						);
-					case _: throw "Unexpected rest arguments type";
-				};
+		// port: the rest argument's expression for the remaining params
+		function restParam(v:TVar, params:Vector<TExpr>):TExpr {
+			switch params {
+				// In case of `...rest` just use `rest`
+				case [{eexpr: TUnop(Spread, Prefix, e)}]:
+					return e;
+				case _:
 			}
-			if (args.length == 0) return params;
-			if (params.length == 0) return vector();
-			return VectorTools.cons(params[0], loop(args.slice(1), params.slice(1)));
+			// In other cases: `haxe.Rest.of([param1, param2, ...])`
+			return switch follow(mapType(v.vType)) {
+				case TAbstract(a = {aPath: {pack: ["haxe"], name: "Rest"}, aImpl: c}, [t]) if (c != null):
+					var cf = c.clStatics.get("of");
+					if (cf == null) throw "Can't find haxe.Rest.of function";
+					var pos = punionEl(p, params);
+					// [param1, param2, ...]
+					// If we don't know the type (e.g. the rest argument is a field type parameter) then we need
+					// to find a common type via unify_min.
+					var paramType = switch follow(t) {
+						case TMono(_): context.Typecore.unifyMin(ctx, params);
+						case _: t;
+					};
+					var array = mk(TArrayDecl(params), ctx.t.tarray(paramType), pos);
+					// haxe.Rest.of(array)
+					typing.CallUnification.makeStaticCallBetter(ctx, c, cf, vector(t), vector(array), TAbstract(a, vector(paramType)), pos);
+				case _: throw "Unexpected rest arguments type";
+			};
 		}
-		return loop(f.tfArgs, params);
+		// port: the list walk as a loop: params pass through, up to a last argument that expects rest parameters
+		var args = f.tfArgs;
+		for (i in 0...args.length) {
+			// last argument expects rest parameters
+			if (i == args.length - 1 && core.TOther.ExtType.isRest(follow(args[i].variable.vType))) {
+				var r = new Vector<TExpr>(i + 1);
+				Vector.blit(params, 0, r, 0, i);
+				r[i] = restParam(args[i].variable, i == 0 ? params : params.slice(i));
+				return r;
+			}
+			if (i >= params.length) return params;
+		}
+		return params;
 	}
 }
 
@@ -771,7 +773,7 @@ class InlineState {
 		/*
 			Build the expr/var subst list
 		*/
-		inline function setVars(pl:Vector<TExpr>, al:Array<{variable:TVar, defaultValue:Null<TExpr>}>):Void {
+		inline function setVars(pl:Vector<TExpr>, al:Vector<{variable:TVar, defaultValue:Null<TExpr>}>):Void {
 			var acc = [];
 			var index = 0;
 			for (arg in al) {
@@ -809,7 +811,7 @@ class InlineState {
 						l.iForceTemp = true;
 					}
 					// We use a null expression because we only care about the type (for abstract casts).
-					if (l.iAbstractThis) l.iSubst.vExtra = varExtra([], withExpr(e, TConst(TNull)));
+					if (l.iAbstractThis) l.iSubst.vExtra = varExtra(vector(), withExpr(e, TConst(TNull)));
 				} else e = opt == null ? mk(TConst(TNull), v.vType, v.vPos) : opt;
 				// port: `(l, e) :: acc` as a push, the accumulator reversed once at the end
 				acc.push({local: l, expr: e});
@@ -827,12 +829,12 @@ class InlineState {
 					case _: ethis;
 				};
 				var v = allocVar(VInlined, "_this", self.etype, self.epos);
-				setVars(VectorTools.cons(self, params), [{variable: v, defaultValue: null}].concat(f.tfArgs));
+				setVars(VectorTools.cons(self, params), VectorTools.cons({variable: v, defaultValue: (null : Null<TExpr>)}, f.tfArgs));
 				v;
 		};
 	}
 
-	public function finalize(e:TExpr, tl:Array<{name:String, optional:Bool, type:T}>, tret:T, hasParams:Bool, mapType:T->T, p:Pos):TExpr {
+	public function finalize(e:TExpr, tl:Vector<{name:String, optional:Bool, type:T}>, tret:T, hasParams:Bool, mapType:T->T, p:Pos):TExpr {
 		if (hadSideEffect) for (item in inlinedVars) if (mightBeAffected(item.expr)
 			&& !core.TOther.ExtType.hasValueSemantics(item.expr.etype)) item.local.iForceTemp = true;
 		// port: hxmc's struct values (Inline.copyArgumentHook): the temporary is a copy, not one the analyzer
@@ -943,7 +945,7 @@ class InlineState {
 							CfImpl)): if (!hasClassFieldFlag(cf, CfAbstractConstructor)) {
 								// the first argument must unify with a_this for abstract implementation functions
 								if (tl.length == 0) throw "Failure: tl";
-								var args = [{name: "", optional: false, type: mapType(a.aThis)}].concat(tl.slice(1));
+								var args = VectorTools.withFirst(tl, {name: "", optional: false, type: mapType(a.aThis)});
 								context.Typecore.unifyRaise(mt, TFun({args: args, ret: tret}), p);
 							}
 						case _: unifyFunc();

@@ -842,7 +842,7 @@ class Genswf9 {
 		}
 	}
 
-	static function end_fun(ctx:Context, args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, dparams:Null<Array<HlValue>>, tret:T):HlMethod {
+	static function end_fun(ctx:Context, args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>, dparams:Null<Array<HlValue>>, tret:T):HlMethod {
 		var m = new HlMethod();
 		m.hlmt_index = 0;
 		m.hlmt_ret = type_void(ctx, tret);
@@ -860,7 +860,7 @@ class Genswf9 {
 		return m;
 	}
 
-	static function begin_fun(ctx:Context, args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, tret:T, el:Array<TExpr>, stat:Bool, p:Pos):Void->HlMethod {
+	static function begin_fun(ctx:Context, args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>, tret:T, el:Array<TExpr>, stat:Bool, p:Pos):Void->HlMethod {
 		var old_locals = ctx.locals;
 		var old_code = ctx.code;
 		var old_infos = ctx.infos;
@@ -1057,7 +1057,7 @@ class Genswf9 {
 	}
 
 	static function empty_method(ctx:Context, p:Pos):HlMethod {
-		var f = begin_fun(ctx, [], ctx.com.basic.tvoid, [], true, p);
+		var f = begin_fun(ctx, vector(), ctx.com.basic.tvoid, [], true, p);
 		write(ctx, HRetVoid);
 		return f();
 	}
@@ -1135,7 +1135,7 @@ class Genswf9 {
 											case _: false;
 										});
 									case _:
-										Lambda.exists(tl, t -> follow(t) == et);
+										tl.exists(t -> follow(t) == et);
 								}
 								if (requires_cast)
 									VCast(id, classify(ctx, e.etype))
@@ -1647,7 +1647,7 @@ class Genswf9 {
 				var el_rev = el.slice(0, el.length - 1);
 				var t_array_dyn = ctx.com.basic.tarray(tDynamic);
 				var nul = mk(TConst(TNull), tDynamic, nullPos);
-				var t = TFun({args: [{name: "thisArg", optional: false, type: tDynamic}, {name: "argArray", optional: false, type: t_array_dyn}], ret: r});
+				var t = TFun({args: vector({name: "thisArg", optional: false, type: tDynamic}, {name: "argArray", optional: false, type: t_array_dyn}), ret: r});
 				var apply = mk(TField(e, FDynamic("apply")), t, e.epos);
 				gen_call(ctx, retval, apply, vector(nul, args_as_array(ctx, el_rev, rest, e.epos)), r);
 				return;
@@ -2163,8 +2163,7 @@ class Genswf9 {
 
 	static function generate_construct(ctx:Context, fdata:TFunc, c:TClass):{m:HlMethod, nargs:Int} {
 		/* make all args optional to allow no-param constructor */
-		var cargs = if (!ctx.need_ctor_skip) fdata.tfArgs else [
-			for (a in fdata.tfArgs) {
+		var cargs = if (!ctx.need_ctor_skip) fdata.tfArgs else fdata.tfArgs.map(a -> {
 				var v = a.variable, c = a.defaultValue;
 				var c = (switch c {
 					case null:
@@ -2176,9 +2175,8 @@ class Genswf9 {
 						});
 					case _: c;
 				});
-				{variable: v, defaultValue: c};
-			}
-		];
+				({variable: v, defaultValue: c} : {variable:TVar, defaultValue:Null<TExpr>});
+			});
 		var f = begin_fun(ctx, cargs, fdata.tfType, [ethis, fdata.tfExpr], false, fdata.tfExpr.epos);
 		/* if skip_constructor, then returns immediatly */
 		if (ctx.need_ctor_skip) switch c.clKind {
@@ -2269,7 +2267,7 @@ class Genswf9 {
 	}
 
 	static function generate_inits(ctx:Context):HlMethod {
-		var finit = begin_fun(ctx, [], ctx.com.basic.tvoid, [], true, nullPos);
+		var finit = begin_fun(ctx, vector(), ctx.com.basic.tvoid, [], true, nullPos);
 		if (!ctx.swc) generate_extern_inits(ctx);
 		for (t in ctx.com.types) {
 			switch t {
@@ -2459,10 +2457,10 @@ class Genswf9 {
 					}
 					if (dparams != null) dparams.reverse();
 					// port: List.map evaluates the allocations left to right.
-					var margs = [
-						for (a in args)
-							{variable: allocVar(VUser(TVOArgument), a.name, a.type, f.cfPos), defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null}
-					];
+					var margs = args.map(a -> ({
+						variable: allocVar(VUser(TVOArgument), a.name, a.type, f.cfPos),
+						defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null
+					} : {variable:TVar, defaultValue:Null<TExpr>}));
 					HFMethod({
 						hlm_type: end_fun(ctx, margs, dparams, tret),
 						hlm_final: false,
@@ -2533,7 +2531,7 @@ class Genswf9 {
 	}
 
 	static function maybe_gen_instance_accessor(ctx:Context, cl:TClass, tl:TParams, accessor_cf:TClassField, acc:Array<HlField>, alloc_slot:Void->Int,
-			kind:HlMethodKind, f_impl:TClassField->TFunc, f_iface:TClassField->{args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, tret:T}):Array<HlField> {
+			kind:HlMethodKind, f_impl:TClassField->TFunc, f_iface:TClassField->{args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>, tret:T}):Array<HlField> {
 		switch findPropertyForAccessor(kind.match(MK3Getter), cl, tl, accessor_cf.cfName) {
 			case null:
 				return acc;
@@ -2575,7 +2573,7 @@ class Genswf9 {
 
 	static function mk_instance_getter_func(c:TClass, tl:TParams, accessor_cl:TClass, accessor_tl:TParams, accessor_cf:TClassField, prop_cf:TClassField):TFunc {
 		return {
-			tfArgs: [],
+			tfArgs: vector(),
 			tfType: prop_cf.cfType,
 			tfExpr: {
 				var ethis = mk(TConst(TThis), TInst(c, tl), nullPos);
@@ -2589,7 +2587,7 @@ class Genswf9 {
 	static function maybe_gen_instance_getter(ctx:Context, c:TClass, f:TClassField, acc:Array<HlField>, alloc_slot:Void->Int):Array<HlField> {
 		var tl = extractParamTypes(c.clParams);
 		return maybe_gen_instance_accessor(ctx, c, tl, f, acc, alloc_slot, MK3Getter, mk_instance_getter_func.bind(c, tl, c, tl, f),
-			prop_cf -> {args: [], tret: prop_cf.cfType});
+			prop_cf -> {args: vector(), tret: prop_cf.cfType});
 	}
 
 	static function mk_varg(t:T):TVar return allocVar(VUser(TVOArgument), "value", t, nullPos);
@@ -2598,7 +2596,7 @@ class Genswf9 {
 			prop_cf:TClassField):TFunc {
 		var varg = mk_varg(prop_cf.cfType);
 		return {
-			tfArgs: [{variable: varg, defaultValue: null}],
+			tfArgs: vector({variable: varg, defaultValue: null}),
 			tfType: com.basic.tvoid,
 			tfExpr: {
 				var ethis = mk(TConst(TThis), TInst(c, tl), nullPos);
@@ -2612,7 +2610,7 @@ class Genswf9 {
 	static function maybe_gen_instance_setter(ctx:Context, c:TClass, f:TClassField, acc:Array<HlField>, alloc_slot:Void->Int):Array<HlField> {
 		var tl = extractParamTypes(c.clParams);
 		return maybe_gen_instance_accessor(ctx, c, tl, f, acc, alloc_slot, MK3Setter, mk_instance_setter_func.bind(ctx.com, c, tl, c, tl, f),
-			prop_cf -> {args: [{variable: mk_varg(prop_cf.cfType), defaultValue: null}], tret: ctx.com.basic.tvoid});
+			prop_cf -> {args: vector(({variable: mk_varg(prop_cf.cfType), defaultValue: null} : {variable:TVar, defaultValue:Null<TExpr>})), tret: ctx.com.basic.tvoid});
 	}
 
 	static function maybe_gen_static_accessor(ctx:Context, cl:TClass, accessor_cf:TClassField, acc:Array<HlField>, alloc_slot:Void->Int, kind:HlMethodKind,
@@ -2642,7 +2640,7 @@ class Genswf9 {
 
 	static function maybe_gen_static_getter(ctx:Context, c:TClass, f:TClassField, acc:Array<HlField>, alloc_slot:Void->Int):Array<HlField> {
 		return maybe_gen_static_accessor(ctx, c, f, acc, alloc_slot, MK3Getter, prop_cf -> ({
-			tfArgs: [],
+			tfArgs: vector(),
 			tfType: prop_cf.cfType,
 			tfExpr: {
 				var ethis = Builder.makeStaticThis(c, nullPos);
@@ -2657,7 +2655,7 @@ class Genswf9 {
 		return maybe_gen_static_accessor(ctx, c, f, acc, alloc_slot, MK3Setter, prop_cf -> {
 			var varg = allocVar(VUser(TVOArgument), "value", prop_cf.cfType, nullPos);
 			({
-				tfArgs: [{variable: varg, defaultValue: null}],
+				tfArgs: vector({variable: varg, defaultValue: null}),
 				tfType: ctx.com.basic.tvoid,
 				tfExpr: {
 					var ethis = Builder.makeStaticThis(c, nullPos);
@@ -2745,7 +2743,7 @@ class Genswf9 {
 							var getter_name = "get_" + name;
 							if (!has_nonextern_field(cl, getter_name)) {
 								var getter_func:TFunc = {
-									tfArgs: [],
+									tfArgs: vector(),
 									tfType: cf.cfType,
 									tfExpr: mk(TReturn(mk_field_access()), tDynamic, nullPos),
 								};
@@ -2768,7 +2766,7 @@ class Genswf9 {
 							if (!has_nonextern_field(cl, setter_name)) {
 								var varg = allocVar(VUser(TVOArgument), "value", cf.cfType, nullPos);
 								var setter_func:TFunc = {
-									tfArgs: [{variable: varg, defaultValue: null}],
+									tfArgs: vector({variable: varg, defaultValue: null}),
 									tfType: cf.cfType,
 									tfExpr: {
 										var efield = mk_field_access();
@@ -2811,7 +2809,7 @@ class Genswf9 {
 					cnargs = 0;
 				} else {
 					var r = generate_construct(ctx, {
-						tfArgs: [],
+						tfArgs: vector(),
 						tfType: ctx.com.basic.tvoid,
 						tfExpr: {
 							eexpr: TBlock(vector()),
@@ -2962,7 +2960,7 @@ class Genswf9 {
 			}
 		}
 		if (pathEq(c.clPath, ctx.boot)) {
-			var cf = mkField("init", TFun({args: [], ret: tDynamic}), c.clPos, nullPos, ctx.swc && ctx.swf_protected);
+			var cf = mkField("init", TFun({args: vector(), ret: tDynamic}), c.clPos, nullPos, ctx.swc && ctx.swf_protected);
 			cf.cfKind = Method(MethNormal);
 			// port: right-to-left record field evaluation: the init method before the name.
 			var m = generate_inits(ctx);
@@ -3087,11 +3085,11 @@ class Genswf9 {
 		var vparams = allocVar(VGenerated, "params", api.tarray(mkMono()), e.ePos);
 		var vindex = allocVar(VGenerated, "index", api.tint, e.ePos);
 		var vtag = allocVar(VGenerated, "tag", api.tstring, e.ePos);
-		var f = begin_fun(ctx, [
+		var f = begin_fun(ctx, vector(
 			{variable: vtag, defaultValue: null},
 			{variable: vindex, defaultValue: null},
 			{variable: vparams, defaultValue: null}
-		], api.tvoid, [ethis], false, e.ePos);
+		), api.tvoid, [ethis], false, e.ePos);
 		var tag_id = ident("tag");
 		var index_id = ident("index");
 		var params_id = ident("params");
@@ -3106,7 +3104,7 @@ class Genswf9 {
 		write(ctx, HInitProp(params_id));
 		write(ctx, HRetVoid);
 		var construct = f();
-		var f = begin_fun(ctx, [], api.tstring, [], true, e.ePos);
+		var f = begin_fun(ctx, vector(), api.tstring, [], true, e.ePos);
 		write(ctx, HGetLex(type_path(ctx, path(["flash"], "Boot"))));
 		write(ctx, HThis);
 		write(ctx, HCallProperty(ident("enum_to_string"), 1));
@@ -3129,11 +3127,11 @@ class Genswf9 {
 			var kind = switch f.efType {
 				case TFun({args: args}):
 					// port: List.map evaluates the allocations left to right.
-					var fargs = [
-						for (a in args)
-							{variable: allocVar(VGenerated, a.name, a.type, e.ePos), defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null}
-					];
-					var fdata = begin_fun(ctx, fargs, TEnum(e, []), [], true, f.efPos);
+					var fargs = args.map(a -> ({
+						variable: allocVar(VGenerated, a.name, a.type, e.ePos),
+						defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null
+					} : {variable:TVar, defaultValue:Null<TExpr>}));
+					var fdata = begin_fun(ctx, fargs, TEnum(e, vector()), [], true, f.efPos);
 					write(ctx, HFindPropStrict(name_id));
 					write(ctx, HString(f.efName));
 					write(ctx, HInt(f.efIndex));
@@ -3229,7 +3227,7 @@ class Genswf9 {
 				else {
 					var debug = do_debug(ctx, c.clMeta);
 					var hlc = generate_class(ctx, c);
-					var init = begin_fun(ctx, [], ctx.com.basic.tvoid, [ethis], false, c.clPos);
+					var init = begin_fun(ctx, vector(), ctx.com.basic.tvoid, [ethis], false, c.clPos);
 					generate_class_init(ctx, c, hlc);
 					write(ctx, HRetVoid);
 					debug();
@@ -3248,7 +3246,7 @@ class Genswf9 {
 				else {
 					var meta = Texpr.buildMetadata(ctx.com.basic, t);
 					var hlc = generate_enum(ctx, e, meta);
-					var init = begin_fun(ctx, [], ctx.com.basic.tvoid, [ethis], false, e.ePos);
+					var init = begin_fun(ctx, vector(), ctx.com.basic.tvoid, [ethis], false, e.ePos);
 					generate_enum_init(ctx, e, hlc, meta);
 					write(ctx, HRetVoid);
 					var f:HlField = {
@@ -3277,7 +3275,7 @@ class Genswf9 {
 
 	static function generate_resource(ctx:Context, name:String):{t:ModuleType, m:HlMethod, f:HlField} {
 		var c = mkClass(nullModule, resource_path(name), nullPos, nullPos);
-		c.clSuper = {cls: mkClass(nullModule, path(["flash", "utils"], "ByteArray"), nullPos, nullPos), params: []};
+		c.clSuper = {cls: mkClass(nullModule, path(["flash", "utils"], "ByteArray"), nullPos, nullPos), params: vector()};
 		var t = TClassDecl(c);
 		return switch generate_type(ctx, t) {
 			case null: die();
@@ -3307,7 +3305,7 @@ class Genswf9 {
 					var length = {
 						var faccess = switch c_array.clFields.get("length") {
 							case null: FDynamic("length");
-							case cf: FInstance(c_array, [tDynamic], cf);
+							case cf: FInstance(c_array, vector(tDynamic), cf);
 						}
 						mk(TField(rest, faccess), basic.tint, rest.epos);
 					}

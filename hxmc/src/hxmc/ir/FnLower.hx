@@ -70,7 +70,7 @@ class FnLower {
 
 	// a function body; `fi.args` already holds the caller-visible signature
 	public function run(tf:TFunc, isCtor = false) {
-		if (boxed == null) boxed = Boxing.analyze(tf.tfExpr, tf.tfArgs.map(a -> a.variable));
+		if (boxed == null) boxed = Boxing.analyze(tf.tfExpr, tf.tfArgs.mapToArray(a -> a.variable));
 		var off = 0;
 		if (self != null) {
 			off = 1;
@@ -87,7 +87,7 @@ class FnLower {
 	// the constructor of a @:hxmc.struct class (Lower.structCtor): this is
 	// the struct's address
 	public function runStructCtor(tf:TFunc) {
-		boxed = Boxing.analyze(tf.tfExpr, tf.tfArgs.map(a -> a.variable));
+		boxed = Boxing.analyze(tf.tfExpr, tf.tfArgs.mapToArray(a -> a.variable));
 		thisLocal = fi.args[0];
 		structCtor = true;
 		bindArgs(tf, 1);
@@ -123,7 +123,7 @@ class FnLower {
 	// the body of a closure literal
 	public function runLambda(tf:TFunc, outerBoxed:Map<Int, Bool>, captured:Array<{id:Int, ty:Ty}>) {
 		boxed = outerBoxed;
-		var inner = Boxing.analyze(tf.tfExpr, tf.tfArgs.map(a -> a.variable));
+		var inner = Boxing.analyze(tf.tfExpr, tf.tfArgs.mapToArray(a -> a.variable));
 		for (k in inner.keys())
 			boxed.set(k, true);
 		var clos = ELocal(fi.args[0]);
@@ -1191,7 +1191,7 @@ class FnLower {
 	// a class, or for a @:hxmc.struct class its box's (Std.isOfType, casts,
 	// the class as a value)
 	function classOrBox(c:TClass):ClassInfo
-		return switch ty(TInst(c, [])) {
+		return switch ty(TInst(c, vector())) {
 			case TStruct(n, _): l.structBox(n);
 			case _: l.classInfo(c);
 		}
@@ -2272,7 +2272,7 @@ class FnLower {
 	function ptrElemCt(t:core.TType.T, e:TExpr):CTy {
 		var ct = CInterop.ctype(t);
 		return switch ct {
-			case CNone | CVoid: cfail('Ptr<${core.TPrinting.sTypes([t])}>: no C type to access (scalars, Ptr, CString and @:hxmc.struct classes)', e);
+			case CNone | CVoid: cfail('Ptr<${core.TPrinting.sTypes(vector(t))}>: no C type to access (scalars, Ptr, CString and @:hxmc.struct classes)', e);
 			case COpaque(c): cfail('Ptr<${c.clPath.name}>: an opaque type has no contents to access', e);
 			case _: ct;
 		}

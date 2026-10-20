@@ -241,15 +241,15 @@ class TyperBase {
 			}
 		case TAbstractDecl(a) if (a.aImpl != null): typeModuleTypeSimple(TClassDecl(a.aImpl), p);
 		case TAbstractDecl(a):
-			var tmp = abstractModuleType(a, []);
-			mk(TTypeExpr(TAbstractDecl(a)), TType(tmp, []), p);
+			var tmp = abstractModuleType(a, vector());
+			mk(TTypeExpr(TAbstractDecl(a)), TType(tmp, vector()), p);
 	};
 
 	public static function typeModuleType(ctx:TyperContext, t:ModuleType, p:Pos):TExpr {
 		function loop(t:ModuleType, tparams:Null<TParams>):TExpr return switch t {
 			case TClassDecl({clKind: KGenericBuild(_)}):
 				var info = InstanceBuilder.getBuildInfo(ctx, t, p);
-				var t1 = info.buildApply(tparams == null ? [] : tparams);
+				var t1 = info.buildApply(tparams == null ? vector() : tparams);
 				var mt:ModuleType;
 				try mt = moduleTypeOfType(t1)
 				catch (_:core.ds.Exit) {
@@ -271,8 +271,8 @@ class TyperBase {
 			case TAbstractDecl(a) if (a.aImpl != null): loop(TClassDecl(a.aImpl), tparams);
 			case TAbstractDecl(a):
 				if (!Meta.has(MetaTag.RuntimeValue, a.aMeta)) raiseTypingError(Globals.sTypePath(a.aPath) + " is not a value", p);
-				var tmp = abstractModuleType(a, []);
-				mk(TTypeExpr(TAbstractDecl(a)), TType(tmp, []), p);
+				var tmp = abstractModuleType(a, vector());
+				mk(TTypeExpr(TAbstractDecl(a)), TType(tmp, vector()), p);
 		};
 		return loop(t, null);
 	}

@@ -64,8 +64,11 @@ class ES6Ctors {
 		}
 	}
 
-	public static function removeDefaultArgValues(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>):Array<{variable:TVar, defaultValue:Null<TExpr>}>
-		return [for (a in args) {variable: a.variable, defaultValue: null}];
+	public static function removeDefaultArgValues(args:haxe.ds.Vector<{variable:TVar, defaultValue:Null<TExpr>}>):haxe.ds.Vector<{
+		variable:TVar,
+		defaultValue:Null<TExpr>
+	}>
+		return args.map(a -> {variable: a.variable, defaultValue: null});
 
 	/* return whether given expression has `this` access before calling `super` */
 	public static function hasThisBeforeSuper(e:TExpr):Null<TExpr> {
@@ -209,7 +212,7 @@ class ES6Ctors {
 						}
 
 						function makeHxCtorCall(eSkipFlag:TExpr):TExpr { /* this._hx_constructor(a,b,c) */
-							var hxctorCallArgs = tfCtor.tfArgs.mapToVector(a -> Builder.makeLocal(a.variable, nullPos));
+							var hxctorCallArgs = tfCtor.tfArgs.map(a -> Builder.makeLocal(a.variable, nullPos));
 							var hxCtorCall = mk(TCall(eHxCtor, hxctorCallArgs), com.basic.tvoid, nullPos);
 							return if (doesCtorSkipping != null) mk(TBlock(vector(
 								mk(TBinop(OpAssign, eSkipFlag, eTrue), com.basic.tbool, nullPos),

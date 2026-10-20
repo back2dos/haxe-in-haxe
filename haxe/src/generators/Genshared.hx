@@ -80,7 +80,7 @@ class Genshared {
 
 	public static function patchOptional(basic:BasicTypes, cf:TClassField):Void {
 		for (cf in cf.cfOverloads) patchOptional(basic, cf);
-		function patchArgs(args:Array<{name:String, optional:Bool, type:T}>):Array<{name:String, optional:Bool, type:T}> {
+		function patchArgs(args:haxe.ds.Vector<{name:String, optional:Bool, type:T}>):haxe.ds.Vector<{name:String, optional:Bool, type:T}> {
 			return args.map(function(a) {
 				var o = a.optional, t = a.type;
 				if (o && !isNullable(t)) t = basic.tnull(t);
@@ -95,7 +95,7 @@ class Genshared {
 				switch follow(t) {
 					case TFun(s):
 						var args = patchArgs(s.args);
-						cf.cfType = TAbstract(a, [TFun({args: args, ret: s.ret})]);
+						cf.cfType = TAbstract(a, vector(TFun({args: args, ret: s.ret})));
 					case t:
 				}
 			case _:
@@ -299,7 +299,7 @@ class Preprocessor<A> {
 							hasDynamicInstanceMethod = true;
 						case Var(_) if (cf.cfExpr != null && !hasFieldInit && c.clConstructor == null && c.clSuper == null):
 							hasFieldInit = true;
-							addImplicitCtor(c, c, mkField("new", tfun([], basic.tvoid), nullPos, nullPos));
+							addImplicitCtor(c, c, mkField("new", tfun(vector(), basic.tvoid), nullPos, nullPos));
 						case _:
 					}
 				case MStatic:
@@ -465,7 +465,7 @@ class TypedefInterfaces<A> {
 				if (implementsRecursively(c, pathInner)) throw new Unify_error([UnifyCustom("already implemented")]);
 				anonIdentification.unify(AnonIdMode.defaultMode, tc, pfm);
 				var ci = makeInterfaceClass(pfm, pathInner, isExtern);
-				c.clImplements = [({cls: ci, params: []} : ClassAndParams)].concat(c.clImplements);
+				c.clImplements = [({cls: ci, params: vector()} : ClassAndParams)].concat(c.clImplements);
 				/* print_endline (Printf.sprintf "%s IMPLEMENTS %s" (s_type_path c.cl_path) (s_type_path path_inner)); */
 				acc.unshift(ci);
 				return acc;

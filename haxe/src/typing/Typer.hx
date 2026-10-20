@@ -379,8 +379,8 @@ class Typer {
 							cf.cfKind = Method(MethInline);
 							addClassFlag(c, CExtern);
 							c.clFields.set(cf.cfName, cf);
-							var on = mk(TConst(TNull), TInst(c, []), p);
-							AKField(FieldAccessTools.create(on, cf, FHInstance(c, []), true, p));
+							var on = mk(TConst(TNull), TInst(c, vector()), p);
+							AKField(FieldAccessTools.create(on, cf, FHInstance(c, vector()), true, p));
 					}
 				case _: AKExpr(mk(TLocal(v), t, p));
 			};
@@ -594,7 +594,7 @@ class Typer {
 							case _: throw "Invalid constructor type";
 						};
 						var vars = args.map(arg -> allocVar(VGenerated, arg.name, arg.type, c.clPos)),
-							el = vars.mapToVector(v -> mk(TLocal(v), v.vType, p)), call:TExpr, t:T;
+							el = vars.map(v -> mk(TLocal(v), v.vType, p)), call:TExpr, t:T;
 						switch [c.clKind, fa.faHost] {
 							case [KAbstractImpl(a), FHAbstract(_)]:
 								t = TAbstract(a, monos);
@@ -848,7 +848,7 @@ class Typer {
 				noAbstractConstructor(c, p);
 				var fa = FieldAccessTools.getConstructorAccess(c, tl, p),
 					ctor = fa.faField;
-				var args:Array<{name:String, optional:Bool, type:T}> = switch follow(FieldAccessTools.getMapFunction(fa)(ctor.cfType)) {
+				var args:haxe.ds.Vector<{name:String, optional:Bool, type:T}> = switch follow(FieldAccessTools.getMapFunction(fa)(ctor.cfType)) {
 					case TFun({args: args, ret: _}): args;
 					case _: throw "Invalid structure constructor";
 				};
@@ -1166,16 +1166,16 @@ class Typer {
 			+ m.mTypes.map(sModuleTypeKind).join(", ")
 			+ "]",
 			p);
-		var tmap = TAbstract(a, [tk, tv]), cf = c.clStatics.get("set");
+		var tmap = TAbstract(a, vector(tk, tv)), cf = c.clStatics.get("set");
 		if (cf == null) throw core.ds.NotFound.raise();
 		var v = genLocal(ctx, tmap, p),
 			ev = mk(TLocal(v), tmap, p),
 			ec = TyperBase.typeModuleType(ctx, TClassDecl(c), p),
-			ef = mk(TField(ec, FStatic(c, cf)), tfun([tk, tv], ctx.t.tvoid), p);
+			ef = mk(TField(ec, FStatic(c, cf)), tfun(vector(tk, tv), ctx.t.tvoid), p);
 		var result = [ev];
 		for (i in 0...keyExprs.length) result.push(makeCall(ctx, ef, vector(ev, keyExprs[i], valueExprs[i]), ctx.com.basic.tvoid, p));
 		result.reverse();
-		result.unshift(mk(TVar(v, mk(TNew(c, [tk, tv], vector()), tmap, p)), tDynamic, p));
+		result.unshift(mk(TVar(v, mk(TNew(c, vector(tk, tv), vector()), tmap, p)), tDynamic, p));
 		return mk(TBlock(Vector.fromArrayCopy(result)), tmap, p);
 	}
 
@@ -1763,7 +1763,7 @@ class Typer {
 				}):
 				var value = typeExpr(ctx, el[0], WithTypeTools.value);
 				if (Common.platform(ctx.com, Flash)) {
-					var t = tfun([value.etype], value.etype);
+					var t = tfun(vector(value.etype), value.etype);
 					mk(TCall(mk(TIdent("__unprotect__"), t, p), vector(value)), value.etype, value.epos);
 				} else value;
 			case EDisplay(subject = {expr: EConst(Ident("super"))},
@@ -1804,7 +1804,7 @@ class Typer {
 					case TInst(c, []): c;
 					case _: throw "Invalid EReg class";
 				};
-				mk(TNew(c, [], vector(str, options)), t, p);
+				mk(TNew(c, vector(), vector(str, options)), t, p);
 			case EConst(String(s, SSingleQuotes)) if (s != ""): typeExpr(ctx, formatString(ctx, s, p), withType);
 			case EConst(Int(s, suffix)) if (suffix != null): switch suffix {
 					case "i32": try mk(TConst(TInt(core.ds.OcamlInt32.ofString(s))), ctx.com.basic.tint,

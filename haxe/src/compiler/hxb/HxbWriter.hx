@@ -19,6 +19,8 @@ import haxe.io.Bytes;
 import haxe.io.BytesOutput;
 import String as StdString;
 
+using core.ds.VectorTools;
+
 // port: representation differences:
 // - OCaml effects (UnboundTTP / UnboundTTPWithoutPosition) are modelled with an
 //   explicit handler stack, see catchUnboundTtp / performUnboundTtp.
@@ -1231,7 +1233,7 @@ class HxbWriter {
 		}, function() return 'function arg `${a.name}`', null);
 	}
 
-	inline function inlinedList<A>(offset:Int, max:Int, fFirst:Void->Void, fElt:A->Void, l:Array<A>) {
+	inline function inlinedList<A>(offset:Int, max:Int, fFirst:Void->Void, fElt:A->Void, l:haxe.ds.Vector<A>) {
 		writeInlinedList(offset, max, chunk.writeU8, fFirst, fElt, l);
 	}
 
@@ -1402,7 +1404,7 @@ class HxbWriter {
 		}
 	}
 
-	function writeTypes(tl:Array<T>):Void chunk.writeList(tl, writeTypeInstance);
+	function writeTypes(tl:core.TType.TParams):Void chunk.writeVector(tl, writeTypeInstance);
 
 	// texpr
 
@@ -1435,7 +1437,7 @@ class HxbWriter {
 			}
 			chunk.writeUleb128(index);
 			chunk.writeOption(v.vExtra, function(ve) {
-				chunk.writeList(ve.vParams, function(ttp) {
+				chunk.writeVector(ve.vParams, function(ttp) {
 					var index = localTypeParameters.add(ttp, true);
 					chunk.writeUleb128(index);
 				});
@@ -1549,7 +1551,7 @@ class HxbWriter {
 				// function 50-59
 				case TFunction(tf):
 					chunk.writeU8(50);
-					chunk.writeList(tf.tfArgs, function(a) {
+					chunk.writeVector(tf.tfArgs, function(a) {
 						declareVar(a.variable);
 						chunk.writeOption(a.defaultValue, loop);
 					});
@@ -1795,7 +1797,7 @@ class HxbWriter {
 	}
 
 	function writeTypeParametersForward(ttps:TypeParams):Void {
-		chunk.writeList(ttps, function(ttp) {
+		chunk.writeVector(ttps, function(ttp) {
 			writePath(ttp.ttpClass.clPath);
 			writePos(ttp.ttpClass.clNamePos);
 			var i = switch ttp.ttpHost {
@@ -1928,7 +1930,7 @@ class HxbWriter {
 					if (inNestedScope()) chunk.writeU8(0)
 					else {
 						chunk.writeU8(1);
-						var ltp = [for (e in localTypeParameters.toList()) e.key];
+						var ltp = localTypeParameters.items.mapToVector(e -> e.key);
 						writeTypeParameters(ltp);
 					}
 					chunk.writeOption(fctx.texprThis, function(e:TExpr) {
@@ -1957,7 +1959,7 @@ class HxbWriter {
 		if (inNestedScope()) chunk.writeU8(0)
 		else {
 			chunk.writeU8(1);
-			var ftp = [for (e in fieldTypeParameters.toList()) e.key];
+			var ftp = fieldTypeParameters.items.mapToVector(e -> e.key);
 			writeTypeParameters(ftp);
 		}
 	}
