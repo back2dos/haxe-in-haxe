@@ -1024,17 +1024,14 @@ class Genswf9 {
 				hlf_init_scope: 1,
 				hlf_max_scope: ctx.infos.imaxscopes + 1 + (if (hasblock) 2 else if (this_reg) 1 else 0),
 				hlf_code: extra.concat(code),
-				hlf_trys: [
-					for (t in ctx.trys)
-						({
-							hltc_start: t.tr_pos + delta,
-							hltc_end: t.tr_end + delta,
-							hltc_handle: t.tr_catch_pos + delta,
-							hltc_type: type_opt(ctx, t.tr_type),
-							hltc_name: null,
-						} : HlTryCatch)
-				],
-				hlf_locals: [for (b in ctx.block_vars) ({name: ident(b.name), type: b.t, slot: b.slot, const: false} : HlLocal)],
+				hlf_trys: ctx.trys.mapToVector(t -> ({
+					hltc_start: t.tr_pos + delta,
+					hltc_end: t.tr_end + delta,
+					hltc_handle: t.tr_catch_pos + delta,
+					hltc_type: type_opt(ctx, t.tr_type),
+					hltc_name: null,
+				} : HlTryCatch)),
+				hlf_locals: ctx.block_vars.mapToVector(b -> ({name: ident(b.name), type: b.t, slot: b.slot, const: false} : HlLocal)),
 			};
 			var mt = end_fun(ctx, args, dparams, tret);
 			mt.hlmt_var_args = (switch varargs {
@@ -2378,7 +2375,7 @@ class Genswf9 {
 		}
 	}
 
-	static function extract_meta(meta:Metadata):Null<Array<HlMetadata>> {
+	static function extract_meta(meta:Metadata):Null<Vector<HlMetadata>> {
 		// port: `x :: loop l` evaluates `loop l` first: the entries are built from the
 		// last one (which decides which invalid definition is reported).
 		var l = [];
@@ -2394,13 +2391,13 @@ class Genswf9 {
 							case _: Error.abort("Invalid meta definition", a.pos);
 						}
 					}
-					l.unshift(({hlmeta_name: n, hlmeta_data: [for (a in args) mk_arg(a)]} : HlMetadata));
+					l.unshift(({hlmeta_name: n, hlmeta_data: args.map(mk_arg)} : HlMetadata));
 				case _:
 			}
 		}
 		return switch l {
 			case []: null;
-			case l: l;
+			case l: Vector.fromArrayCopy(l);
 		}
 	}
 
@@ -3055,14 +3052,12 @@ class Genswf9 {
 		// port: right-to-left record field evaluation: the static constructor
 		// first, then the implements check.
 		var static_construct = empty_method(ctx, c.clPos);
-		var impls = [
-			for (i in c.clImplements) {
-				var c = i.cls;
-				if (!hasClassFlag(c, CInterface)) Error.abort("Can't implement class in Flash9", c.clPos);
-				var p = real_path(c.clPath);
-				HMMultiName(p.name, [HNPublic(p.pack.join("."))]);
-			}
-		];
+		var impls = c.clImplements.mapToVector(i -> {
+			var c = i.cls;
+			if (!hasClassFlag(c, CInterface)) Error.abort("Can't implement class in Flash9", c.clPos);
+			var p = real_path(c.clPath);
+			HMMultiName(p.name, [HNPublic(p.pack.join("."))]);
+		});
 		var hc = new HlClass();
 		hc.hlc_index = 0;
 		hc.hlc_name = name;
@@ -3079,9 +3074,9 @@ class Genswf9 {
 		});
 		hc.hlc_implements = impls;
 		hc.hlc_construct = cid;
-		hc.hlc_fields = fields;
+		hc.hlc_fields = Vector.fromArrayCopy(fields);
 		hc.hlc_static_construct = static_construct;
-		hc.hlc_static_fields = statics;
+		hc.hlc_static_fields = Vector.fromArrayCopy(statics);
 		return hc;
 	}
 
@@ -3187,9 +3182,9 @@ class Genswf9 {
 		hc.hlc_final = true;
 		hc.hlc_interface = false;
 		hc.hlc_namespace = null;
-		hc.hlc_implements = [];
+		hc.hlc_implements = vector();
 		hc.hlc_construct = construct;
-		hc.hlc_fields = [
+		hc.hlc_fields = vector(
 			{hlf_name: tag_id, hlf_slot: 0, hlf_kind: HFVar({hlv_type: HMPath([], "String"), hlv_value: HVNone, hlv_const: false}), hlf_metas: null},
 			{hlf_name: index_id, hlf_slot: 0, hlf_kind: HFVar({hlv_type: HMPath([], "int"), hlv_value: HVNone, hlv_const: false}), hlf_metas: null},
 			{hlf_name: params_id, hlf_slot: 0, hlf_kind: HFVar({hlv_type: HMPath([], "Array"), hlv_value: HVNone, hlv_const: false}), hlf_metas: null},
@@ -3204,8 +3199,8 @@ class Genswf9 {
 					hlm_kind: MK3Normal,
 				}),
 				hlf_metas: null,
-			},
-		];
+			}
+		);
 		hc.hlc_static_construct = static_construct;
 		var sf:Array<HlField> = [
 			{
@@ -3221,8 +3216,7 @@ class Genswf9 {
 				hlf_metas: null,
 			}
 		].concat(constrs);
-		sf.reverse();
-		hc.hlc_static_fields = sf;
+		hc.hlc_static_fields = VectorTools.ofArrayReversed(sf);
 		return hc;
 	}
 

@@ -105,7 +105,7 @@ class VectorTools {
 	public static inline function last<T>(v:Vector<T>):T
 		return v[v.length - 1];
 
-	// port: Array.init
+	// port: Array.init: `f` applied to the indices in order
 	public static inline function init<T>(n:Int, f:Int->T):Vector<T> {
 		var r = new Vector<T>(n);
 		for (i in 0...n) r[i] = f(i);

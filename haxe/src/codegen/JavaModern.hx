@@ -416,14 +416,14 @@ enum JAttribute {
 	public var jcAttributes:Array<JAttribute>;
 }
 
-typedef ConstantPool = {strings:Array<String>, paths:Array<GlobalTypePath>, nameAndTypes:Array<{name:String, t:String}>};
+typedef ConstantPool = {strings:Vector<String>, paths:Vector<GlobalTypePath>, nameAndTypes:Vector<{name:String, t:String}>};
 
 class JReaderModern {
 	static function readConstantPool(ch:ClassInput):ConstantPool {
 		var count = ch.readUi16();
-		var strings = [for (_ in 0...count) ""];
-		var paths = [for (_ in 0...count) 0];
-		var nameAndTypes = [for (_ in 0...count) {name: 0, t: 0}];
+		var strings = new Vector<String>(count, "");
+		var paths = new Vector<Int>(count, 0);
+		var nameAndTypes = new Vector<{name:Int, t:Int}>(count, {name: 0, t: 0});
 		var i = 1;
 		while (i < count) {
 			switch ch.readByte() {
