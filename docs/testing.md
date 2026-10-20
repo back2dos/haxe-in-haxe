@@ -135,6 +135,29 @@ npm-pack job builds with it off (`HXMC_MODULE_CACHE=0`), the fixpoint
 builds the tool with it cold, warm and off, and `Crosshost` compares the
 native tool (cached) with the WebAssembly one (never cached).
 
+## The packages' examples, built
+
+`make examples-check` (a lane of `make check`; `hxmc/test/ExampleBuilds.hx`)
+builds the packages' examples and runs none of them, so it needs no
+browser, GPU or display: what CI's `site` and `gfx` jobs build, where a
+program that does not build otherwise shows first. Its list is the site's
+gallery's (`site/src/Examples.hx`: the files of `packages/<pkg>/examples` with
+a header), of every package with examples (theme's too, which the gallery
+leaves out): each example built for wasm32-wasi as the site builds it
+(`Examples.wasm`, `Examples.wasmArgs`: the package's class paths, legacy
+exception handling), and each one on a canvas or playing a sound, a program
+on `@hxmc/os`'s window and audio, also for this machine (`Examples.buildArgs`,
+as `gfx-programs`, `3d-check`, `audio-programs` and the site's measurements
+build them: Linux in the glibc mode). That is 20 modules and 19 executables,
+built in parallel (half the cores' worth of builds at once, `-j`; ids
+restrict it), with the module cache, into `bin/hxmc-t/examples`; a build that
+fails prints its log's end. About 15 s after the tool or the std changed (an
+empty cache), a few seconds otherwise (Xeon E-2356G, 6 cores/12 threads, 62
+GB, Linux 6.1). Not built there: the JavaScript islands and bundles of
+`packages/web/examples` (the port's: `make web-check`, `web-widgets`), and
+ui's `NativeForm`, which has no header (`make ui-web-check` builds it for
+wasm32-wasi, `ui-programs` natively in `NativeTest`).
+
 ## Graphics
 
 `make gfx-check`: the examples of `packages/gfx`, the triangle, the cube
