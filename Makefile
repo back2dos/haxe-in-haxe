@@ -60,6 +60,8 @@ BENCH_DATA ?=
 BENCH_ARGS ?=
 # `make bench-arrays`: length, rounds, samples, optional JSON output
 ARRAY_BENCH_ARGS ?=
+# `make bench-maps`: keys, rounds
+MAP_BENCH_ARGS ?=
 # `make crosshost`: the arguments of hxmc/test/Crosshost.hx (CI splits the targets: "--targets a,b")
 CROSSHOST_ARGS ?= --tool
 
@@ -112,7 +114,7 @@ endef
 
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
-	lix lix-release lix-dist reference bench bench-arrays test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
+	lix lix-release lix-dist reference bench bench-arrays bench-maps test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test corpus-stage \
 	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
 	native-macros dev-check portcheck measure site-check \
@@ -189,6 +191,8 @@ help:
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
 ## bench-arrays  Array vs hxmc.NativeArray vs Vector: nine element types and five workloads
 ##             (ARRAY_BENCH_ARGS="65536 128 7 bin/vector-bench/results.json")
+## bench-maps  ObjectMap get/set/exists/remove on objects, hits and misses, and StringMap's
+##             (MAP_BENCH_ARGS="1000000 11": keys, rounds)
 ## measure     peak memory and time of the self-compile (ours, the reference) and of the
 ##             tool's builds (haxe/test/Measure.hx)
 ## wasmgc-check  -D hxmc.wasm-gc (WasmGC, an experiment): hxmc/test/wasmgc's programs and a few corpus
@@ -209,7 +213,7 @@ help:
 ## distclean   also remove bin/ entirely
 ##
 ## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, ANDROID_TARGET, IOS_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
-## LIX_DIR, BENCH_DATA, BENCH_ARGS, ARRAY_BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
+## LIX_DIR, BENCH_DATA, BENCH_ARGS, ARRAY_BENCH_ARGS, MAP_BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
 $(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
@@ -556,6 +560,12 @@ bench-arrays: bin/vector-bench/m
 
 bin/vector-bench/m: $(TOOL) $(STD) $(HOST_RT) hxmc/test/bench/VectorBench.hx hxmc/test/bench/VectorBenchMacro.hx
 	$(call hxmc,$@,-cp hxmc/test/bench -main VectorBench $(HXMC_ARGS))
+
+bench-maps: bin/map-bench/m
+	bin/map-bench/m $(MAP_BENCH_ARGS)
+
+bin/map-bench/m: $(TOOL) $(STD) $(HOST_RT) hxmc/test/bench/MapBench.hx
+	$(call hxmc,$@,-cp hxmc/test/bench -main MapBench $(HXMC_ARGS))
 
 # (the self-compile of PORT_BIN; the npm package's WebAssembly compiler)
 measure: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE) $(PORT_BIN) bin/npm/native/wasm32-wasi/haxe.wasm
