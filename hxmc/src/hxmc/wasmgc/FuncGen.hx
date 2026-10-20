@@ -1428,6 +1428,12 @@ class FuncGen {
 				case "createEmpty":
 					all();
 					call(m.meta.createEmpty());
+				case "createInstance":
+					all();
+					call(m.meta.createInstance());
+				case "makerKind":
+					all();
+					call(m.meta.makerKind());
 				case "enumOf":
 					all();
 					call(m.meta.enumOf());
