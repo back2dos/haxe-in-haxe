@@ -15,6 +15,8 @@ import core.Message.WarningMode;
 import hxmc.ModuleStore;
 import core.ds.VectorTools.vector;
 
+using core.ds.VectorTools;
+
 // The compilation server's module cache made durable (docs/plans/compiler.md, "Cached
 // modules"): a build writes the typed modules it ends with, as the server
 // keeps them in its HXB mode (each module's HXB chunks, its dependencies,
@@ -1098,7 +1100,7 @@ class ModuleCache {
 		buildReads.sort((a, b) -> Reflect.compare(a.role + a.name, b.role + b.name));
 		var jobs:Array<{v:Variant, f:Void->{chunks:CachedChunks, monos:Bytes}}> = [];
 		var all:Array<Variant> = [];
-		var byKey = [new Map<String, Variant>(), new Map<String, Variant>()];
+		var byKey:haxe.ds.Vector<Map<String, Variant>> = vector(new Map<String, Variant>(), new Map<String, Variant>());
 		for (role in 0...coms.length) {
 			var c = coms[role];
 			var config:compiler.hxb.HxbWriterConfig.WriterTargetConfig = switch c.hxbWriterConfig {
@@ -1173,7 +1175,7 @@ class ModuleCache {
 				v.file = file;
 				v.fileRec = rec;
 				v.matched = true;
-				v.deps = [];
+				var deps:Array<StoredDep> = [];
 				var macroDefines = false;
 				var ok = true;
 				for (d in x.mDeps) {
@@ -1190,13 +1192,14 @@ class ModuleCache {
 					// macro that looked at it; across contexts, a macro's module, its
 					// whole content: its code runs)
 					var eligible = r == role;
-					v.deps.push({role: r, path: d.mdPath, key: key(d.mdPath), eligible: eligible, expect: ""});
+					deps.push({role: r, path: d.mdPath, key: key(d.mdPath), eligible: eligible, expect: ""});
 				}
 				if (!ok) {
 					skip("a dependency of another context");
 					continue;
 				}
-				v.deps.sort((a, b) -> Reflect.compare(a.role + "|" + a.key, b.role + "|" + b.key));
+				deps.sort((a, b) -> Reflect.compare(a.role + "|" + a.key, b.role + "|" + b.key));
+				v.deps = haxe.ds.Vector.fromArrayCopy(deps);
 				var old = s.restored(m);
 				if (old != null) {
 					v.reads = old.reads;
@@ -1625,10 +1628,10 @@ class ModuleCacheState {
 	public var index:StoreIndex;
 	// per role (0: the program's context, 1: the macros'), its signature and
 	// defines (the macros': predicted while that context does not exist)
-	public var signs:Array<Null<String>> = [null, null];
-	public var defs:Array<Null<haxe.ds.StringMap<String>>> = [null, null];
+	public var signs = new haxe.ds.Vector<Null<String>>(2);
+	public var defs = new haxe.ds.Vector<Null<haxe.ds.StringMap<String>>>(2);
 	// per role, the variant restored for each module (ModuleCache.key)
-	public var chosen = [new Map<String, Variant>(), new Map<String, Variant>()];
+	public var chosen:haxe.ds.Vector<Map<String, Variant>> = vector(new Map<String, Variant>(), new Map<String, Variant>());
 	public var approved = new Map<String, Bool>();
 	public var hashes = new Map<String, String>();
 	public var closure:Null<Closure> = null;
@@ -1848,7 +1851,7 @@ class ModuleCacheState {
 	}
 
 	// per role, the variants whose reads match, per module that has several
-	var alternatives:Array<Map<String, Array<Variant>>> = [new Map(), new Map()];
+	var alternatives:haxe.ds.Vector<Map<String, Array<Variant>>> = vector(new Map<String, Array<Variant>>(), new Map<String, Array<Variant>>());
 
 	// a module without a file of its own, which a macro defined: of its
 	// variants, one whose dependencies are as they were when it was typed
