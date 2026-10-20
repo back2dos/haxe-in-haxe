@@ -8,6 +8,7 @@
 package haxe.ds;
 
 import hxmc.rt.MapSlots;
+import hxmc.rt.MapSlots.RefSlots;
 
 /**
 	IntMap allows mapping of Int keys to arbitrary values.
@@ -21,7 +22,7 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 	// entries that fit before the next growth)
 	var slots:MapSlots<Int>;
 	// the entries' values (room)
-	var vs:MapSlots<Dynamic>;
+	var vs:RefSlots;
 	// the removed entries, null until the first removal
 	var dead:MapSlots<Bool>;
 	var used:Int; // entries appended, the removed ones included
@@ -119,14 +120,15 @@ class IntMap<T> implements haxe.Constraints.IMap<Int, T> {
 	}
 
 	// rebuild with removed entries dropped and room for twice the live ones
+	// (a table that only grows doubles: at 3/4 full, to 3/8; removals cost at most one entry moved each)
 	function grow() {
 		var os = slots, ovs = vs, od = dead, on = used, ocap = mask + 1;
 		var cap = 8;
-		while (cap * 3 < (live + 1) * 8)
+		while (cap * 3 < live * 8)
 			cap *= 2;
 		var room = (cap * 3) >> 2;
 		slots = new MapSlots<Int>(cap + room);
-		vs = new MapSlots<Dynamic>(room);
+		vs = new RefSlots(room);
 		dead = null;
 		used = 0;
 		live = 0;

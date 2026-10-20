@@ -9,6 +9,7 @@
 package haxe.ds;
 
 import hxmc.rt.MapSlots;
+import hxmc.rt.MapSlots.RefSlots;
 
 /**
 	StringMap allows mapping of String keys to arbitrary values.
@@ -22,7 +23,7 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	// the entries that fit before the next growth)
 	var slots:MapSlots<Int>;
 	// the entries' keys and values, interleaved (2 * room)
-	var kvs:MapSlots<Dynamic>;
+	var kvs:RefSlots;
 	// the removed entries, null until the first removal
 	var dead:MapSlots<Bool>;
 	var used:Int; // entries appended, the removed ones included
@@ -123,14 +124,15 @@ class StringMap<T> implements haxe.Constraints.IMap<String, T> {
 	}
 
 	// rebuild with removed entries dropped and room for twice the live ones
+	// (a table that only grows doubles: at 3/4 full, to 3/8; removals cost at most one entry moved each)
 	function grow() {
 		var os = slots, okvs = kvs, od = dead, on = used, ocap = mask + 1;
 		var cap = 8;
-		while (cap * 3 < (live + 1) * 8)
+		while (cap * 3 < live * 8)
 			cap *= 2;
 		var room = (cap * 3) >> 2;
 		slots = new MapSlots<Int>(cap + room);
-		kvs = new MapSlots<Dynamic>(2 * room);
+		kvs = new RefSlots(2 * room);
 		dead = null;
 		used = 0;
 		live = 0;
