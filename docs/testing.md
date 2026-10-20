@@ -135,6 +135,16 @@ npm-pack job builds with it off (`HXMC_MODULE_CACHE=0`), the fixpoint
 builds the tool with it cold, warm and off, and `Crosshost` compares the
 native tool (cached) with the WebAssembly one (never cached).
 
+## The runtime's symbols
+
+Every build checks that the runtime defines each symbol generated code may
+call by name, whatever the program calls (docs/hxmc.md, "The symbols
+generated code calls"), so the corpus' builds on every target check it, and
+a missing module fails all of them alike instead of only the programs that
+happen to call it; it has no lane of its own. A runtime symbol that
+generated code calls and that `RuntimeSymbols` does not list fails the
+build that calls it.
+
 ## The packages' examples, built
 
 `make examples-check` (a lane of `make check`; `hxmc/test/ExampleBuilds.hx`)
