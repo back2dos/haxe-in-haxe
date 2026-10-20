@@ -24,6 +24,7 @@ class Options {
 	// hxmc.ios-entitlements=<file>
 	public var ios = new Map<String, String>();
 	public var opt = true; // MIR optimizations (HXMC_OPT=0: off)
+	public var shrinkWrap = false; // -D hxmc.shrink-wrap: ShrinkWrap (HXMC_SHRINKWRAP=1/0 forces it, not in the cache's key)
 	public var jobs = 0; // parallel module compilations (HXMC_JOBS, -D hxmc.jobs; 0: the cores)
 	public var dump:Null<String> = null; // function names whose machine code is printed (HXMC_DUMP)
 	// -D hxmc.link=<path>[,<path>...]: objects and archives linked with the program (LinkInputs)
@@ -125,6 +126,8 @@ class Options {
 			if (v != null) o.ios.set(k, v);
 		}
 		o.opt = env("HXMC_OPT") != "0";
+		var sw = env("HXMC_SHRINKWRAP");
+		o.shrinkWrap = sw != null && sw != "" ? sw != "0" : def("hxmc.shrink_wrap") != null; // (-D turns the dash into an underscore)
 		var eh = def("hxmc.wasm_eh"); // (-D turns the dash into an underscore)
 		if (eh != null) switch eh {
 			case "legacy": o.wasmLegacyEh = true;

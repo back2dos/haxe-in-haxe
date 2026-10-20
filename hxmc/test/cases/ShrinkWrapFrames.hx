@@ -1,3 +1,4 @@
+// define: hxmc.shrink-wrap
 // Functions whose shadow-stack frame ShrinkWrap pushes after their early
 // exits: parameters used after allocations (the corpus' 64 KB nursery
 // collects often, moving them), a callee inlined before the push, calls on

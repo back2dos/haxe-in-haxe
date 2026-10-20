@@ -17,13 +17,15 @@ import hxmc.Mir;
 // and no inlined callee's frame is pushed on a way to D (rt_sp must be the
 // entry's value there). D is not in a loop (the push would run again).
 // Nothing changes for a function with a try (setjmp) or when no such D
-// exists. HXMC_SHRINKWRAP=0 turns it off; HXMC_SW_LOG=1 prints each
+// exists. Opt-in, -D hxmc.shrink-wrap (or HXMC_SHRINKWRAP=1): it takes
+// tsc-haxe's type check 1.4% fewer instructions and 2% less time, but the
+// HaxeBenchmarks' nbody 8% more time (a frame pushed later on a path that
+// always reaches it costs a jump). HXMC_SW_LOG=1 prints each
 // function's outcome, HXMC_SW_ONLY=<symbol> and HXMC_SW_HASH=<lo>-<hi> (the
 // symbol's hash mod 1000) bisect a miscompilation.
 class ShrinkWrap {
 	var f:MFunc;
 
-	public static var on = Sys.getEnv("HXMC_SHRINKWRAP") != "0";
 	public static var moved = 0; // (statistics)
 	static var log = Sys.getEnv("HXMC_SW_LOG") == "1";
 
