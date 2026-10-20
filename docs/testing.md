@@ -106,7 +106,10 @@ outputs of hxc, the C target hxmc came from): a new case gets one with
 with the reason in the commit. A `// build-seconds: <n>` line of a case bounds
 the tool's time to build it (`BigInit`: a function of a thousand nested
 constructor calls, the shape of ml2hx's generated tables, once a minute of
-register allocation). `Crosshost`: the tool as a WebAssembly module
+register allocation). `Corpus.WASM_EXCLUDED` and `POSIX_ONLY` name the cases
+a target cannot run (threads and sockets on wasm32-wasi; `NullAccessCrash`, a
+fault that is not a null access, dies of SIGSEGV on Linux and macOS only:
+docs/hxmc.md, "Null access"). `Crosshost`: the tool as a WebAssembly module
 writes the same bytes as the native tool, for every target, itself included.
 `RT_VERIFY=1` fills the free nursery with a pattern, so uninitialized
 allocations and missed roots show at once. `ModuleCacheCheck` (`make
@@ -131,6 +134,39 @@ source use it (the corpus builds from HXB archives and does not); CI's
 npm-pack job builds with it off (`HXMC_MODULE_CACHE=0`), the fixpoint
 builds the tool with it cold, warm and off, and `Crosshost` compares the
 native tool (cached) with the WebAssembly one (never cached).
+
+## The runtime's symbols
+
+Every build checks that the runtime defines each symbol generated code may
+call by name, whatever the program calls (docs/hxmc.md, "The symbols
+generated code calls"), so the corpus' builds on every target check it, and
+a missing module fails all of them alike instead of only the programs that
+happen to call it; it has no lane of its own. A runtime symbol that
+generated code calls and that `RuntimeSymbols` does not list fails the
+build that calls it.
+
+## The packages' examples, built
+
+`make examples-check` (a lane of `make check`; `hxmc/test/ExampleBuilds.hx`)
+builds the packages' examples and runs none of them, so it needs no
+browser, GPU or display: what CI's `site` and `gfx` jobs build, where a
+program that does not build otherwise shows first. Its list is the site's
+gallery's (`site/src/Examples.hx`: the files of `packages/<pkg>/examples` with
+a header), of every package with examples (theme's too, which the gallery
+leaves out): each example built for wasm32-wasi as the site builds it
+(`Examples.wasm`, `Examples.wasmArgs`: the package's class paths, legacy
+exception handling), and each one on a canvas or playing a sound, a program
+on `@hxmc/os`'s window and audio, also for this machine (`Examples.buildArgs`,
+as `gfx-programs`, `3d-check`, `audio-programs` and the site's measurements
+build them: Linux in the glibc mode). That is 20 modules and 19 executables,
+built in parallel (half the cores' worth of builds at once, `-j`; ids
+restrict it), with the module cache, into `bin/hxmc-t/examples`; a build that
+fails prints its log's end. About 15 s after the tool or the std changed (an
+empty cache), a few seconds otherwise (Xeon E-2356G, 6 cores/12 threads, 62
+GB, Linux 6.1). Not built there: the JavaScript islands and bundles of
+`packages/web/examples` (the port's: `make web-check`, `web-widgets`), and
+ui's `NativeForm`, which has no header (`make ui-web-check` builds it for
+wasm32-wasi, `ui-programs` natively in `NativeTest`).
 
 ## Graphics
 

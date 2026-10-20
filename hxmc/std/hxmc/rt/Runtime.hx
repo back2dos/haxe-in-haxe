@@ -4,6 +4,10 @@ package hxmc.rt;
 // into every program through Std (hxmc/std/Std.hx). Their classes are
 // @:keep (DCE keeps them typed); hxmc compiles only the functions a program
 // calls, and the @:hxmc.export ones (generated code calls them by symbol).
+// A module defining a symbol generated code refers to is imported here for
+// each target that needs it, not left to another module that loads it:
+// every build checks these imports define them all, whatever the program
+// calls (hxmc/src/hxmc/ir/RuntimeSymbols.hx).
 import hxmc.rt.Str;
 import hxmc.rt.Dyn;
 import hxmc.rt.Arr;
@@ -14,6 +18,10 @@ import hxmc.rt.Names;
 import hxmc.rt.FloatText;
 import hxmc.rt.Boxes;
 import hxmc.rt.LibM;
+// what a null access calls (but WasmGC's, hxmc.rt.gc.GcNative)
+#if !hxmc.wasm_gc
+import hxmc.rt.NullAccess;
+#end
 // WebAssembly's runtime (@:hxmc.wasm: what C provides on the native
 // targets), typed for a program built for it only
 #if (hxmc.target == "wasm32-wasi")
@@ -29,6 +37,8 @@ import hxmc.rt.gc.GcStr;
 import hxmc.rt.gc.GcSys;
 import hxmc.rt.gc.GcDyn;
 import hxmc.rt.gc.GcNative;
+// (NativeArray's: GcDyn loads it too, but what generated code calls is imported here)
+import hxmc.rt.gc.GcNArray;
 #end
 #else
 // the native targets' runtime over the C library (@:hxmc.native): the
