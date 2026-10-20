@@ -11,18 +11,26 @@ import haxe.macro.Expr;
 // Array in between; `vector()` is the empty vector (on hxmc one static object per
 // element kind: no allocation). The element type comes from the expected type
 // where there is one, as an array literal's would, else from the elements (`set`
-// rather than `[i] =`, which types its right side without one).
+// rather than `[i] =`, which types its right side without one). On hxmc, of a
+// known element type, it is `hxmc.NativeArray.literal([a, b, c])`, which the
+// backend allocates and fills as it does an Array literal.
 macro function vector(exprs:Array<Expr>):Expr {
 	var p = Context.currentPos();
-	var hint:Null<ComplexType> = switch Context.getExpectedType() {
-		case null: null;
+	var hint:Null<ComplexType> = null, elem:Null<ComplexType> = null;
+	switch Context.getExpectedType() {
+		case null:
 		case t:
 			switch Context.follow(t) {
-				case vt = TAbstract(_.get() => {pack: ["haxe", "ds"], name: "Vector"}, [_]):
-					try Context.toComplexType(vt) catch (_:Dynamic) null;
-				case _: null;
+				case vt = TAbstract(_.get() => {pack: ["haxe", "ds"], name: "Vector"}, [et]):
+					try {
+						hint = Context.toComplexType(vt);
+						elem = Context.toComplexType(et);
+					} catch (_:Dynamic) {}
+				case _:
 			}
 	}
+	if (hint != null && elem != null && Context.definedValue("target.name") == "hxmc")
+		return macro @:pos(p) (haxe.ds.Vector.fromData(hxmc.NativeArray.literal(([$a{exprs}] : Array<$elem>))) : $hint);
 	if (exprs.length == 0)
 		return hint == null ? macro @:pos(p) new haxe.ds.Vector(0) : macro @:pos(p) (new haxe.ds.Vector(0) : $hint);
 	var name = "__vector" + VectorTools.nextId++;
