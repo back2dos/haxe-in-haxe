@@ -57,6 +57,14 @@ class ClassInfo {
 	// (Lower.reflectStatics); Reach keeps those live code can reach (null: no
 	// live code has the class value)
 	public var statics:Null<Array<StaticEntry>> = null;
+	// what Type.createInstance calls on a new instance of the class, with the
+	// arguments: its constructor (a superclass's when it has none), or that
+	// constructor's entry for dynamic calls (numbers and Bools with default
+	// values nullable: Lower.defaultsEntry); fn null: no constructor at all
+	// (the call throws, as Eval's fails). Set for every class once the program
+	// can call Type.createInstance (Lower.makers); Reach keeps it where live
+	// code can have the class value (null: none)
+	public var maker:Null<{fn:Null<FuncInfo>}> = null;
 
 	public function new(name, ident, sup) {
 		this.name = name;
@@ -213,6 +221,9 @@ class FuncInfo {
 	// collector written in Haxe, whose code is otherwise no-GC): never noGc
 	public var collects:Bool = false;
 	public var cSymbol:Null<String>; // @:hxmc.export: the symbol (the runtime's C code calls it)
+	// (Facts) of the runtime's exports: the families hxmc.ir.RuntimeSymbols
+	// lists it for, which MirBuild.call checks; -1: not the runtime's
+	public var rtFamilies:Int = -1;
 	// the Haxe module the function comes from (dot path): hxmc compiles the
 	// functions of a module into one object
 	public var module:String;

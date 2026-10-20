@@ -140,21 +140,8 @@ class Lower {
 							hostImpls.set(n, {c: c, cf: cf});
 							staticFunc(c, cf);
 						}
-				case TClassDecl(c) if (c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern)):
-					// @:hxmc.android: the Android targets' only (Mem.target() 9 and 10)
-					if (hasMeta(":hxmc.android", c.clMeta) && targetCode >= 0 && targetCode < 9) continue;
-					// @:hxmc.ios: the iOS targets' only (Mem.platform() 1 and 2)
-					if (hasMeta(":hxmc.ios", c.clMeta) && targetPlatform >= 0 && targetPlatform < 1) continue;
-					// @:hxmc.wasm: the runtime of WebAssembly only (what C provides elsewhere)
-					if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) continue;
-					// @:hxmc.native: the runtime of the native targets only (over C libraries)
-					if (hasMeta(":hxmc.native", c.clMeta) && targetOs == 3) continue;
-					// @:hxmc.wasmgc: the runtime of -D hxmc.wasm-gc only; @:hxmc.anyHeap: of
-					// both (written over hxmc.rt.Repr); the others of linear memory only
-					if (hasMeta(":hxmc.wasmgc", c.clMeta) != wasmGc && !hasMeta(":hxmc.anyHeap", c.clMeta)) continue;
-					// @:hxmc.os("windows"): the runtime of one system only
-					var os = metaString(":hxmc.os", c.clMeta);
-					if (os != null && targetOs >= 0 && ["linux", "macos", "windows", "wasm"].indexOf(os) != targetOs) continue;
+				case TClassDecl(c) if (runtimeClass(c)):
+					if (!ofTarget(c)) continue;
 					for (cf in c.clOrderedStatics) {
 						if (cf.cfMeta.length == 0) continue;
 						// (an exported variable: data read by its symbol, always there)
@@ -172,6 +159,30 @@ class Lower {
 					}
 				case _:
 			}
+	}
+
+	// a class of the hxmc package, whose statics may implement the runtime's
+	// functions (findHosts; hxmc.ir.RuntimeSymbols)
+	public static function runtimeClass(c:TClass):Bool
+		return c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc" && !c.hasClassFlag(CExtern);
+
+	// whether such a class is of this target's runtime
+	public static function ofTarget(c:TClass):Bool {
+		// @:hxmc.android: the Android targets' only (Mem.target() 9 and 10)
+		if (hasMeta(":hxmc.android", c.clMeta) && targetCode >= 0 && targetCode < 9) return false;
+		// @:hxmc.ios: the iOS targets' only (Mem.platform() 1 and 2)
+		if (hasMeta(":hxmc.ios", c.clMeta) && targetPlatform >= 0 && targetPlatform < 1) return false;
+		// @:hxmc.wasm: the runtime of WebAssembly only (what C provides elsewhere)
+		if (hasMeta(":hxmc.wasm", c.clMeta) && targetOs != 3) return false;
+		// @:hxmc.native: the runtime of the native targets only (over C libraries)
+		if (hasMeta(":hxmc.native", c.clMeta) && targetOs == 3) return false;
+		// @:hxmc.wasmgc: the runtime of -D hxmc.wasm-gc only; @:hxmc.anyHeap: of
+		// both (written over hxmc.rt.Repr); the others of linear memory only
+		if (hasMeta(":hxmc.wasmgc", c.clMeta) != wasmGc && !hasMeta(":hxmc.anyHeap", c.clMeta)) return false;
+		// @:hxmc.os("windows"): the runtime of one system only
+		var os = metaString(":hxmc.os", c.clMeta);
+		if (os != null && targetOs >= 0 && ["linux", "macos", "windows", "wasm"].indexOf(os) != targetOs) return false;
+		return true;
 	}
 
 	// the Haxe implementation of runtime function `name`, lowered on first use
@@ -197,6 +208,12 @@ class Lower {
 	public static inline var BOUNDS_UNCHECKED = 0; // not tested (unspecified)
 	public static inline var BOUNDS_THROWS = 1; // haxe.exceptions.ArgumentException (rt/NArray.outOfBounds)
 	public static inline var BOUNDS_SILENT = 2; // a read gives the element type's default, a write does nothing
+	// -D hxmc.null-checks (default: WebAssembly): references are tested against
+	// null before they are dereferenced (MirBuild.nullCheck; the receivers of
+	// the runtime's methods: FnLower.receiverCheck; WasmGC: FuncGen), and null
+	// throws "Null Access"; without, the native targets fault and the runtime's
+	// handler throws (hxmc.rt.Faults)
+	public static var nullChecks = false;
 
 	// a condition on the target (Mem.os, Mem.arm, Mem.target compared with
 	// constants) as a constant (EInt), when it is one: FnLower lowers only
@@ -481,6 +498,7 @@ class Lower {
 		return c.clPath.pack.length == 0 && c.clPath.name == name;
 
 	var methodsDone = 0; // classes whose every method is lowered
+	var makersDone = 0; // classes given their Type.createInstance entry (makers)
 
 	function drain() {
 		while (true) {
@@ -495,6 +513,9 @@ class Lower {
 					if (f.cfKind.match(Method(MethNormal | MethInline)) && funcOf(f) != null && !f.hasClassFieldFlag(CfExtern))
 						method(tc, f);
 			}
+			if (makers)
+				while (makersDone < tclasses.length)
+					maker(tclasses[makersDone++]);
 			while (pending.length > 0)
 				pending.shift()();
 			// every implementation of a dispatched selector, in every class seen so far
@@ -895,6 +916,7 @@ class Lower {
 			fl.run(tf);
 			fl.finish();
 		})));
+		if (isCreateInstance(fi.name)) makers = true;
 		return fi;
 	}
 
@@ -1065,7 +1087,7 @@ class Lower {
 			fl.run(tf);
 			fl.finish();
 		})));
-		defaultsEntry(fi, ci);
+		fi.dfltEntry = defaultsEntry(fi, ci);
 		return fi;
 	}
 
@@ -1074,16 +1096,17 @@ class Lower {
 	// numbers or Bools, its entry in the method table (DataGen.types: dynamic
 	// and structural calls) is this one, those arguments nullable
 	// (closureArgTy, as a closure of a function type with optional
-	// arguments), null meaning the default.
-	function defaultsEntry(fi:FuncInfo, ci:ClassInfo) {
-		if (fi.sret) return;
+	// arguments), null meaning the default (null: the method itself is the
+	// entry). A constructor's, for Type.createInstance: maker.
+	function defaultsEntry(fi:FuncInfo, ci:ClassInfo):Null<FuncInfo> {
+		if (fi.sret) return null;
 		var ds = defaults.get(fi);
-		if (ds == null) return;
+		if (ds == null) return null;
 		var tys = [for (i in 1...fi.args.length) closureArgTy(fi.args[i].ty, i < ds.length ? ds[i] : null)];
 		var differs = false;
 		for (i in 0...tys.length)
 			if (tys[i] != fi.args[i + 1].ty) differs = true;
-		if (!differs) return;
+		if (!differs) return null;
 		var w = new FuncInfo(fi.name + "__dflt", fi.module);
 		w.args.push(new Local(0, "this0", fi.args[0].ty));
 		for (i in 0...tys.length)
@@ -1091,13 +1114,52 @@ class Lower {
 		w.ret = fi.ret;
 		w.pos = fi.pos;
 		w.display = fi.display;
-		fi.dfltEntry = w;
 		prog.funcs.push(w);
 		pending.push(guarded(w, () -> lowerBody(w, null, () -> {
 			var fl = new FnLower(this, w, ci, null);
 			fl.forwardDefaults(fi);
 			fl.finish();
 		})));
+		return w;
+	}
+
+	// Type.createInstance can be called: the lowering met the runtime's
+	// function (staticFunc; a program whose classes another one makes, as the
+	// compiler makes macro code's, may set it too). Every class seen then gets
+	// its entry (ClassInfo.maker), which Reach keeps where live code can have
+	// the class value; a program that never calls it gets none.
+	public var makers = false;
+
+	// the runtime's Type.createInstance (natively, on WasmGC): Reach's too
+	public static function isCreateInstance(name:String):Bool
+		return name == "hxmc_rt_Dyn_createInstance" || name == "hxmc_rt_gc_GcNative_createInstance";
+
+	// (a constructor's entry, shared by the subclasses calling it)
+	var ctorEntries = new Map<FuncInfo, FuncInfo>();
+
+	// c's entry for Type.createInstance (ClassInfo.maker): the constructor
+	// `new` calls (its own, else the nearest superclass's), its entry for
+	// dynamic calls where it has default values for numbers or Bools; none to
+	// call when no class of the chain has one (the call fails, as Eval's);
+	// no entry when an argument is a struct, which no array of Dynamic holds
+	function maker(c:TClass) {
+		var ci = classInfo(c);
+		var k = c;
+		while (k.clConstructor == null && k.clSuper != null)
+			k = k.clSuper.cls;
+		if (k.clConstructor == null) {
+			ci.maker = {fn: null};
+			return;
+		}
+		var f = ctor(k);
+		if (hasStruct(f)) return;
+		var e = ctorEntries.get(f);
+		if (e == null) {
+			e = defaultsEntry(f, classInfo(k));
+			if (e == null) e = f;
+			ctorEntries.set(f, e);
+		}
+		ci.maker = {fn: e};
 	}
 
 	public function ctor(c:TClass):FuncInfo {

@@ -152,7 +152,9 @@ class Gc {
 
 	static var stats:Bool;
 	static var minors:Int;
-	static var majors:Int;
+	// every collection, and the major ones (both move objects: hxmc.rt.IdHash)
+	@:hxmc.export("hxmc_gc_majors") static var majors:Int;
+	@:hxmc.export("hxmc_gc_count") static var collections:Int;
 	static var minorSecs:Float; // RT_STATS
 	static var youngBytes:I64; // RT_STATS: allocated in the nursery, and promoted from it
 	static var promotedBytes:I64;
@@ -762,6 +764,7 @@ class Gc {
 			return;
 		}
 		minors++;
+		collections++;
 		var scan = oldPtr;
 		major = false;
 		if (!gcBfs) {
@@ -786,6 +789,7 @@ class Gc {
 
 	@:hxmc.noGc static function majorCollect(need:I64) {
 		majors++;
+		collections++;
 		#if hxmc.gc_prefault
 		if (pfState > 0) prefaultCancel();
 		#end
@@ -1399,6 +1403,7 @@ class Gc {
 	// and the main shadow stack given back to the system. Nothing of the
 	// heap is used after this (the program's threads have ended).
 	@:hxmc.noGc public static function releaseHeap() {
+		Faults.uninstall(); // (its handler's code goes with the library)
 		if (!region0.isNull()) Os.release(region0, regionBytes);
 		if (!region1.isNull()) Os.release(region1, regionBytes);
 		if (!nurseryBase.isNull()) Os.release(nurseryBase, nurseryBytes);

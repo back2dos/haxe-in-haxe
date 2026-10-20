@@ -50,6 +50,22 @@ class MirBuild {
 	static var noShadow = Sys.getEnv("HXMC_NOSHADOW") == "1";
 	static var frameSpills = Sys.getEnv("HXMC_FRAMESPILL") != "0"; // (measurement: 0 pushes on every slow path)
 
+	// explicit null tests (Lower.nullChecks): the block of a call of
+	// rt_null_access per try (its handler's slot; -1: none), which the tests
+	// of the code it covers share (WebAssembly: a try's body is wrapped as
+	// the dominator subtree of its first block, so a block shared across
+	// tries would be outside them), and the values known not to be null
+	var nullBlocks = new Map<Int, MBlock>();
+	var fresh = new Map<Int, Bool>();
+	// the local each value was last read from, and the locals tested since
+	// their last assignment on every path here (a reference does not become
+	// null when the collector moves it: a local reloaded from its slot is not
+	// tested again). A nested statement list starts with what was known before
+	// it and gives back nothing but the locals it assigns forgotten; a loop
+	// forgets them before its body too (scoped).
+	var localOfVal = new Map<Int, Int>();
+	var checkedLocals = new Map<Int, Bool>();
+
 	public var icaches = 0; // inline caches of this function (bss: <name>__ic, IC_SIZE each)
 	public var icSym:String;
 
@@ -352,9 +368,12 @@ class MirBuild {
 	// safe region, or such a C function, unless this function is in a
 	// safe region itself (another thread may collect meanwhile). The root
 	// slots then keep their values across the call (Opt: MIns.keepsFrame).
-	function keepsFrame(sym:String):Bool {
+	function keepsFrame(sym:String):Bool
+		return p != null && fn != null && !fn.blocksHere && keepsFrameOf(sym, p.e.bySymbol.get(sym));
+
+	// (g: the program's function of that symbol, or null)
+	function keepsFrameOf(sym:String, g:Null<FuncInfo>):Bool {
 		if (p == null || fn == null || fn.blocksHere) return false;
-		var g = p.e.bySymbol.get(sym);
 		if (g != null) return g.noGc && !g.blocks;
 		if (sym == "rt_blocking_enter" || sym == "rt_blocking_leave") return false;
 		return hxmc.ir.FnLower.noGcHost(sym) || QUIET.exists(sym) || StringTools.startsWith(sym, "hxmc$");
@@ -373,9 +392,15 @@ class MirBuild {
 	];
 
 	function call(sym:String, args:Vector<Int>, ret:MTy, noReturn = false):Int {
+		var g = p == null ? null : p.e.bySymbol.get(sym);
+		// (a function the runtime exports, called by its symbol: one hxmc.ir.RuntimeSymbols lists)
+		if (g != null && g.cSymbol == sym) {
+			var family = abi.wasm ? hxmc.ir.RuntimeSymbols.WASM32 : hxmc.ir.RuntimeSymbols.NATIVE;
+			if (g.rtFamilies & family == 0) hxmc.ir.RuntimeSymbols.called(sym, family);
+		}
 		var i = mk(Call, ret);
 		i.sym = sym;
-		i.keepsFrame = keepsFrame(sym);
+		i.keepsFrame = keepsFrameOf(sym, g);
 		i.args = args;
 		i.argTys = args.map(tyOfVal);
 		i.noReturn = noReturn;
@@ -627,17 +652,20 @@ class MirBuild {
 
 	function readLocal(l:Local):Int {
 		var s = refSlot.get(l);
-		if (s != null) return loadM(Opt.MFrame, I64, 8, fr, 8 * s);
-		var m = memSlot.get(l);
-		if (m != null) {
-			var t = mty(l.ty);
-			var a = stackAddr(m);
-			return load(t, t == I32 ? 4 : 8, a, 0);
+		var v = if (s != null) loadM(Opt.MFrame, I64, 8, fr, 8 * s) else {
+			var m = memSlot.get(l);
+			if (m != null) {
+				var t = mty(l.ty);
+				var a = stackAddr(m);
+				load(t, t == I32 ? 4 : 8, a, 0);
+			} else readVar(l.id, cur);
 		}
-		return readVar(l.id, cur);
+		if (hxmc.ir.Lower.nullChecks) localOfVal.set(v, l.id);
+		return v;
 	}
 
 	function writeLocal(l:Local, v:Int) {
+		if (hxmc.ir.Lower.nullChecks) checkedLocals.remove(l.id);
 		var s = refSlot.get(l);
 		if (s != null) {
 			storeM(Opt.MFrame, 8, fr, 8 * s, v);
@@ -959,7 +987,7 @@ class MirBuild {
 			case SExpr(e):
 				ex(e);
 			case SSetField(c, idx, obj, v):
-				var o = ex(obj);
+				var o = nullCheck(ex(obj));
 				var x = ex(v);
 				storeSlot(o, c.locs[idx], c.fields[idx].ty, x, isNullConst(v));
 			case SBoxSet(t, bx, v):
@@ -990,12 +1018,12 @@ class MirBuild {
 				br(cv, t, y.length > 0 ? e : join);
 				seal(t);
 				cur = t;
-				stmts(x);
+				scoped(x);
 				jmp(join);
 				if (y.length > 0) {
 					seal(e);
 					cur = e;
-					stmts(y);
+					scoped(y);
 					jmp(join);
 				}
 				seal(join);
@@ -1009,7 +1037,8 @@ class MirBuild {
 				jmp(head);
 				cur = head;
 				loops.push({cont: head, brk: exit, tries: tries.length});
-				stmts(body);
+				forgetAssigned(body);
+				scoped(body);
 				jmp(head);
 				loops.pop();
 				seal(head);
@@ -1046,12 +1075,12 @@ class MirBuild {
 				for (x in bodies) {
 					seal(x.b);
 					cur = x.b;
-					stmts(x.body);
+					scoped(x.body);
 					jmp(join);
 				}
 				seal(db);
 				cur = db;
-				stmts(def);
+				scoped(def);
 				jmp(join);
 				seal(join);
 				cur = join;
@@ -1107,7 +1136,7 @@ class MirBuild {
 		seal(hb);
 		cur = tb;
 		tries.push(slot);
-		stmts(body);
+		scoped(body);
 		tries.pop();
 		if (!terminated()) {
 			var h2 = stackAddr(slot);
@@ -1125,7 +1154,7 @@ class MirBuild {
 		var catchAll = false;
 		for (c in catches) {
 			if (c.test == null) {
-				stmts(c.body);
+				scoped(c.body);
 				jmp(join);
 				catchAll = true;
 				break;
@@ -1136,7 +1165,7 @@ class MirBuild {
 			seal(yes);
 			seal(no);
 			cur = yes;
-			stmts(c.body);
+			scoped(c.body);
 			jmp(join);
 			cur = no;
 		}
@@ -1250,6 +1279,94 @@ class MirBuild {
 	function tindex(o:Int):Int
 		return loadM(Opt.MConst, I32, 2, o, Abi.HDR_TINDEX);
 
+	// ---- null access (docs/hxmc.md, "Null access")
+
+	// The reference v is about to be dereferenced. The native targets fault
+	// on null (an object's fields are near its address) and the runtime's
+	// fault handler throws (hxmc.rt.Faults); with explicit tests
+	// (WebAssembly, where address 0 is memory and a trap cannot be caught,
+	// or -D hxmc.null-checks=1), null branches to the throw here. A test
+	// dominated by one of the same value is dropped (Opt.condProp). None in a
+	// @:hxmc.noGc function (FnLower.receiverCheck).
+	inline function nullCheck(v:Int):Int
+		return hxmc.ir.Lower.nullChecks && !fn.declNoGc ? nullTest(v) : v;
+
+	function nullTest(v:Int):Int {
+		if (nonNull(v)) return v;
+		var lid = localOfVal.get(v);
+		if (lid != null && checkedLocals.exists(lid)) return v;
+		var bad = nullBlock();
+		var ok = newBlock();
+		br(cmp(CEq, v, lconst(0, 0)), bad, ok);
+		seal(ok);
+		cur = ok;
+		if (lid != null) checkedLocals.set(lid, true);
+		return v;
+	}
+
+	// a nested statement list (null tests: checkedLocals)
+	function scoped(ss:Vector<Stmt>) {
+		if (!hxmc.ir.Lower.nullChecks) {
+			stmts(ss);
+			return;
+		}
+		var saved = checkedLocals;
+		checkedLocals = saved.copy();
+		stmts(ss);
+		checkedLocals = saved;
+		forgetAssigned(ss);
+	}
+
+	function forgetAssigned(ss:Vector<Stmt>) {
+		if (!checkedLocals.keys().hasNext()) return;
+		function st(s:Stmt) {
+			switch s {
+				case SSet(l, _): checkedLocals.remove(l.id);
+				case _:
+			}
+			hxmc.ir.Facts.iterStmt(st, _ -> {}, s);
+		}
+		for (s in ss)
+			st(s);
+	}
+
+	function nullBlock():MBlock {
+		var key = tries.length == 0 ? -1 : tries[tries.length - 1];
+		var b = nullBlocks.get(key);
+		if (b != null) return b;
+		b = newBlock();
+		b.cold = true;
+		nullBlocks.set(key, b);
+		var save = cur;
+		cur = b;
+		call("rt_null_access", vector(), Void, true);
+		add(mk(Unreachable, Void));
+		seal(b); // (it reads no variable: its predecessors may come later)
+		cur = save;
+		return b;
+	}
+
+	// a value never null: data at a symbol (literals, type objects, static
+	// closures), a frame address, an object made here, a constructor's
+	// object (new), a closure's own (its call tests it: ECallClos). A
+	// method's receiver may be null: a direct call does not read it (the
+	// native targets fault only where the method does, and these tests
+	// behave the same)
+	function nonNull(v:Int):Bool {
+		var i = f.vals[v];
+		return switch i.op {
+			case SymAddr | StackAddr: true;
+			case Param: i.imm == 0 && (fn.lambda != null || isCtor(fn));
+			case _: fresh.exists(v);
+		}
+	}
+
+	public static function isCtor(g:FuncInfo):Bool
+		return g.args.length > 0 && switch g.args[0].ty {
+			case TRef(RObj(c)): c.ctor == g;
+			case _: false;
+		};
+
 	// ---- allocation
 
 	static function hdrLo(nslots:Int, kind:Int):Int
@@ -1292,7 +1409,9 @@ class MirBuild {
 		jmp(join);
 		seal(join);
 		cur = join;
-		return readVar(res, cur);
+		var v = readVar(res, cur);
+		if (hxmc.ir.Lower.nullChecks) fresh.set(v, true);
+		return v;
 	}
 
 	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
@@ -1398,7 +1517,7 @@ class MirBuild {
 		var list = cold ? coldList : null;
 		var iv = ex(i);
 		var vv = ex(v);
-		var av = readLocal(a);
+		var av = nullCheck(readLocal(a));
 		var k = arrKind(elem);
 		var fast = newBlock(), slow = newBlock(), join = newBlock(), chk = newBlock();
 		slow.cold = true;
@@ -1438,7 +1557,7 @@ class MirBuild {
 	function arrPush(elem:Ty, a:Local, v:Ex, cold:Bool) {
 		var list = cold ? coldList : null;
 		var vv = ex(v);
-		var av = readLocal(a);
+		var av = nullCheck(readLocal(a));
 		var k = arrKind(elem);
 		var fast = newBlock(), slow = newBlock(), join = newBlock(), c1 = newBlock(), c2 = newBlock();
 		slow.cold = true;
@@ -1478,7 +1597,7 @@ class MirBuild {
 	}
 
 	function arrGet(elem:Ty, a:Ex, i:Ex, checked:Bool):Int {
-		var av = ex(a);
+		var av = nullCheck(ex(a));
 		var iv = ex(i);
 		var k = arrKind(elem);
 		var t = mty(elem);
@@ -1596,7 +1715,7 @@ class MirBuild {
 	}
 
 	function anonGet(name:String, t:Ty, obj:Ex, hint:Null<ShapeInfo>):Int {
-		var o = ex(obj);
+		var o = nullCheck(ex(obj));
 		var fid = fidConst(name);
 		var mt = mty(t);
 		var res = newVar(mt);
@@ -1637,7 +1756,7 @@ class MirBuild {
 	}
 
 	function anonSet(name:String, t:Ty, obj:Ex, v:Ex) {
-		var o = ex(obj);
+		var o = nullCheck(ex(obj));
 		var fid = fidConst(name);
 		var c = ic(o, fid);
 		var hit = newBlock(), miss = newBlock(), chk = newBlock(), join = newBlock();
@@ -1699,8 +1818,8 @@ class MirBuild {
 			case EConv(c, x): conv(c, ex(x));
 			case EBox(t, x): boxFrom(t, ex(x));
 			case EUnbox(t, x): unboxTo(t, ex(x));
-			case EField(c, idx, obj): slotLoad(ex(obj), c.locs[idx], c.fields[idx].ty);
-			case EFieldAddr(c, idx, obj): op2(Add, I64, ex(obj), lconst32(8 * c.locs[idx]));
+			case EField(c, idx, obj): slotLoad(nullCheck(ex(obj)), c.locs[idx], c.fields[idx].ty);
+			case EFieldAddr(c, idx, obj): op2(Add, I64, nullCheck(ex(obj)), lconst32(8 * c.locs[idx]));
 			case EAnonGet(name, t, obj, hint): anonGet(name, t, obj, hint);
 			case ECast(_, x): ex(x);
 			case EInstOf(c, x): instOf(ex(x), c);
@@ -1709,13 +1828,13 @@ class MirBuild {
 				if (base != null)
 					for (c in en.ctors)
 						if (c.tindex - c.tag != base) base = null;
-				var o = ex(x);
+				var o = nullCheck(ex(x));
 				if (base != null) op2(Sub, I32, tindex(o), tyConst(en.ctors[0].tindex, -en.ctors[0].tag)) else {
 					var ti = op1(ZExt, I64, tindex(o));
 					loadM(Opt.MConst, I32, 4, symAddr("rt_types"), Abi.TYPE_TAG, false, op2(Mul, I64, ti, lconst32(Abi.TYPE_SIZE)), 1);
 				}
-			case EEnumParam(c, idx, x): slotLoad(ex(x), at(idx, c.params[idx]), c.params[idx]);
-			case EArrLen(a): loadM(Opt.MHdr, I32, 4, ex(a), 0);
+			case EEnumParam(c, idx, x): slotLoad(nullCheck(ex(x)), at(idx, c.params[idx]), c.params[idx]);
+			case EArrLen(a): loadM(Opt.MHdr, I32, 4, nullCheck(ex(a)), 0);
 			case EArrGet(elem, a, i): arrGet(elem, a, i, true);
 			case EArrGetU(elem, a, i): arrGet(elem, a, i, false);
 			case EBoxGet(t, bx): slotLoad(ex(bx), 0, t);
@@ -1733,7 +1852,7 @@ class MirBuild {
 				id;
 			case ECallDispatch(sel, sig, args):
 				var xs = exs(args);
-				var o = xs[0];
+				var o = nullCheck(xs[0]);
 				var row = symAddr(p.selectorSym(sel));
 				var ti = op1(ZExt, I64, tindex(o));
 				var fp = load(I64, 8, row, -8 * Abi.T_FIRST, false, ti, 8);
@@ -1744,7 +1863,7 @@ class MirBuild {
 				xs[0] = c;
 				for (k in 0...args.length)
 					xs[k + 1] = ex(args[k]);
-				var fp = load(I64, 8, c, 0);
+				var fp = load(I64, 8, nullCheck(c), 0);
 				// (a struct result: the address of the caller's memory, last)
 				var sr = s.ret.match(TStruct(_));
 				var tys = new Vector<MTy>(s.args.length + (sr ? 2 : 1));
@@ -2113,6 +2232,7 @@ class MirBuild {
 				cur = join;
 				return readVar(res, cur);
 			}
+			nullCheck(xs[0]);
 			if (name == "hxmc_narray_length") return loadM(Opt.MConst, I32, 4, xs[0], 0);
 			if (name == "hxmc_narray_dget" || name == "hxmc_narray_dset") return narrayDyn(name, xs);
 			var suffix = name.substr(name.length - 1);
@@ -2139,8 +2259,9 @@ class MirBuild {
 		if (hxmc.ir.FnLower.isIntrinsic(name)) return intrinsic(name, args);
 		var xs = exs(args);
 		return switch name {
-			case "String_length": loadM(Opt.MConst, I32, 4, xs[0], 0);
+			case "String_length": loadM(Opt.MConst, I32, 4, nullCheck(xs[0]), 0);
 			case "String_charCodeAt_i":
+				nullCheck(xs[0]);
 				var r = newVar(I32);
 				writeVar(r, cur, iconst(0));
 				var ok = newBlock(), join = newBlock();
@@ -2191,7 +2312,7 @@ class MirBuild {
 				readVar(r, cur);
 			case "Math_isNaN": cmp(FNe, xs[0], xs[0]);
 			case "Math_isFinite": cmp(FEq, op2(FSub, F64, xs[0], xs[0]), fconst(0));
-			case "StringBuf_addChar": stringBufAddChar(xs[0], xs[1]);
+			case "StringBuf_addChar": stringBufAddChar(nullCheck(xs[0]), xs[1]);
 			case _:
 				var sig = hxmc.ir.CInterop.SIGS.get(name);
 				if (sig != null) return cCall(name, sig, xs, ret);
@@ -2858,7 +2979,7 @@ class MirBuild {
 	}
 
 	function callAnon(name:String, s:SigInfo, obj:Ex, args:Vector<Ex>):Int {
-		var o = ex(obj);
+		var o = nullCheck(ex(obj));
 		var xs = exs(args);
 		var fid = fidConst(name);
 		var rt = mty(s.ret);

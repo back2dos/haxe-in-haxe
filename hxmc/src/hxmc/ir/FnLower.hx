@@ -276,7 +276,7 @@ class FnLower {
 		if (self > 0) {
 			var s = newLocal("self", lambda.captures[0].ty);
 			out.push(SSet(s, ECapture(lambda, 0, ELocal(fi.args[0]))));
-			args[0] = ELocal(s);
+			args[0] = receiverCheck(ELocal(s), s.ty);
 		}
 		if (fi.ret == TVoid) {
 			out.push(SExpr(ECallHost(name, args, TVoid)));
@@ -662,6 +662,25 @@ class FnLower {
 				out.push(SSet(lo, x));
 				lo;
 		}
+	}
+
+	// -D hxmc.null-checks (Lower.nullChecks): the receiver x of a method the
+	// runtime implements (String's, Array's, an extern class's), whose code
+	// reads it without a test, tested against null before the call (the
+	// program's own methods test what they read: MirBuild.nullCheck); null
+	// throws "Null Access", as the native targets' fault handler does where
+	// the runtime reads it (hxmc.rt.Faults); none in a @:hxmc.noGc function,
+	// which promises no GC point (a throw is one: Facts.findNoGc) and reads
+	// memory unchecked, as the runtime's own code does
+	function receiverCheck(x:Ex, t:Ty):Ex {
+		if (!Lower.nullChecks || fi.declNoGc || !Ir.isRef(t)) return x;
+		switch x {
+			case EStr(_) | EType(_): return x;
+			case _:
+		}
+		var r = ELocal(asLocal(x, t));
+		out.push(SIf(EBin(RefEq, r, ENull(t)), vector(SThrow(EStr("Null Access"))), vector()));
+		return r;
 	}
 
 	static function strip(e:TExpr):TExpr
@@ -1441,7 +1460,7 @@ class FnLower {
 					case Var(_) if (CInterop.isStruct(c)): structGet(obj, c, cf, e);
 					case Var(_) if (c.hasClassFlag(CExtern)):
 						var t = ty(cf.cfType);
-						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), vector(value(obj)), t));
+						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), vector(receiverCheck(value(obj), tyOf(obj))), t));
 						coerce(x, t, tyOf(e));
 					case Var(_) if (c.hasClassFlag(CInterface)):
 						anonGet(cf.cfName, obj, e);
@@ -2134,6 +2153,7 @@ class FnLower {
 				for (k in 0...s.args.length)
 					to[k + 1] = ty(s.args[k].type);
 				var xs = args(VectorTools.cons(obj, cargs), to, null);
+				xs[0] = receiverCheck(xs[0], tyOf(obj));
 				var intrinsic = intrinsicMethod(name, xs, tyOf(obj));
 				if (intrinsic != null) return coerce(intrinsic, t, rt);
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);

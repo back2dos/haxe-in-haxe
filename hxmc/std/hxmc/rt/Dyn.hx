@@ -137,6 +137,11 @@ class Dyn {
 	// a closure over `o` calling method m (TK_BOUND: code, this, fn)
 	static function boundMethod(o:Dynamic, m:Ptr):Dynamic {
 		var sig = mSig(m), fn = mFn(m);
+		return bound(o, fn, sig);
+	}
+
+	// a closure over `o` calling fn, which takes o and arguments of signature sig
+	static inline function bound(o:Dynamic, fn:Ptr, sig:Int):Dynamic {
 		var c = Mem.alloc(3, Mem.getI32At(Mem.sym("rt_bound_types"), 0, sig), K_OBJ);
 		var p = Mem.addr(c);
 		Mem.setPtr(p, 0, Mem.getPtr(Mem.sym("rt_bound_tramps"), 8 * sig));
@@ -247,8 +252,11 @@ class Dyn {
 		return fid == fidLength - 1;
 	}
 
+	// (null throws "Null Access", as a typed access of null does: Faults; a
+	// field read of a null Dynamic gives null on Eval, the targets that test
+	// for null throw: docs/hxmc.md, "Null access")
 	@:hxmc.export("hx_anon_get_slow") static function anonGetSlow(o:Dynamic, fid:Int):Dynamic {
-		if (Str.isNull(o)) Rt.rt_throw("Null access");
+		if (Str.isNull(o)) Rt.rt_throw("Null Access");
 		var st = findStatic(o, fid);
 		if (!st.isNull()) return staticGet(st);
 		var t = tindex(o);
@@ -266,7 +274,7 @@ class Dyn {
 	}
 
 	@:hxmc.export("hx_anon_set_slow") static function anonSetSlow(o:Dynamic, fid:Int, v:Dynamic):Void {
-		if (Str.isNull(o)) Rt.rt_throw("Null access");
+		if (Str.isNull(o)) Rt.rt_throw("Null Access");
 		if (tindex(o) == T_ARRAY && isLength(fid)) {
 			// Array length assignment resizes the array.
 			var n:Int = v;
@@ -322,7 +330,7 @@ class Dyn {
 	// calls a closure with boxed arguments (args[0...n], missing ones null)
 	static function callBoxed(f:Dynamic, args:Array<Dynamic>, n:Int):Dynamic {
 		var s = closureSig(f);
-		if (s < 0) Rt.rt_throw("Cannot call a non-function");
+		if (s < 0) Rt.rt_throw(Str.isNull(f) ? "Cannot call null" : "Cannot call a non-function"); // (Eval's for null)
 		var want = sigArgs(s);
 		if (want > 16) want = 16;
 		// the arguments boxed (reading an Int or Float array boxes) into a
@@ -420,7 +428,7 @@ class Dyn {
 	// ---- Dynamic access
 
 	@:hxmc.export("hx_dyn_get") static function dynGet(o:Dynamic, name:String):Dynamic {
-		if (Str.isNull(o)) Rt.rt_throw("Null access");
+		if (Str.isNull(o)) Rt.rt_throw("Null Access");
 		var t = tindex(o);
 		if (Str.len(name) == 6 && name == "length") {
 			if (t == T_STRING) return (Str.len(o) : Dynamic);
@@ -529,9 +537,12 @@ class Dyn {
 
 	// a NativeArray's index out of bounds by Dynamic access: as -D
 	// hxmc.native-array-outofbounds says for typed access (FnLower.nativeRead;
-	// silent: the default of the storage's kind), an error when it is not defined
+	// silent: the default of the storage's kind), an error when it is not
+	// defined; null throws "Null Access", as Eval and a typed access do (another
+	// value that is not an array reads null)
 	@:hxmc.host("hx_dyn_aget") static function dynAget(a:Dynamic, i:Int):Dynamic {
-		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
+		if (Str.isNull(a)) Rt.rt_throw("Null Access");
+		if (tindex(a) == T_NATIVE_ARRAY) {
 			var n = Mem.getI32(Mem.addr(a), 0);
 			if (!Mem.ult(i, n)) {
 				#if (hxmc.native_array_outofbounds == "silent")
@@ -544,12 +555,13 @@ class Dyn {
 			}
 			return NArray.get(a, i);
 		}
-		if (Str.isNull(a) || tindex(a) != T_ARRAY) return null;
+		if (tindex(a) != T_ARRAY) return null;
 		return (a : Array<Dynamic>)[i];
 	}
 
 	@:hxmc.host("hx_dyn_aset") static function dynAset(a:Dynamic, i:Int, v:Dynamic):Void {
-		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
+		if (Str.isNull(a)) Rt.rt_throw("Null Access");
+		if (tindex(a) == T_NATIVE_ARRAY) {
 			var n = Mem.getI32(Mem.addr(a), 0);
 			if (!Mem.ult(i, n)) {
 				#if (hxmc.native_array_outofbounds == "silent")
@@ -563,7 +575,7 @@ class Dyn {
 			NArray.set(a, i, v);
 			return;
 		}
-		if (Str.isNull(a) || tindex(a) != T_ARRAY) Rt.rt_throw("Invalid array access");
+		if (tindex(a) != T_ARRAY) Rt.rt_throw("Invalid array access");
 		var arr:Array<Dynamic> = a;
 		arr[i] = v;
 	}
@@ -965,6 +977,29 @@ class Dyn {
 		var t = described(c);
 		var n = slotCount(ty(t));
 		return Mem.alloc(n > 0 ? n : 1, t, K_OBJ);
+	}
+
+	// Type.createInstance: a new instance, the constructor its class's entry
+	// names called with the arguments (Types.maker: those missing null,
+	// numbers and Bools with default values given them when null, as on
+	// Eval); a String's is the String it is given, an Array's an empty one,
+	// as on Eval
+	public static function createInstance(c:Dynamic, args:Array<Dynamic>):Dynamic {
+		if (Str.isNull(c)) Rt.rt_throw("Null Access");
+		if (tindex(c) != T_TYPEOBJ) Rt.rt_throw("Type.createInstance: not a class");
+		var t = described(c);
+		if (t == T_STRING) return Str.isNull(args) || args.length == 0 ? null : args[0];
+		if (t == T_ARRAY) return new Array<Dynamic>();
+		// (an extern class's value is T_NONE's: the runtime implements it, its constructor is not in the tables)
+		if (t == T_NONE) Rt.rt_throw("Type.createInstance: not a class of the program (an extern class, which the runtime implements)");
+		if (t < T_FIRST || tk(ty(t)) != TK_CLASS) Rt.rt_throw("Type.createInstance: " + typeName(c) + " is not a class");
+		var k = maker(ty(t));
+		// (Eval's message, a failure of the compiler there)
+		if (k == 1) Rt.rt_throw("Instance constructor not found: " + typeName(c));
+		if (k == 0) Rt.rt_throw("Type.createInstance: the constructor of " + typeName(c) + " was left out (no live code has the class's value)");
+		var o = createEmpty(c);
+		dynCall(bound(o, makerFn(ty(t)), k - 2), args);
+		return o;
 	}
 
 	public static function enumCtorNames(e:Dynamic):Array<String> {
