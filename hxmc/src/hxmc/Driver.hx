@@ -644,7 +644,7 @@ class Driver {
 // The order blocks are laid out in: reverse postorder, the cold blocks (slow
 // paths) at the end.
 class Layout {
-	public static function order(f:MFunc):Array<MBlock> {
+	public static function order(f:MFunc):haxe.ds.Vector<MBlock> {
 		var seen = f.newMark();
 		var post = [];
 		// iterative DFS: the first successor is visited first
@@ -669,9 +669,15 @@ class Layout {
 				idx.pop();
 			}
 		}
-		post.reverse();
-		var hot = [for (b in post) if (!b.cold) b];
-		var cold = [for (b in post) if (b.cold) b];
-		return hot.concat(cold);
+		// (reverse postorder: the hot blocks, then the cold ones)
+		var n = post.length;
+		var r = new haxe.ds.Vector<MBlock>(n);
+		var k = 0, i = n;
+		while (i-- > 0)
+			if (!post[i].cold) r[k++] = post[i];
+		i = n;
+		while (i-- > 0)
+			if (post[i].cold) r[k++] = post[i];
+		return r;
 	}
 }

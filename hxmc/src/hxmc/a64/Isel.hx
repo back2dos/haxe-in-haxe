@@ -61,25 +61,28 @@ enum abstract AOp(Int) to Int from Int {
 // Mir -> LIR for AArch64 (AAPCS64). x16/x17 are the emitter's scratch
 // registers and x18 is the platform register: none of them is allocated.
 class Isel implements hxmc.Target.Selector {
-	public var gprs(default, null):Array<Int>;
-	public var fprs(default, null):Array<Int>;
+	public var gprs(default, null):Vector<Int> = GPRS;
+	public var fprs(default, null):Vector<Int> = FPRS;
 
 	public static inline var ZR = 31;
 	static inline var D0 = 32;
 
-	public static var ARG_GPRS = [0, 1, 2, 3, 4, 5, 6, 7];
-	public static var CALLER_SAVED = [
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 32, 33, 34, 35, 36, 37, 38, 39, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62,
-		63
-	];
-	public static var CALLEE_SAVED = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 43, 44, 45, 46, 47];
+	public static final ARG_GPRS:Vector<Int> = vector(0, 1, 2, 3, 4, 5, 6, 7);
+	public static final CALLER_SAVED:Vector<Int> = vector(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 32, 33, 34, 35, 36, 37, 38, 39, 48, 49, 50,
+		51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63);
+	public static final CALLEE_SAVED:Vector<Int> = vector(19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 43, 44, 45, 46, 47);
+	// the allocatable registers in order of preference
+	static final GPRS:Vector<Int> = vector(9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28);
+	static final FPRS:Vector<Int> = vector(32, 33, 34, 35, 36, 37, 38, 39, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 40, 41, 42, 43,
+		44, 45, 46, 47);
+	static final CALL_RESULTS:Vector<Int> = vector(0, 1, 32, 33, 34, 35);
 
 	var apple:Bool;
 	var m:MFunc;
 	var f:LFunc;
 	var vreg:haxe.ds.Vector<Int>;
 	var useCount:haxe.ds.Vector<Int>;
-	var lb:Array<LBlock>;
+	var lb:Vector<LBlock>;
 	var cur:LBlock;
 	var folded:haxe.ds.Vector<Bool>;
 
@@ -92,8 +95,6 @@ class Isel implements hxmc.Target.Selector {
 	public function new(abi:Abi) {
 		this.abi = abi;
 		apple = abi.os == "macos";
-		gprs = [9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28];
-		fprs = [32, 33, 34, 35, 36, 37, 38, 39, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 40, 41, 42, 43, 44, 45, 46, 47];
 	}
 
 	// ---- RegTarget
@@ -153,7 +154,7 @@ class Isel implements hxmc.Target.Selector {
 				for (r in CALLER_SAVED)
 					defs.push(r);
 			case RET:
-				if (i.uses != null) for (x in i.uses)
+				for (x in i.uses)
 					uses.push(x);
 			case B | BCOND | BRK:
 		}
@@ -162,7 +163,7 @@ class Isel implements hxmc.Target.Selector {
 	public function isMove(i:LIns):Bool
 		return i.op == MOV;
 
-	public var callResults(default, null):Array<Int> = [0, 1, 32, 33, 34, 35];
+	public var callResults(default, null):Vector<Int> = CALL_RESULTS;
 
 	public function isCall(i:LIns):Bool
 		return i.op == CALL;
@@ -271,7 +272,7 @@ class Isel implements hxmc.Target.Selector {
 	static inline function addImm(v:Int):Bool
 		return v >= -4095 && v <= 4095;
 
-	public function select(mf:MFunc, layout:Array<MBlock>):LFunc {
+	public function select(mf:MFunc, layout:Vector<MBlock>):LFunc {
 		m = mf;
 		f = new LFunc(mf.name, 32);
 		for (s in mf.slots)
@@ -289,12 +290,10 @@ class Isel implements hxmc.Target.Selector {
 		for (b in mf.blocks)
 			for (i in b.ins)
 				if (i.op == Const || i.op == SymAddr || i.op == StackAddr) folded[i.id] = true;
-		lb = [];
 		var maxId = 0;
 		for (b in mf.blocks)
 			if (b.id >= maxId) maxId = b.id + 1;
-		for (_ in 0...maxId)
-			lb.push(null);
+		lb = new Vector<LBlock>(maxId);
 		for (b in layout) {
 			var l = new LBlock(f.blocks.length);
 			l.cold = b.cold;
@@ -355,9 +354,8 @@ class Isel implements hxmc.Target.Selector {
 			l.succs = [];
 			for (i in l.ins) {
 				if (i.target != null && l.succs.indexOf(i.target) < 0) l.succs.push(i.target);
-				if (i.table != null)
-					for (t in i.table)
-						if (l.succs.indexOf(t) < 0) l.succs.push(t);
+				for (t in i.table)
+					if (l.succs.indexOf(t) < 0) l.succs.push(t);
 			}
 		}
 		for (l in f.blocks)
@@ -374,7 +372,6 @@ class Isel implements hxmc.Target.Selector {
 		tlsBase = f.newReg(false);
 		var x = emit(CALL);
 		x.sym = "hxmc_tls_base";
-		x.uses = [];
 		mov(tlsBase, 0, 8);
 	}
 
@@ -872,12 +869,12 @@ class Isel implements hxmc.Target.Selector {
 					rs.push(r);
 				}
 				var x = new LIns(RET);
-				x.uses = [];
+				x.uses = new Vector(rs.length);
 				var gk = 0, fk = 0;
 				for (k in 0...rs.length) {
 					var d = m.cRet[k].float ? D0 + fk++ : gk++;
 					mov(d, rs[k], 8);
-					x.uses.push(d);
+					x.uses[k] = d;
 				}
 				flush();
 				push(x);
@@ -886,7 +883,7 @@ class Isel implements hxmc.Target.Selector {
 				if (i.a >= 0) {
 					var r = m.vals[i.a].ty == F64 ? D0 : 0;
 					mov(r, use(i.a), 8);
-					x.uses = [r];
+					x.uses = vector(r);
 				}
 				flush();
 				push(x);
@@ -951,7 +948,7 @@ class Isel implements hxmc.Target.Selector {
 				cr.size = 4;
 			}
 			bcond(Asm.HI, def);
-			var table = [for (_ in 0...span) def];
+			var table = new Vector<LBlock>(span, def);
 			for (k in 0...n)
 				table[i.cases[k] - lo] = targets[k];
 			var j = emit(JTABLE);
@@ -1189,7 +1186,7 @@ class Isel implements hxmc.Target.Selector {
 		var x = emit(CALL);
 		x.sym = i.sym;
 		x.s1 = target;
-		x.uses = uses;
+		x.uses = Vector.fromArrayCopy(uses);
 		if (i.ty != Void) mov(reg(i.id), i.ty == F64 ? D0 : 0, 8);
 		if (i.structRet && i.cRet.length > 0) {
 			// a struct in x0-x1 or d0-d3 (s0-s3): out of them first, then into its memory

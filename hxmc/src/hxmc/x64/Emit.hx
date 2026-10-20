@@ -5,6 +5,8 @@ import hxmc.Mir.SrcPos;
 import hxmc.Obj;
 import hxmc.x64.Asm;
 import hxmc.x64.Isel.XOp;
+import haxe.ds.Vector;
+import core.ds.VectorTools.vector;
 
 // Allocated LIR -> x86-64 machine code in a text section: frame layout,
 // prologue and epilogues, jump tables, the constant pool. With frame pointers
@@ -62,7 +64,7 @@ class Emit implements hxmc.Target.Emitter {
 		return constant(bits.getInt32(0), bits.getInt32(4), 0, 0);
 	}
 
-	var slotOff:Array<Int>;
+	var slotOff:Vector<Int>;
 	var frameSize = 0;
 
 	// HXMC_SIZE_STATS=1: bytes of code by instruction kind, hot and cold
@@ -76,9 +78,21 @@ class Emit implements hxmc.Target.Emitter {
 		statBytes.set(k, (statBytes.exists(k) ? statBytes.get(k) : 0) + n);
 		statLock.release();
 	}
-	var saved:Array<Int>;
-	var savedX:Array<Int>; // Win64: xmm6-15 used, saved in the frame (all 128 bits)
-	var savedXOff:Array<Int>;
+	var saved:Vector<Int>;
+	var savedX:Vector<Int>; // Win64: xmm6-15 used, saved in the frame (all 128 bits)
+	var savedXOff:Vector<Int>;
+
+	// the registers of regs in lo...hi the function uses
+	static function usedOf(regs:Vector<Int>, usedRegs:Vector<Bool>, lo:Int, hi:Int):Vector<Int> {
+		var n = 0;
+		for (r in regs)
+			if (r >= lo && r < hi && usedRegs[r]) n++;
+		var a = new Vector<Int>(n);
+		n = 0;
+		for (r in regs)
+			if (r >= lo && r < hi && usedRegs[r]) a[n++] = r;
+		return a;
+	}
 
 	// (measurement: how much run time depends on code layout alone, the
 	// noise of A/B comparisons: HXMC_FALIGN aligns functions, HXMC_FSHIFT
@@ -92,7 +106,7 @@ class Emit implements hxmc.Target.Emitter {
 		a.b = text.buf;
 	}
 
-	public function func(f:LFunc, usedRegs:Array<Bool>, global:Bool):Symbol {
+	public function func(f:LFunc, usedRegs:Vector<Bool>, global:Bool):Symbol {
 		text.buf.align(FALIGN, 0xcc);
 		for (_ in 0...FSHIFT)
 			text.buf.u8(0xcc);
@@ -100,19 +114,20 @@ class Emit implements hxmc.Target.Emitter {
 		a.reset();
 		// frame: outgoing arguments, then the slots
 		var off = f.outArgs;
-		slotOff = [];
-		for (s in f.slots) {
+		slotOff = new Vector(f.slots.length);
+		for (k in 0...f.slots.length) {
+			var s = f.slots[k];
 			var al = s.align < 8 ? 8 : s.align;
 			off = (off + al - 1) & ~(al - 1);
-			slotOff.push(off);
+			slotOff[k] = off;
 			off += s.size;
 		}
-		saved = [for (r in (win ? Isel.WIN_CALLEE_SAVED : Isel.CALLEE_SAVED)) if (r < 16 && usedRegs[r]) r];
-		savedX = [for (r in (win ? Isel.WIN_CALLEE_SAVED : [])) if (r >= 16 && usedRegs[r]) r];
-		savedXOff = [];
-		for (_ in savedX) {
+		saved = usedOf(win ? Isel.WIN_CALLEE_SAVED : Isel.CALLEE_SAVED, usedRegs, 0, 16);
+		savedX = win ? usedOf(Isel.WIN_CALLEE_SAVED, usedRegs, 16, LFunc.NPHYS) : vector();
+		savedXOff = new Vector(savedX.length);
+		for (k in 0...savedX.length) {
 			off = (off + 15) & ~15;
-			savedXOff.push(off);
+			savedXOff[k] = off;
 			off += 16;
 		}
 		var x = off;
@@ -161,7 +176,7 @@ class Emit implements hxmc.Target.Emitter {
 			i -> (i.op : XOp) == MOV && i.d == i.s1 && (isX(i.d) || !i.flag && !(i.size == 4 && i.imm2 == 1)));
 		for (b in f.blocks)
 			b.label = a.newLabel();
-		var tables:Array<{label:Int, entries:Array<LBlock>}> = [];
+		var tables:Array<{label:Int, entries:haxe.ds.Vector<LBlock>}> = [];
 		for (bi in 0...f.blocks.length) {
 			var b = f.blocks[bi];
 			a.bind(b.label);
@@ -387,7 +402,7 @@ class Emit implements hxmc.Target.Emitter {
 		epilogueBytes += text.buf.len - at;
 	}
 
-	function ins(i:LIns, next:Null<LBlock>, tables:Array<{label:Int, entries:Array<LBlock>}>) {
+	function ins(i:LIns, next:Null<LBlock>, tables:Array<{label:Int, entries:haxe.ds.Vector<LBlock>}>) {
 		if (lines != null && i.pos != 0 && i.pos != lastPos) {
 			lastPos = i.pos;
 			lines.push(text.buf.len);
