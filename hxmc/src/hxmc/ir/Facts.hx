@@ -716,6 +716,8 @@ class GcPoints {
 		return switch e {
 			case ECall(f, _) if (f.noGc): 0;
 			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | EBox(_) | EAnonGet(_) | EArrGet(TRef(RAny), _, _) | EArrGetU(TRef(RAny), _, _): 1;
+			// (a NativeArray literal: its elements stored after the allocation, MirBuild)
+			case ECallHost("hxmc_narray_lit", _, _): 2;
 			case ECallHost(n, _, _): FnLower.noGcHost(n) ? 0 : 1;
 			case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): 2;
 			case _: 0;

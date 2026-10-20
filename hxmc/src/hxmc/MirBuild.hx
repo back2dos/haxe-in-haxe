@@ -2058,6 +2058,23 @@ class MirBuild {
 	}
 
 	function host(name:String, args:Vector<Ex>, ret:Ty):Int {
+		if (name == "hxmc_narray_lit") {
+			// (FnLower: NativeArray.literal) the storage of the elements args[1...] of
+			// kind args[0], as newArr makes an Array literal's: none, the empty array
+			// of the kind; else one call of the runtime, then each element stored
+			var k = intLiteral(args[0], "NativeArray kind");
+			var n = args.length - 1;
+			if (n == 0) return symAddr(EMPTY_ARRAY + k, 8);
+			if (n > (k == Abi.AK_BOOL ? 0x7FFFFFE8 : k == Abi.AK_I32 ? 0x1FFFFFFA : 0x0FFFFFFD)) throw "hxmc: NativeArray literal of " + n + " elements";
+			var o = call("hx_narray_new_n", vector(iconst(k), iconst(n)), I64);
+			var size = k == Abi.AK_BOOL ? 1 : k == Abi.AK_I32 ? 4 : 8;
+			for (i in 0...n) {
+				var v = ex(args[i + 1]);
+				if (k == Abi.AK_PTR) setPtr(o, op2(Add, I64, o, lconst32(8 + 8 * i)), v, Opt.MElem);
+				else storeM(Opt.MElem, size, o, 8 + size * i, v);
+			}
+			return o;
+		}
 		if (StringTools.startsWith(name, "hxmc_narray_")) {
 			var xs = exs(args);
 			if (name == "hxmc_narray_new") {

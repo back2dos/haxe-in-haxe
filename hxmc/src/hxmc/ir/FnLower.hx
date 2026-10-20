@@ -2021,6 +2021,34 @@ class FnLower {
 				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elem, rt);
 				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elem), elem)));
 				return EInt(0);
+			// NativeArray.literal([a, b, c]) (VectorTools' `vector(a, b, c)`): one
+			// allocation and the elements stored in order, as an Array literal is
+			// (MirBuild, hxmc_narray_lit); the storage of an erased type parameter
+			// and WasmGC's as `new NativeArray(n)` and its stores
+			case TField(_, FStatic(c, cf)) if (Lower.isNativeArray(c) && cf.cfName == "literal"):
+				var el = switch strip(cargs[0]).eexpr {
+					case TArrayDecl(el): el;
+					case _: return fail("NativeArray.literal of something else than an array literal", e);
+				};
+				var elem = switch rt {
+					case TRef(RNativeArr(t)): t;
+					case _: return fail("NativeArray.literal of another type", e);
+				};
+				var erased = switch TFunctions.follow(e.etype) {
+					case TInst(_, [p]): switch TFunctions.follow(p) {
+							case TInst(pc, _): pc.clKind.match(KTypeParameter(_));
+							case _: false;
+						}
+					case _: false;
+				};
+				var xs = operands(el);
+				if (!erased && !Lower.wasmGc)
+					return ECallHost("hxmc_narray_lit", VectorTools.cons(EInt(nativeKind(elem)), xs.mapi((i, x) -> coerce(x, tyOf(el[i]), elem))), rt);
+				var a = ELocal(asLocal(erased ? ECallHost(l.native("hx_narray_open"), vector(EInt(el.length)), rt) : ECallHost("hxmc_narray_new",
+					vector(EInt(nativeKind(elem)), EInt(el.length)), rt), rt));
+				for (i in 0...el.length)
+					nativeWrite(elem, a, EInt(i), ELocal(asLocal(coerce(xs[i], tyOf(el[i]), elem), elem)));
+				return a;
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);
 			case TIdent("__resources__") if (cargs.length == 0):
