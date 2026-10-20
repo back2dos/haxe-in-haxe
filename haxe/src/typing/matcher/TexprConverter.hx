@@ -180,6 +180,11 @@ class TexprConverter {
 				case _: {kind: SKValue, finiteness: Infinite};
 			};
 		var classified = loop(false, t);
+		// Array patterns on values which can be accessed by index (#8012).
+		if (cases.length > 0 && cases[0].scCon.kind.match(ConArray(_)) && ExprToPattern.getArrayAccess(ctx, t, e.epos) != null) {
+			all = [];
+			classified = {kind: SKLength, finiteness: Infinite};
+		}
 		// port: unguarded enum constructors are removed in one pass at the end (by field identity) rather than one filter per case.
 		var removedEnum:Null<haxe.ds.ObjectMap<core.TType.TEnumField, Bool>> = null;
 		for (sc in cases) {
@@ -301,7 +306,9 @@ class TexprConverter {
 					subject = switch ctors.kind {
 						case SKValue: subject;
 						case SKEnum: mk(TEnumIndex(subject), com.basic.tint, subject.epos);
-						case SKLength: ExprToPattern.typeFieldAccess(ctx, subject, "length");
+						case SKLength:
+							var aa = ExprToPattern.getArrayAccess(ctx, subject.etype, subject.epos);
+							aa != null ? aa.aaLength(subject, subject.epos) : ExprToPattern.typeFieldAccess(ctx, subject, "length");
 					};
 					if (ecases.length == 1 && edef == null && ctors.finiteness == RunTimeFinite && !nullable)
 						core.ds.Record.withFields(ecases[0].caseExpr,
