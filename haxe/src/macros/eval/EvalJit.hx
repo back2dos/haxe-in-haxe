@@ -309,7 +309,7 @@ class EvalJit {
 					];
 					return EvalEmitter.emitObjectDeclaration(proto, fa);
 				case TArrayDecl(el):
-					var execs = [for (e in el) jitExprRec(jit, false, e)];
+					var execs = el.map(e -> jitExprRec(jit, false, e));
 					return EvalEmitter.emitArrayDeclaration(execs);
 				case TTypeExpr(mt):
 					var key = EvalHash.pathHash(tPath(mt));
@@ -339,7 +339,7 @@ class EvalJit {
 						mappingI.push(c.i);
 						mappingSlot.push(outer.slot);
 					}
-					return EvalEmitter.emitClosure(ctx, mappingI, mappingSlot, eci, hasret, exec, fl);
+					return EvalEmitter.emitClosure(ctx, Vector.fromArrayCopy(mappingI), Vector.fromArrayCopy(mappingSlot), eci, hasret, exec, fl);
 				// branching
 				case TIf(e1, e2, eo):
 					var execCond = jitExprRec(jit, false, e1);
@@ -380,12 +380,11 @@ class EvalJit {
 					var l:Float = (max : Float) - (min : Float) + 1;
 					if (l > 0 && l < 256) {
 						var li = Std.int(l);
-						var cases = [
-							for (i in 0...li) {
-								var f = h.findOpt(i + min);
-								f == null ? execDef : f;
-							}
-						];
+						var cases = new Vector<Emitter>(li);
+						for (i in 0...li) {
+							var f = h.findOpt(i + min);
+							cases[i] = f == null ? execDef : f;
+						}
 						return EvalEmitter.emitIntSwitchArray(-min, exec, cases, execDef, sw.switchSubject.epos);
 					} else
 						return EvalEmitter.emitIntSwitchMap(exec, h, execDef, sw.switchSubject.epos);
@@ -405,16 +404,17 @@ class EvalJit {
 					emit_string_switch_map exec !h exec_def e1.epos */
 				case TSwitch(sw):
 					var exec = jitExprRec(jit, false, sw.switchSubject);
-					var execs = [];
-					var patterns = [
-						for (c in sw.switchCases) {
-							EvalJitContext.pushScope(jit, c.caseExpr.epos);
-							var el = [for (e in c.casePatterns) jitExprRec(jit, false, e)];
-							execs.push(jitExprRec(jit, ret, c.caseExpr));
-							EvalJitContext.popScope(jit);
-							el;
-						}
-					];
+					var n = sw.switchCases.length;
+					var execs = new Vector<Emitter>(n);
+					var patterns = new Vector<Array<Emitter>>(n);
+					for (i in 0...n) {
+						var c = sw.switchCases[i];
+						EvalJitContext.pushScope(jit, c.caseExpr.epos);
+						var el = [for (e in c.casePatterns) jitExprRec(jit, false, e)];
+						execs[i] = jitExprRec(jit, ret, c.caseExpr);
+						EvalJitContext.popScope(jit);
+						patterns[i] = el;
+					}
 					var execDef = jitDefault(jit, ret, sw.switchDefault);
 					return EvalEmitter.emitSwitch(exec, execs, patterns, execDef);
 				case TWhile({eexpr: TParenthesis(e1)}, e2, flag):
@@ -751,7 +751,7 @@ class EvalJit {
 					case FEnum({ePath: path}, ef):
 						var key = EvalHash.pathHash(path);
 						var pos:Null<Pos> = e.epos;
-						return EvalEmitter.emitEnumConstruction(key, ef.efIndex, execs, pos);
+						return EvalEmitter.emitEnumConstruction(key, ef.efIndex, Vector.fromArrayCopy(execs), pos);
 					case FStatic({clPath: path}, cf) if (isProperMethod(cf)):
 						var proto = EvalContext.getStaticPrototype(ctx, EvalHash.pathHash(path), ef.epos);
 						var v = lazyProtoField(proto);

@@ -1254,7 +1254,7 @@ class MacroContext {
 			];
 		};
 		var args = el2.length == 0 ? args : args.slice(0, args.length == 0 ? 0 : args.length - 1)
-			.concat([macros.eval.EvalEncode.encodeArray(el2.mapToArray(MacroApiImpl.encodeExpr))]);
+			.concat([macros.eval.EvalEncode.encodeArrayV(el2.map(MacroApiImpl.encodeExpr))]);
 		function call():MacroResult {
 			var v = callMacro(args);
 			if (v == null)

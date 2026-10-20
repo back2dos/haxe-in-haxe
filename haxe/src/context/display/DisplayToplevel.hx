@@ -625,7 +625,7 @@ class DisplayToplevel {
 	public static function collectAndRaise<R>(ctx:Typer, tk:ToplevelKind, withType:WithTypeValue, cr:CompletionResultKindValue,
 			name:String, pname:Pos, pinsert:Pos):R {
 		var p_ = DisplayException.lastCompletionPos;
-		var fields = if (p_ != null && pname.pmin == p_.pmin) DisplayException.lastCompletionResult.copy() else collect(ctx, tk, withType,
+		var fields = if (p_ != null && pname.pmin == p_.pmin) DisplayException.lastCompletionResult.toArray() else collect(ctx, tk, withType,
 			name == "");
 		return DisplayException.raiseFields(fields, cr, DisplayTypes.makeSubject(name, pinsert, pname));
 	}

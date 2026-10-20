@@ -368,7 +368,8 @@ class CoroToTexpr {
 					{var recordCopy38 = core.ds.Record.copy((exprs.etmpResult).force()); recordCopy38.epos = e.epos; recordCopy38;}),
 				com.basic.tvoid);
 		}
-		var excStateMap:Array<Array<Int>> = [for (_ in 0...ctx.nextBlockId) []];
+		var excStateMap = new Vector<Array<Int>>(ctx.nextBlockId);
+		for (i in 0...excStateMap.length) excStateMap[i] = [];
 		inline function generate(cb:CoroBlock):Int {
 			var el = getBlockExprs(cb);
 			inline function addState(next:Null<Int>, extra:Array<TExpr>, tail:Null<Array<TExpr>>):Int {

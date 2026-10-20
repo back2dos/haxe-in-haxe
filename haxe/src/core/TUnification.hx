@@ -1581,9 +1581,9 @@ enum UnificationMatrixState {
 }
 
 class UnificationMatrix {
-	var values:Array<UnificationMatrixState>;
+	var values:haxe.ds.Vector<UnificationMatrixState>;
 
-	public function new(arity:Int) values = [for (_ in 0...arity) STop];
+	public function new(arity:Int) values = new haxe.ds.Vector(arity, STop);
 
 	public function join(t:T, at:Int):Void switch values[at] {
 		case STop:

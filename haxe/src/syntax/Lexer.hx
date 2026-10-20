@@ -68,12 +68,12 @@ class LexerError {
 	public var lline:Int;
 	public var lmaxline:Int;
 	public var llines:Array<{offset:Int, line:Int}>;
-	public var lalines:Array<{offset:Int, line:Int}>;
+	public var lalines:haxe.ds.Vector<{offset:Int, line:Int}>;
 	public var llast:Int;
 	public var llastindex:Int;
 
 	public inline function new(lfile:String, lline:Int, lmaxline:Int, llines:Array<{offset:Int, line:Int}>,
-			lalines:Array<{offset:Int, line:Int}>, llast:Int, llastindex:Int) {
+			lalines:haxe.ds.Vector<{offset:Int, line:Int}>, llast:Int, llastindex:Int) {
 		this.lfile = lfile;
 		this.lline = lline;
 		this.lmaxline = lmaxline;
@@ -111,7 +111,7 @@ class Lexer {
 		lline: 1,
 		lmaxline: 1,
 		llines: [{offset: 0, line: 1}],
-		lalines: [{offset: 0, line: 1}],
+		lalines: haxe.ds.Vector.fromArrayCopy([{offset: 0, line: 1}]),
 		llast: 0x7FFFFFFF,
 		llastindex: 0
 	};
@@ -199,7 +199,7 @@ class Lexer {
 		// rebuild cache if we have a new line
 		if (f.lmaxline != f.lline) {
 			f.lmaxline = f.lline;
-			f.lalines = f.llines.copy();
+			f.lalines = haxe.ds.Vector.fromArrayCopy(f.llines);
 			f.llast = 0x7FFFFFFF;
 			f.llastindex = 0;
 		}

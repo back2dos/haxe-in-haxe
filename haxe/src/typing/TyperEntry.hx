@@ -254,7 +254,12 @@ class TyperEntry {
 			coreApi: null,
 			macros: macros,
 			moduleCheckPolicies: [],
-			delayed: [for (_ in 0...TyperPassTools.allTyperPassesLength) {tasks: [], tasksLate: []}],
+			delayed: {
+				var a = new haxe.ds.Vector<TyperPassTasks>(TyperPassTools.allTyperPassesLength);
+				for (i in 0...a.length)
+					a[i] = new TyperPassTasks([], []);
+				a;
+			},
 			delayedMinIndex: 0,
 			debugDelayed: [],
 			retainMeta: Common.defined(com, Define.RetainUntypedMeta),

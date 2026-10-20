@@ -106,7 +106,7 @@ class EvalMain {
 		var stringPrototype = EvalEncode.fakeProto(fakeProtoCache, EvalHash.key_String);
 		var arrayPrototype = EvalEncode.fakeProto(fakeProtoCache, EvalHash.key_Array);
 		var vectorPrototype = EvalEncode.fakeProto(fakeProtoCache, EvalHash.key_eval_Vector);
-		var toplevel = EvalValueTools.vobject(new Vobject([], OProto(EvalEncode.fakeProto(fakeProtoCache, EvalHash.key_eval_toplevel))));
+		var toplevel = EvalValueTools.vobject(new Vobject(new haxe.ds.Vector(0), OProto(EvalEncode.fakeProto(fakeProtoCache, EvalHash.key_eval_toplevel))));
 		var maxStackDepth = intOfString(context.Common.definedValueSafe(com, core.Define.EvalCallStackDepth, "1000"));
 		var maxPrintDepth = intOfString(context.Common.definedValueSafe(com, core.Define.EvalPrintDepth, "5"));
 		var printIndentation = switch context.Common.definedValueSafe(com, core.Define.EvalPrettyPrint) {
@@ -573,7 +573,7 @@ class EvalMain {
 				switch e.eargs {
 					case []: epath;
 					case _:
-						var args = e.eargs.mapToVector(v -> valueToExpr(v, p));
+						var args = e.eargs.map(v -> valueToExpr(v, p));
 						{expr: ECall(epath, args), pos: p};
 				}
 			case VInstance({ikind: IIntMap(m)}):
@@ -697,7 +697,7 @@ class EvalMain {
 							var ef = en.eConstrs.get(en.eNames[ev.eindex]);
 							if (ef == null) throw NotFound.raise();
 							f(ef.efName);
-							function loop2(first:Bool, tl:Array<{name:String, optional:Bool, type:T}>, vl:Array<Value>, i:Int) {
+							function loop2(first:Bool, tl:Array<{name:String, optional:Bool, type:T}>, vl:haxe.ds.Vector<Value>, i:Int) {
 								if (i >= vl.length || i >= tl.length) return;
 								if (!first) f(", ");
 								loop(tabs, tl[i].type, vl[i]);

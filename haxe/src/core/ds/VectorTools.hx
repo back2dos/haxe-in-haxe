@@ -105,6 +105,13 @@ class VectorTools {
 	public static inline function last<T>(v:Vector<T>):T
 		return v[v.length - 1];
 
+	// port: Array.init
+	public static inline function init<T>(n:Int, f:Int->T):Vector<T> {
+		var r = new Vector<T>(n);
+		for (i in 0...n) r[i] = f(i);
+		return r;
+	}
+
 	// port: Array.of_list (of the elements from `pos` on)
 	public static inline function ofArray<T>(a:Array<T>, pos = 0):Vector<T> {
 		var r = new Vector<T>(a.length - pos);

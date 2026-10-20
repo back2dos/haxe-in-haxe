@@ -2315,7 +2315,7 @@ class CheckingHxbWriter extends compiler.hxb.HxbWriter {
 	// the modifiers back on the monomorphs a reader made (after it read the module)
 	public static function restore(com:CommonContext, reader:compiler.hxb.HxbReader, b:Bytes) {
 		var i = new BytesInput(b);
-		var monos:Array<T> = @:privateAccess reader.tmonos;
+		var monos:haxe.ds.Vector<T> = @:privateAccess reader.tmonos;
 		for (_ in 0...i.readInt32()) {
 			var index = i.readInt32();
 			var mods = [

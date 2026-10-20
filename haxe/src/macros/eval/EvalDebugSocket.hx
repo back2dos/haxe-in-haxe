@@ -17,6 +17,7 @@ import macros.eval.EvalHash;
 import macros.eval.EvalDebugMisc;
 
 using macros.eval.EvalValue.EvalValueTools;
+using core.ds.VectorTools;
 
 // port: deviations:
 // - Event channels are `EvalContext.EventChannel`; the socket thread holds the
@@ -152,7 +153,7 @@ class EvalDebugSocket {
 					var valueS = switch ve.eargs {
 						case []: name;
 						case vl:
-							var l = vl.map(level2ValueRepr);
+							var l = vl.mapToArray(level2ValueRepr);
 							var s = '$name(${l.join(", ")})';
 							s;
 					}
@@ -170,7 +171,7 @@ class EvalDebugSocket {
 				case VArray(va):
 					return jv("Array", arrayElems(EvalArray.toList(va)), va.alength);
 				case VVector(vv):
-					return jv("Vector", arrayElems(vv.copy()), vv.length);
+					return jv("Vector", arrayElems(vv.toArray()), vv.length);
 				case VInstance(vi):
 					function className() return threadSafeValueString(env, v);
 					var r = switch vi.ikind {
@@ -382,7 +383,7 @@ class EvalDebugSocket {
 					var l = EvalArray.toList(va);
 					return [for (i => v in l) {n: '[$i]', v: v}];
 				case VVector(vv):
-					var l = vv.copy();
+					var l = vv.toArray();
 					return [for (i => v in l) {n: '[$i]', v: v}];
 				case VInstance({ikind: IStringMap(h)}):
 					return h.fold(function(s, e, acc:Array<{n:String, v:Value}>) {

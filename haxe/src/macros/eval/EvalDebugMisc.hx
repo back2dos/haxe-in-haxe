@@ -261,12 +261,12 @@ class EvalDebugMisc {
 		return i;
 	}
 
-	static function arrayGet(a:Array<Value>, i:Int):Value {
+	static function arrayGet(a:haxe.ds.Vector<Value>, i:Int):Value {
 		if (i < 0 || i >= a.length) throw new core.ds.InvalidArgument("index out of bounds");
 		return a[i];
 	}
 
-	static function arraySet(a:Array<Value>, i:Int, v:Value):Void {
+	static function arraySet(a:haxe.ds.Vector<Value>, i:Int, v:Value):Void {
 		if (i < 0 || i >= a.length) throw new core.ds.InvalidArgument("index out of bounds");
 		a[i] = v;
 	}

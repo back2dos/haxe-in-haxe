@@ -43,6 +43,7 @@ import core.ds.AtomicLazy;
 import context.Lookup;
 import context.PlatformConfig;
 import compiler.io.CompilerIo;
+import core.ds.VectorTools.vector;
 
 enum PackageRule {
 	Forbidden;
@@ -248,7 +249,7 @@ interface AbstractHxbLib {
 	public function getBytes(target:String, path:GlobalTypePath):Null<haxe.io.Bytes>;
 	public function close():Void;
 	public function getFilePath():String;
-	public function getStringPool(target:String):Null<Array<String>>;
+	public function getStringPool(target:String):Null<haxe.ds.Vector<String>>;
 }
 
 @:structInit class ParserState {
@@ -469,7 +470,7 @@ typedef CommonContext = {
 	var jsGen:Null<Void->Void>;
 	// misc
 	var basic:BasicTypes;
-	var memoryMarker:Array<Float>;
+	var memoryMarker:haxe.ds.Vector<Float>;
 	var hxbReaderApi:Null<compiler.hxb.HxbReaderApi>;
 	var hxbReaderStats:HxbReaderStatsData;
 	var hxbWriterConfig:Null<compiler.hxb.HxbWriterConfig>;
@@ -781,7 +782,7 @@ class Common {
 		} catch (_:Dynamic) return 0;
 	}
 
-	public static final memoryMarker = [Sys.time()];
+	public static final memoryMarker:haxe.ds.Vector<Float> = vector(Sys.time());
 
 	static function newBasicTypes():BasicTypes return {
 		tvoid: mkMono(),

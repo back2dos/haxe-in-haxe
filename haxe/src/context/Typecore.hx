@@ -185,7 +185,7 @@ enum FunctionMode {
 }
 
 @:structInit class TyperGlobals {
-	public var delayed:Array<TyperPassTasks>;
+	public var delayed:haxe.ds.Vector<TyperPassTasks>;
 	public var delayedMinIndex:Int;
 	public var debugDelayed:Array<Dynamic>;
 	public var retainMeta:Bool;
@@ -359,10 +359,10 @@ class MonomorphList {
 	public var allowInline:Bool;
 	public var allowTransform:Bool;
 	// events
-	public var memoryMarker:Array<Float>;
+	public var memoryMarker:Vector<Float>;
 
 	public inline function new(com:context.Common.CommonContext, t:BasicTypes, g:TyperGlobals, m:TyperModule, c:TyperClass, f:TyperField,
-			e:TyperExpr, pass:TyperPass, typeParams:TypeParams, allowInline:Bool, allowTransform:Bool, memoryMarker:Array<Float>) {
+			e:TyperExpr, pass:TyperPass, typeParams:TypeParams, allowInline:Bool, allowTransform:Bool, memoryMarker:Vector<Float>) {
 		this.com = com;
 		this.t = t;
 		this.g = g;
@@ -591,7 +591,7 @@ class TyperManager {
 }
 
 class Typecore {
-	public static final memoryMarker:Array<Float> = [Sys.time()];
+	public static final memoryMarker:Vector<Float> = vector(Sys.time());
 	public static var makeCallRef:(ctx:Typer, e:TExpr, el:Vector<TExpr>, t:T, p:Pos,
 		?forceInline:Bool) -> TExpr = function(ctx, e, el, t, p, ?forceInline) throw "makeCallRef is not initialized";
 	public static var typeExprRef:(ctx:Typer, e:core.Ast.Expr, withType:core.WithType.WithTypeValue,

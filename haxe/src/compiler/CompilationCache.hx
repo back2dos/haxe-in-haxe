@@ -14,6 +14,7 @@ import core.ds.PriorityQueue;
 import compiler.hxb.HxbData;
 import compiler.hxb.HxbWriter;
 import syntax.Parser.ParserDisplayInformation;
+import core.ds.VectorTools.vector;
 
 // port: Digest.t signatures are hexadecimal strings (see Define.getSignature).
 @:structInit class CachedFile {
@@ -269,7 +270,7 @@ class ContextCache {
 	public function setJson(j:JsonValue):Void json = j;
 
 	/* Pointers for memory inspection. */
-	public function getPointers():Array<Dynamic> return [files, modules, binaryCache];
+	public function getPointers():haxe.ds.Vector<Dynamic> return vector(files, modules, binaryCache);
 
 	/* access tracking */
 	public function updateAccessTime():Void lastAccessTime = Sys.time();
@@ -606,5 +607,5 @@ class Cache {
 	}
 
 	/* Pointers for memory inspection. */
-	public function getPointers():Array<Dynamic> return [contexts, haxelib, directories, nativeLibs];
+	public function getPointers():haxe.ds.Vector<Dynamic> return vector(contexts, haxelib, directories, nativeLibs);
 }

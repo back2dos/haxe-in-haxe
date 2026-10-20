@@ -25,6 +25,9 @@ import compiler.hxb.HxbReaderApi;
 import context.HxbReaderStats.HxbReaderStatsData;
 import haxe.io.Bytes;
 import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // port: representation notes:
 // - `hxb_reader_stats` is context.HxbReaderStats (shared with Common), so
@@ -36,12 +39,12 @@ import core.ds.VectorTools.vector;
 //   (positions in particular are never mutated in place).
 
 @:structInit class FieldReaderContext {
-	public var tPool:Array<T>;
+	public var tPool:Vector<T>;
 	public var pos:Pos;
-	public var vars:Array<TVar>;
+	public var vars:Vector<TVar>;
 	public var tthis:Null<T>;
 
-	public inline function new(tPool:Array<T>, pos:Pos, vars:Array<TVar>, tthis:Null<T>) {
+	public inline function new(tPool:Vector<T>, pos:Pos, vars:Vector<TVar>, tthis:Null<T>) {
 		this.tPool = tPool;
 		this.pos = pos;
 		this.vars = vars;
@@ -49,7 +52,7 @@ import core.ds.VectorTools.vector;
 	}
 }
 
-function createFieldReaderContext(p:Pos, ts:Array<T>, vars:Array<TVar>, tthis:Null<T>):FieldReaderContext return {
+function createFieldReaderContext(p:Pos, ts:Vector<T>, vars:Vector<TVar>, tthis:Null<T>):FieldReaderContext return {
 	tPool: ts,
 	pos: p,
 	vars: vars,
@@ -207,18 +210,18 @@ class HxbReader {
 	var currentModule:ModuleDef = TFunctions.nullModule;
 
 	var ch:BytesWithPosition = BytesWithPosition.create(Bytes.alloc(0));
-	var stringPool:Array<String> = [];
-	var docPool:Array<String> = [];
+	var stringPool = new Vector<String>(0);
+	var docPool = new Vector<String>(0);
 
-	var classes:Array<AtomicLazy<TClass>> = [];
-	var abstracts:Array<AtomicLazy<TAbstract>> = [];
-	var enums:Array<AtomicLazy<TEnum>> = [];
-	var typedefs:Array<AtomicLazy<TDef>> = [];
-	var anons:Array<TAnon> = [];
-	var anonFields:Array<TClassField> = [];
-	var tmonos:Array<T> = [];
-	var classFields:Array<AtomicLazy<TClassField>> = [];
-	var enumFields:Array<AtomicLazy<TEnumField>> = [];
+	var classes = new Vector<AtomicLazy<TClass>>(0);
+	var abstracts = new Vector<AtomicLazy<TAbstract>>(0);
+	var enums = new Vector<AtomicLazy<TEnum>>(0);
+	var typedefs = new Vector<AtomicLazy<TDef>>(0);
+	var anons = new Vector<TAnon>(0);
+	var anonFields = new Vector<TClassField>(0);
+	var tmonos = new Vector<T>(0);
+	var classFields = new Vector<AtomicLazy<TClassField>>(0);
+	var enumFields = new Vector<AtomicLazy<TEnumField>>(0);
 
 	var typeTypeParameters:Array<TypedTypeParam> = [];
 	var fieldTypeParameters:Array<TypedTypeParam> = [];
@@ -269,7 +272,7 @@ class HxbReader {
 
 	public function readBool():Bool return readByte() != 0;
 
-	inline function readFromStringPool(pool:Array<String>):String return pool[uleb()];
+	inline function readFromStringPool(pool:Vector<String>):String return pool[uleb()];
 
 	public function readString():String return readFromStringPool(stringPool);
 
@@ -1606,9 +1609,13 @@ class HxbReader {
 		}
 		var tthis = readOption(readTypeInstance);
 		var l = uleb();
-		var ts = [for (_ in 0...l) readTypeInstance()];
+		var ts = new Vector<T>(l);
+		for (i in 0...l)
+			ts[i] = readTypeInstance();
 		var l = uleb();
-		var vars = [for (_ in 0...l) readVar()];
+		var vars = new Vector<TVar>(l);
+		for (i in 0...l)
+			vars[i] = readVar();
 		return createFieldReaderContext(readPos(), ts, vars, tthis);
 	}
 
@@ -1924,15 +1931,19 @@ class HxbReader {
 
 	// Chunks
 
-	public function readStringPool():Array<String> {
+	public function readStringPool():Vector<String> {
 		var l = uleb();
-		return [for (i in 0...l) readRawString()];
+		var a = new Vector<String>(l);
+		for (i in 0...l)
+			a[i] = readRawString();
+		return a;
 	}
 
 	public function readEfr():Void {
 		var l = uleb();
-		var a = [
-			for (i in 0...l) {
+		var a = new Vector<AtomicLazy<TEnumField>>(l);
+		for (i in 0...l)
+			a[i] = {
 				var en = readEnumRef();
 				var name = readString();
 				AtomicLazy.fromFun(function() {
@@ -1940,13 +1951,14 @@ class HxbReader {
 					return findMap(en.eConstrs, name);
 				});
 			}
-		];
 		enumFields = a;
 	}
 
 	public function readOfr():Void {
 		var l = uleb();
-		var a = [for (_ in 0...l) readClassFieldForward()];
+		var a = new Vector<TClassField>(l);
+		for (i in 0...l)
+			a[i] = readClassFieldForward();
 		anonFields = a;
 	}
 
@@ -1969,8 +1981,9 @@ class HxbReader {
 
 	public function readCfr():Void {
 		var l = uleb();
-		var a = [
-			for (i in 0...l) {
+		var a = new Vector<AtomicLazy<TClassField>>(l);
+		for (i in 0...l)
+			a[i] = {
 				var c = readClassRef();
 				var kind = switch readByte() {
 					case 0: CfrStatic;
@@ -2031,7 +2044,6 @@ class HxbReader {
 					return if (depth == 0) cf else pickOverload(cf, depth);
 				});
 			}
-		];
 		classFields = a;
 	}
 
@@ -2162,8 +2174,9 @@ class HxbReader {
 
 	public function readClr():Void {
 		var l = uleb();
-		classes = [
-			for (i in 0...l) {
+		var a = new Vector<AtomicLazy<TClass>>(l);
+		for (i in 0...l)
+			a[i] = {
 				var fp = readFullPath();
 				AtomicLazy.fromFun(function() {
 					return switch resolveType(fp.pack, fp.mname, fp.tname) {
@@ -2175,13 +2188,14 @@ class HxbReader {
 					}
 				});
 			}
-		];
+		classes = a;
 	}
 
 	public function readAbr():Void {
 		var l = uleb();
-		abstracts = [
-			for (i in 0...l) {
+		var a = new Vector<AtomicLazy<TAbstract>>(l);
+		for (i in 0...l)
+			a[i] = {
 				var fp = readFullPath();
 				AtomicLazy.fromFun(function() {
 					return switch resolveType(fp.pack, fp.mname, fp.tname) {
@@ -2193,13 +2207,14 @@ class HxbReader {
 					}
 				});
 			}
-		];
+		abstracts = a;
 	}
 
 	public function readEnr():Void {
 		var l = uleb();
-		enums = [
-			for (i in 0...l) {
+		var a = new Vector<AtomicLazy<TEnum>>(l);
+		for (i in 0...l)
+			a[i] = {
 				var fp = readFullPath();
 				AtomicLazy.fromFun(function() {
 					return switch resolveType(fp.pack, fp.mname, fp.tname) {
@@ -2210,13 +2225,14 @@ class HxbReader {
 					}
 				});
 			}
-		];
+		enums = a;
 	}
 
 	public function readTdr():Void {
 		var l = uleb();
-		typedefs = [
-			for (i in 0...l) {
+		var a = new Vector<AtomicLazy<TDef>>(l);
+		for (i in 0...l)
+			a[i] = {
 				var fp = readFullPath();
 				AtomicLazy.fromFun(function() {
 					return switch resolveType(fp.pack, fp.mname, fp.tname) {
@@ -2228,7 +2244,7 @@ class HxbReader {
 					}
 				});
 			}
-		];
+		typedefs = a;
 	}
 
 	public function readImports():Void {
@@ -2313,12 +2329,12 @@ class HxbReader {
 				case 2:
 					var td = mkTypedef(currentModule, path, pos, namePos, mkMono());
 					td.tParams = params.copy();
-					typedefs = typedefs.concat([AtomicLazy.fromVal(td)]);
+					typedefs = typedefs.snoc(AtomicLazy.fromVal(td));
 					TTypeDecl(td);
 				case 3:
 					var a = TOther.mkAbstract(currentModule, path, pos, namePos);
 					a.aParams = params.copy();
-					abstracts = abstracts.concat([AtomicLazy.fromVal(a)]);
+					abstracts = abstracts.snoc(AtomicLazy.fromVal(a));
 					TAbstractDecl(a);
 				case _:
 					HxbData.error("Invalid type kind: " + kind);
@@ -2332,12 +2348,15 @@ class HxbReader {
 		var file = readString();
 
 		var l = uleb();
-		anons = [
-			for (_ in 0...l) ({
+		anons = new Vector<TAnon>(l);
+		for (i in 0...l)
+			anons[i] = ({
 				aFields:new haxe.ds.StringMap(), aStatus:Closed
-			} : TAnon)
-		];
-		tmonos = [for (_ in 0...uleb()) mkMono()];
+			} : TAnon);
+		var l = uleb();
+		tmonos = new Vector<T>(l);
+		for (i in 0...l)
+			tmonos[i] = mkMono();
 		return api.makeModule(path, file);
 	}
 
