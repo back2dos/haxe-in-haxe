@@ -46,7 +46,7 @@ class Emit implements hxmc.Target.Emitter {
 	var split = 0;
 	// this function's frame operations (Unwind; offsets in the section until
 	// the function is done) and (-debug) its rows of lines
-	var ops:Array<Int>;
+	var ops:Array<Int> = []; // (the function's frame operations, while it is written)
 	var lines:Null<Array<Int>>;
 	var lastPos = 0;
 	var fileIndex = new Map<String, Int>();
@@ -67,7 +67,7 @@ class Emit implements hxmc.Target.Emitter {
 	public function stub(name:String) {
 		text.buf.align(4, 0);
 		start = text.buf.len;
-		ops = [];
+		ops.resize(0);
 		switch name {
 			case hxmc.MirBuild.STUB_CALL_ON_STACK:
 				// fn() (x1) with the stack pointer at top (x0); unwinders follow
@@ -98,7 +98,7 @@ class Emit implements hxmc.Target.Emitter {
 			case _:
 				throw "hxmc: unknown runtime stub " + name;
 		}
-		obj.funcs.push(new FuncRec(obj.define(name, text, start, text.buf.len - start, true), ops));
+		obj.funcs.push(new FuncRec(obj.define(name, text, start, text.buf.len - start, true), Vector.fromArrayCopy(ops)));
 	}
 
 	public function useSection(name:Null<String>) {
@@ -111,7 +111,7 @@ class Emit implements hxmc.Target.Emitter {
 		text.buf.align(16, 0);
 		start = text.buf.len;
 		a.reset();
-		ops = [];
+		ops.resize(0);
 		lines = f.display != null ? [] : null;
 		lastPos = 0;
 		var off = f.outArgs;
@@ -174,11 +174,11 @@ class Emit implements hxmc.Target.Emitter {
 		}
 		a.finish();
 		var sym = obj.define(f.name, text, start, text.buf.len - start, global);
-		var r = new FuncRec(sym, ops);
+		var r = new FuncRec(sym, Vector.fromArrayCopy(ops));
 		if (lines != null) {
 			r.name = f.display;
-			var rows = [];
-			var k = 0;
+			var rows = new Vector<Int>(3 * ((lines.length + 1) >> 1));
+			var k = 0, j = 0;
 			while (k < lines.length) {
 				var p = SrcPos.get(lines[k + 1]);
 				var fi = fileIndex.get(p.file);
@@ -187,9 +187,9 @@ class Emit implements hxmc.Target.Emitter {
 					obj.files.push(p.file);
 					fileIndex.set(p.file, fi);
 				}
-				rows.push(lines[k]);
-				rows.push(fi);
-				rows.push(p.line);
+				rows[j++] = lines[k];
+				rows[j++] = fi;
+				rows[j++] = p.line;
 				k += 2;
 			}
 			r.lines = rows;

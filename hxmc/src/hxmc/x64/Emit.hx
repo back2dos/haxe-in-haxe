@@ -28,7 +28,7 @@ class Emit implements hxmc.Target.Emitter {
 	var fp:Bool;
 	// this function's frame operations (Unwind; offsets in the section until
 	// the function is done) and (-debug) its rows of lines
-	var ops:Array<Int>;
+	var ops:Array<Int> = []; // (the function's frame operations, while it is written)
 	var lines:Null<Array<Int>>;
 	var lastPos = 0;
 	var fileIndex = new Map<String, Int>();
@@ -136,7 +136,7 @@ class Emit implements hxmc.Target.Emitter {
 		// leaf functions without slots keep rsp as it is
 		if (!f.hasCalls && f.slots.length == 0 && f.outArgs == 0 && savedX.length == 0) x = 0;
 		frameSize = x;
-		ops = [];
+		ops.resize(0);
 		lines = f.display != null ? [] : null;
 		lastPos = 0;
 		if (fp) {
@@ -234,11 +234,11 @@ class Emit implements hxmc.Target.Emitter {
 			ops[k] = map(ops[k]) - start;
 			k += 4;
 		}
-		var r = new FuncRec(sym, ops);
+		var r = new FuncRec(sym, Vector.fromArrayCopy(ops));
 		if (lines != null) {
 			r.name = f.display;
-			var rows = [];
-			var k = 0;
+			var rows = new Vector<Int>(3 * ((lines.length + 1) >> 1));
+			var k = 0, j = 0;
 			while (k < lines.length) {
 				var p = SrcPos.get(lines[k + 1]);
 				var fi = fileIndex.get(p.file);
@@ -247,9 +247,9 @@ class Emit implements hxmc.Target.Emitter {
 					obj.files.push(p.file);
 					fileIndex.set(p.file, fi);
 				}
-				rows.push(map(lines[k]) - start);
-				rows.push(fi);
-				rows.push(p.line);
+				rows[j++] = map(lines[k]) - start;
+				rows[j++] = fi;
+				rows[j++] = p.line;
 				k += 2;
 			}
 			r.lines = rows;
@@ -274,13 +274,13 @@ class Emit implements hxmc.Target.Emitter {
 			ops[k] -= start;
 			k += 4;
 		}
-		obj.funcs.push(new FuncRec(sym, ops));
+		obj.funcs.push(new FuncRec(sym, Vector.fromArrayCopy(ops)));
 	}
 
 	// the arguments of hxmc_alloc_slow, then a jump to it (no frame: 20 bytes)
 	public function allocStub(name:String, lo:Int, tySym:Null<String>, tyVal:Int, bytes:Int):Bool {
 		var start = text.buf.len;
-		ops = [];
+		ops.resize(0);
 		a.movImm32(win ? 1 : 7, lo); // rcx / rdi
 		if (tySym != null) a.isym = obj.sym(tySym);
 		a.movImm32(win ? 2 : 6, tySym != null ? 0 : tyVal); // rdx / rsi
@@ -293,7 +293,7 @@ class Emit implements hxmc.Target.Emitter {
 	// the runtime's stubs (MirBuild.STUB_*), in the C convention
 	public function stub(name:String) {
 		var start = text.buf.len;
-		ops = [];
+		ops.resize(0);
 		var arg0 = win ? Asm.RCX : Asm.RDI, arg1 = win ? Asm.RDX : Asm.RSI;
 		switch name {
 			case hxmc.MirBuild.STUB_CALL_ON_STACK:
