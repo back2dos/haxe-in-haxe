@@ -2,6 +2,9 @@ package hxmc;
 
 import haxe.ds.Vector;
 import hxmc.Mir;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 // Machine-independent optimizations on MIR (target facts stay in Abi and
 // the instruction selectors):
@@ -246,7 +249,7 @@ class Opt {
 				j.id = vals.length;
 				vals.push(j);
 				j.block = pre;
-				j.targets = [h];
+				j.targets = vector(h);
 				pre.ins = [j];
 				pre.preds = [outside];
 				pre.succs = [h];
@@ -330,11 +333,11 @@ class Opt {
 							if (q >= 0) {
 								drop.preds.splice(q, 1);
 								for (i in drop.ins)
-									if (i.op == Phi) i.args.splice(q, 1);
+									if (i.op == Phi) i.removeArg(q);
 							}
 							t.op = Jmp;
 							t.a = -1;
-							t.targets = [keep];
+							t.targets = vector(keep);
 							b.succs = [keep];
 							changed = true;
 						}
@@ -447,11 +450,11 @@ class Opt {
 			if (k >= 0) {
 				drop.preds.splice(k, 1);
 				for (i in drop.ins)
-					if (i.op == Phi) i.args.splice(k, 1);
+					if (i.op == Phi) i.removeArg(k);
 			}
 			t.op = Jmp;
 			t.a = -1;
-			t.targets = [keep];
+			t.targets = vector(keep);
 			b.succs = [keep];
 		}
 		var uses = MFunc.ints(f.vals.length, 0);
@@ -460,9 +463,8 @@ class Opt {
 				if (i.a >= 0) uses[i.a]++;
 				if (i.b >= 0) uses[i.b]++;
 				if (i.c >= 0) uses[i.c]++;
-				if (i.args != null)
-					for (x in i.args)
-						uses[x]++;
+				for (x in i.args)
+					uses[x]++;
 			}
 		var vals = f.vals;
 		for (b in f.blocks.copy()) {
@@ -497,7 +499,7 @@ class Opt {
 				var j = s.preds.indexOf(b);
 				for (i in s.ins)
 					if (i.op == Phi) {
-						i.args.push(i.args[j]);
+						i.addArg(i.args[j]);
 						uses[i.args[j]]++;
 					}
 			}
@@ -520,7 +522,7 @@ class Opt {
 					addArgs(onZero);
 					t.op = Br;
 					t.a = v;
-					t.targets = [onSet, onZero];
+					t.targets = vector(onSet, onZero);
 					p.succs = [onSet, onZero];
 					onSet.preds.push(p);
 					onZero.preds.push(p);
@@ -531,7 +533,7 @@ class Opt {
 				}
 				// drop the edge into b
 				b.preds.splice(k, 1);
-				phi.args.splice(k, 1);
+				phi.removeArg(k);
 			}
 		}
 		pruneBlocks();
@@ -554,7 +556,7 @@ class Opt {
 					if (i.op == Phi) {
 						i.op = Copy;
 						i.a = i.args[0];
-						i.args = null;
+						i.args = vector();
 						i.block = b;
 						rest.push(i);
 					} else {
@@ -592,7 +594,7 @@ class Opt {
 		if (t.op == Br && t.targets[0] == t.targets[1]) {
 			t.op = Jmp;
 			t.a = -1;
-			t.targets = [to];
+			t.targets = vector(to);
 			p.succs = [to];
 			to.preds.remove(p);
 		}
@@ -619,7 +621,7 @@ class Opt {
 				while (k >= 0) {
 					s.preds.splice(k, 1);
 					for (i in s.ins)
-						if (i.op == Phi) i.args.splice(k, 1);
+						if (i.op == Phi) i.removeArg(k);
 					k = s.preds.indexOf(b);
 				}
 			}
@@ -1153,9 +1155,8 @@ class Opt {
 				if (i.a >= 0) i.a = res(i.a);
 				if (i.b >= 0) i.b = res(i.b);
 				if (i.c >= 0) i.c = res(i.c);
-				if (i.args != null)
-					for (k in 0...i.args.length)
-						i.args[k] = res(i.args[k]);
+				for (k in 0...i.args.length)
+					i.args[k] = res(i.args[k]);
 			}
 	}
 
@@ -1168,9 +1169,8 @@ class Opt {
 					if (i.a >= 0) uses[i.a]++;
 					if (i.b >= 0) uses[i.b]++;
 					if (i.c >= 0) uses[i.c]++;
-					if (i.args != null)
-						for (x in i.args)
-							uses[x]++;
+					for (x in i.args)
+						uses[x]++;
 				}
 		var work = [];
 		for (b in f.blocks)
@@ -1183,9 +1183,8 @@ class Opt {
 			if (i.a >= 0 && --uses[i.a] == 0 && removable(f.vals[i.a])) work.push(f.vals[i.a]);
 			if (i.b >= 0 && --uses[i.b] == 0 && removable(f.vals[i.b])) work.push(f.vals[i.b]);
 			if (i.c >= 0 && --uses[i.c] == 0 && removable(f.vals[i.c])) work.push(f.vals[i.c]);
-			if (i.args != null)
-				for (x in i.args)
-					if (--uses[x] == 0 && removable(f.vals[x])) work.push(f.vals[x]);
+			for (x in i.args)
+				if (--uses[x] == 0 && removable(f.vals[x])) work.push(f.vals[x]);
 		}
 		for (b in f.blocks) {
 			var ins = b.ins, k = 0;

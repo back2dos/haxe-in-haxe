@@ -1,6 +1,10 @@
 package hxmc;
 
 import hxmc.Mir;
+import haxe.ds.Vector;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 // Scalar replacement of frame slots (after inlining, before Opt): a slot
 // whose address is only the base of loads and stores at constant offsets
@@ -44,9 +48,8 @@ class Sroa {
 				if (i.a >= 0) use(i.a, i);
 				if (i.b >= 0) use(i.b, i);
 				if (i.c >= 0) use(i.c, i);
-				if (i.args != null)
-					for (x in i.args)
-						use(x, i);
+				for (x in i.args)
+					use(x, i);
 			}
 		for (s in 0...f.slots.length)
 			if (addrs[s].length > 0) promote(s, addrs[s], uses);
@@ -77,7 +80,7 @@ class Sroa {
 				if (trivial && same >= 0) {
 					p.op = Copy;
 					p.a = same;
-					p.args = null;
+					p.args = vector();
 					changed = true;
 				}
 			}
@@ -209,15 +212,16 @@ class Sroa {
 				phi.id = f.vals.length;
 				f.vals.push(phi);
 				phi.block = b;
-				phi.args = [];
 				phis.push(phi);
 				var k = 0;
 				while (k < b.ins.length && b.ins[k].op == Phi)
 					k++;
 				b.ins.insert(k, phi);
 				entryVal.set(key, phi.id);
-				for (p in b.preds)
-					phi.args.push(readEnd(v, p));
+				var args = new Vector<Int>(b.preds.length);
+				for (q in 0...args.length)
+					args[q] = readEnd(v, b.preds[q]);
+				phi.args = args;
 				return phi.id;
 			}
 			entryVal.set(key, r);

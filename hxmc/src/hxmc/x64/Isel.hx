@@ -4,6 +4,8 @@ import hxmc.Mir;
 import hxmc.Abi;
 import hxmc.Lir;
 import hxmc.x64.Asm;
+import haxe.ds.Vector;
+import core.ds.VectorTools.vector;
 
 // x86-64 LIR operations (LIns.op)
 enum abstract XOp(Int) to Int from Int {
@@ -121,7 +123,7 @@ class Isel implements hxmc.Target.Selector {
 	// where argument k of a function with these parameter types is: a
 	// register (>= 0), or -1 - (its 8-byte slot among the stack arguments,
 	// counted from the first one; Win64 counts the shadow space)
-	function argLoc(params:Array<MTy>, k:Int):Int {
+	function argLoc(params:Vector<MTy>, k:Int):Int {
 		if (win) {
 			if (k < 4) return params[k] == F64 ? XMM0 + k : WIN_ARG_GPRS[k];
 			return -1 - k;
@@ -138,12 +140,18 @@ class Isel implements hxmc.Target.Selector {
 	}
 
 	// argLoc for each of the first n arguments, with the parts of structs
-	// (MIns.cGroups; null: none): System V places a struct's parts in
+	// (MIns.cGroups; empty: none): System V places a struct's parts in
 	// registers when enough of both kinds are left, else all on the stack
 	// (its memory, in 8-byte words), as it does with a MEMORY struct's
-	function argLocs(params:Array<MTy>, groups:Null<Array<Int>>, n:Int):Array<Int> {
-		if (win || groups == null) return [for (k in 0...n) argLoc(params, k)];
-		var r = [];
+	function argLocs(params:Vector<MTy>, groups:Vector<Int>, n:Int):Vector<Int> {
+		if (win || groups.length == 0) {
+			var r = new Vector<Int>(n);
+			for (k in 0...n)
+				r[k] = argLoc(params, k);
+			return r;
+		}
+		// (a struct's parts are all in params: its last one may come after n)
+		var r = new Vector<Int>(params.length);
 		var gi = 0, fi = 0, si = 0, k = 0;
 		while (k < n) {
 			var g = groups[k];
@@ -153,7 +161,7 @@ class Isel implements hxmc.Target.Selector {
 				if (params[j] == F64) nf++ else ni++;
 			var regs = g > 0 && gi + ni <= 6 && fi + nf <= 8;
 			for (j in k...k + cnt)
-				r.push(!regs ? -1 - si++ : params[j] == F64 ? XMM0 + fi++ : ARG_GPRS[gi++]);
+				r[j] = !regs ? -1 - si++ : params[j] == F64 ? XMM0 + fi++ : ARG_GPRS[gi++];
 			k += cnt;
 		}
 		return r;
@@ -384,7 +392,7 @@ class Isel implements hxmc.Target.Selector {
 				if (i.a >= 0) useCount[i.a]++;
 				if (i.b >= 0) useCount[i.b]++;
 				if (i.c >= 0) useCount[i.c]++;
-				if (i.args != null) for (x in i.args)
+				for (x in i.args)
 					useCount[x]++;
 				if ((i.op == Load || i.op == Store) && i.imm > -0x40000000 && i.imm < 0x40000000) addrUses[i.a]++;
 			}
@@ -784,7 +792,7 @@ class Isel implements hxmc.Target.Selector {
 		switch i.op {
 			case Phi:
 			case Param:
-				var loc = m.cParams != null ? argLocs(m.params, m.cParams, i.imm + 1)[i.imm] : argLoc(m.params, i.imm);
+				var loc = m.cParams.length > 0 ? argLocs(m.params, m.cParams, i.imm + 1)[i.imm] : argLoc(m.params, i.imm);
 				var d = reg(i.id);
 				if (loc >= 0) mov(d, loc) else {
 					var x = emit(LOAD);
@@ -1125,7 +1133,7 @@ class Isel implements hxmc.Target.Selector {
 				}
 			case Switch:
 				switchIns(i, b, next);
-			case Ret if (i.a >= 0 && m.cRet != null):
+			case Ret if (i.a >= 0 && m.structRet):
 				// a struct in rax-rdx and xmm0-xmm1, from its memory (whole words)
 				var rs = [];
 				for (p in m.cRet) {
@@ -1316,7 +1324,7 @@ class Isel implements hxmc.Target.Selector {
 		var moves:Array<{d:Int, s:Int, size:Int}> = [];
 		// (a struct result in registers: its address is the last argument, not
 		// passed, MirBuild.cStructRet)
-		var n = i.cRet != null ? i.args.length - 1 : i.args.length;
+		var n = i.structRet ? i.args.length - 1 : i.args.length;
 		var locs = argLocs(i.argTys, i.cGroups, n);
 		for (k in 0...n) {
 			var a = i.args[k];
@@ -1377,7 +1385,7 @@ class Isel implements hxmc.Target.Selector {
 			var r = i.ty == F64 ? XMM0 : RAX;
 			mov(reg(i.id), r, 8);
 		}
-		if (i.cRet != null) {
+		if (i.structRet) {
 			// a struct in rax-rdx and xmm0-xmm1: out of them first, then into
 			// its memory (whole words: the slot is rounded up to them)
 			var rs = [], gk = 0, fk = 0;

@@ -125,7 +125,7 @@ class WasmGen {
 		};
 
 	// the signature string of a type ($t:<params>><result>)
-	public static function sigOf(params:Array<MTy>, ret:MTy):String {
+	public static function sigOf(params:haxe.ds.Vector<MTy>, ret:MTy):String {
 		var s = new StringBuf();
 		for (p in params)
 			s.add(tyChar(p));
@@ -532,7 +532,7 @@ class WasmGen {
 			case Call:
 				if (!u.returnsTwice) {
 					if (u.sym == null) fn(u.a, true);
-					var tys = argTys(u);
+					var tys = u.argTys;
 					for (k in 0...u.args.length)
 						fn(u.args[k], tys[k] == I32);
 				}
@@ -1299,9 +1299,6 @@ class WasmGen {
 		};
 	}
 
-	function argTys(i:MIns):Array<MTy>
-		return i.argTys != null ? i.argTys : [for (a in i.args) vals[a].ty];
-
 	function call(i:MIns) {
 		if (i.returnsTwice) {
 			// setjmp: the first return (the second is the pad's branch)
@@ -1317,7 +1314,7 @@ class WasmGen {
 		if (imp != null && hxmc.ir.CInterop.USER.exists(i.sym)) {
 			imp = hxmc.CAbi.wasmSig(imp);
 			// an import (LinkWasm): pointers as i32, floats as f32
-			var tys = argTys(i);
+			var tys = i.argTys;
 			for (k in 0...i.args.length)
 				switch imp.args[k] {
 					case CPtr:
@@ -1338,7 +1335,7 @@ class WasmGen {
 			}
 			return;
 		}
-		var tys = argTys(i);
+		var tys = i.argTys;
 		for (k in 0...i.args.length)
 			valueAs(i.args[k], tys[k]);
 		if (i.sym != null) {
