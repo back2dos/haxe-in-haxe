@@ -930,7 +930,7 @@ class MirBuild {
 
 	// ---- statements
 
-	function stmts(ss:Array<Stmt>) {
+	function stmts(ss:Vector<Stmt>) {
 		// (a nested list's positions end with it: the code after it, or another
 		// branch, has the position it had before)
 		var saved = curPos;
@@ -1088,7 +1088,7 @@ class MirBuild {
 		}
 	}
 
-	function tryStmt(body:Array<Stmt>, catches:Array<{test:Null<Ex->Ex>, l:Local, body:Array<Stmt>}>) {
+	function tryStmt(body:Vector<Stmt>, catches:Vector<IrCatch>) {
 		var slot = f.slot(abi.handlerSize, abi.handlerAlign < 16 ? 16 : abi.handlerAlign);
 		var h = stackAddr(slot);
 		store(8, h, abi.handlerPrev, tlsLoad("rt_hcur"));
@@ -1297,7 +1297,7 @@ class MirBuild {
 
 	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
 
-	static function hasArrayStore(ss:Array<Stmt>):Bool {
+	static function hasArrayStore(ss:Vector<Stmt>):Bool {
 		var r = false;
 		function st(s:Stmt) {
 			switch s {
@@ -1670,7 +1670,7 @@ class MirBuild {
 	// ---- expressions
 
 	// the values of a list of expressions, in order
-	function exs(es:Array<Ex>):Vector<Int> {
+	function exs(es:Vector<Ex>):Vector<Int> {
 		var xs = new Vector<Int>(es.length);
 		for (k in 0...es.length)
 			xs[k] = ex(es[k]);
@@ -1844,7 +1844,7 @@ class MirBuild {
 		return readVar(r, cur);
 	}
 
-	function newArr(elem:Ty, vs:Array<Ex>):Int {
+	function newArr(elem:Ty, vs:Vector<Ex>):Int {
 		var k = arrKind(elem);
 		var o:Int;
 		if (vs.length == 0) {
@@ -2057,7 +2057,7 @@ class MirBuild {
 		return readVar(r, cur);
 	}
 
-	function host(name:String, args:Array<Ex>, ret:Ty):Int {
+	function host(name:String, args:Vector<Ex>, ret:Ty):Int {
 		if (StringTools.startsWith(name, "hxmc_narray_")) {
 			var xs = exs(args);
 			if (name == "hxmc_narray_new") {
@@ -2576,7 +2576,7 @@ class MirBuild {
 	// instruction selection expands calls of these symbols inline
 	public static inline var SPECIAL = "hxmc$";
 
-	function intrinsic(name:String, args:Array<Ex>):Int {
+	function intrinsic(name:String, args:Vector<Ex>):Int {
 		var short = name.substr(name.lastIndexOf("_") + 1);
 		var atomic = StringTools.startsWith(name, "hxmc_unsafe_Atomic_");
 		if (atomic) {
@@ -2840,7 +2840,7 @@ class MirBuild {
 			}
 	}
 
-	function callAnon(name:String, s:SigInfo, obj:Ex, args:Array<Ex>):Int {
+	function callAnon(name:String, s:SigInfo, obj:Ex, args:Vector<Ex>):Int {
 		var o = ex(obj);
 		var xs = exs(args);
 		var fid = fidConst(name);

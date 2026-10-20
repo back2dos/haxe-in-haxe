@@ -208,7 +208,7 @@ class Fingerprint {
 		}
 	}
 
-	function stmts(ss:Array<Stmt>) {
+	function stmts(ss:haxe.ds.Vector<Stmt>) {
 		word(LIST);
 		word(ss.length);
 		for (s in ss)
@@ -311,7 +311,7 @@ class Fingerprint {
 		}
 	}
 
-	function args(xs:Array<Ex>) {
+	function args(xs:haxe.ds.Vector<Ex>) {
 		word(xs.length);
 		for (x in xs)
 			ex(x);

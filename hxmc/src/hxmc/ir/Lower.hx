@@ -6,8 +6,12 @@ import core.Ast.Unop;
 import core.TType;
 import core.MetaList.StrictMeta;
 import core.TFunctions;
+import core.ds.VectorTools;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 using core.TFunctions;
+using core.ds.VectorTools;
 
 // Lowers the filtered typed AST (the data HXB serializes) of everything
 // reachable from `main` to the IR (docs/hxmc.md).
@@ -108,7 +112,7 @@ class Lower {
 			try f() catch (e:LowerError) {
 				if (!survey) throw e.toString();
 				record(e, fi.name);
-				fi.body = [SThrow(ENull(TRef(RAny)))];
+				fi.body = vector(SThrow(ENull(TRef(RAny))));
 			}
 			bindHosts(fi);
 		}
@@ -251,14 +255,15 @@ class Lower {
 		}
 		var ex:Ex->Ex = null;
 		// (xs itself when no element changes)
-		function exs(xs:Array<Ex>):Array<Ex> {
+		function exs(xs:Vector<Ex>):Vector<Ex> {
 			for (i in 0...xs.length) {
 				var x = ex(xs[i]);
 				if (x != xs[i]) {
-					var r = xs.slice(0, i);
-					r.push(x);
+					var r = new Vector<Ex>(xs.length);
+					Vector.blit(xs, 0, r, 0, i);
+					r[i] = x;
 					for (k in i + 1...xs.length)
-						r.push(ex(xs[k]));
+						r[k] = ex(xs[k]);
 					return r;
 				}
 			}
@@ -271,7 +276,7 @@ class Lower {
 			case ECallHost("hxmc_unsafe_Mem_platform", [], _) if (targetPlatform >= 0): EInt(targetPlatform);
 			case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
 			// (Float's %: hxmc.rt.LibM.fmod, as Math's natives)
-			case EBin(FMod, a, b) if (hostImpls.exists("fmod")): ECall(hostImpl("fmod"), [ex(a), ex(b)]);
+			case EBin(FMod, a, b) if (hostImpls.exists("fmod")): ECall(hostImpl("fmod"), vector(ex(a), ex(b)));
 			case EBin(op, a, b):
 				var x = ex(a), y = ex(b);
 				x == a && y == b ? e : EBin(op, x, y);
@@ -364,7 +369,7 @@ class Lower {
 				var xs = exs(args);
 				xs == args ? e : ENewAnon(s, xs);
 		});
-		var sts:Array<Stmt>->Array<Stmt> = null;
+		var sts:Vector<Stmt>->Vector<Stmt> = null;
 		function st(s:Stmt):Stmt {
 			return switch s {
 				case SSet(l, e):
@@ -393,12 +398,12 @@ class Lower {
 					x == v ? s : SSetGlobal(g, x);
 				case SIf(c, a, b):
 					switch ex(c) {
-						case EInt(v): SIf(EInt(1), v != 0 ? sts(a) : sts(b), []);
+						case EInt(v): SIf(EInt(1), v != 0 ? sts(a) : sts(b), vector());
 						case x: SIf(x, sts(a), sts(b));
 					}
 				case SLoop(body): SLoop(sts(body));
 				case SBreak | SContinue: s;
-				case SSwitch(e, cases, def): SSwitch(ex(e), [for (c in cases) {values: c.values, body: sts(c.body)}], sts(def));
+				case SSwitch(e, cases, def): SSwitch(ex(e), cases.map(c -> {values: c.values, body: sts(c.body)}), sts(def));
 				case SReturn(null): s;
 				case SReturn(e):
 					var x = ex(e);
@@ -407,20 +412,18 @@ class Lower {
 					var x = ex(e);
 					x == e ? s : SThrow(x);
 				case STry(body, catches):
-					STry(sts(body), [
-						for (c in catches) {
-							var test = c.test;
-							// (bound now: the test is built when the try is, after Facts; the
-							// runtime functions it calls, hx_is, are lowered with the program)
-							if (test != null) ex(test(ELocal(c.l)));
-							{test: test == null ? null : x -> ex(test(x)), l: c.l, body: sts(c.body)};
-						}
-					]);
+					STry(sts(body), catches.map(c -> {
+						var test = c.test;
+						// (bound now: the test is built when the try is, after Facts; the
+						// runtime functions it calls, hx_is, are lowered with the program)
+						if (test != null) ex(test(ELocal(c.l)));
+						({test: test == null ? null : x -> ex(test(x)), l: c.l, body: sts(c.body)} : IrCatch);
+					}));
 				case SCold(id, x): SCold(id, st(x));
 				case SPos(_): s;
 			}
 		}
-		sts = ss -> [for (s in ss) st(s)];
+		sts = ss -> ss.map(st);
 		fi.body = sts(fi.body);
 	}
 
@@ -885,7 +888,11 @@ class Lower {
 		prog.funcs.push(fi);
 		signature(fi, tf, null);
 		if (hasMeta(":hxmc.callback", cf.cfMeta)) callback(fi, cf);
-		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, null, null).run(tf))));
+		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> {
+			var fl = new FnLower(this, fi, null, null);
+			fl.run(tf);
+			fl.finish();
+		})));
 		return fi;
 	}
 
@@ -930,20 +937,22 @@ class Lower {
 			var n = fi.sret ? fi.args.length - 1 : fi.args.length;
 			w.args = [for (k in 0...n) new Local(fi.args[k].id, fi.args[k].name, fi.args[k].ty)];
 			w.ret = fi.ret;
-			var xs:Array<Ex> = [for (a in w.args) ELocal(a)];
+			var xs = w.args.mapToVector(a -> (ELocal(a) : Ex));
+			var body:Array<Stmt> = [];
 			var gc = !fi.declNoGc && targetOs != 3;
-			if (gc) w.body.push(SExpr(ECallHost("rt_blocking_leave", [], TVoid)));
+			if (gc) body.push(SExpr(ECallHost("rt_blocking_leave", vector(), TVoid)));
 			var r = new Local(w.args.length, "r", fi.ret == TVoid ? TI32 : fi.ret);
 			if (fi.sret) {
 				w.locals.push(r);
-				w.body.push(SSet(r, ECallHost("hxmc_unsafe_Mem_structSlot", [EInt(switch fi.ret { case TStruct(_, s): s; case _: 8; }), EInt(8)], TI64)));
-				w.body.push(SExpr(ECall(fi, xs.concat([ELocal(r)]))));
+				body.push(SSet(r, ECallHost("hxmc_unsafe_Mem_structSlot", vector(EInt(switch fi.ret { case TStruct(_, s): s; case _: 8; }), EInt(8)), TI64)));
+				body.push(SExpr(ECall(fi, xs.snoc(ELocal(r)))));
 			} else if (fi.ret != TVoid) {
 				w.locals.push(r);
-				w.body.push(SSet(r, ECall(fi, xs)));
-			} else w.body.push(SExpr(ECall(fi, xs)));
-			if (gc) w.body.push(SExpr(ECallHost("rt_blocking_enter", [], TVoid)));
-			w.body.push(SReturn(fi.ret == TVoid ? null : ELocal(r)));
+				body.push(SSet(r, ECall(fi, xs)));
+			} else body.push(SExpr(ECall(fi, xs)));
+			if (gc) body.push(SExpr(ECallHost("rt_blocking_enter", vector(), TVoid)));
+			body.push(SReturn(fi.ret == TVoid ? null : ELocal(r)));
+			w.body = Vector.fromArrayCopy(body);
 			prog.funcs.push(w);
 			return;
 		}
@@ -959,18 +968,13 @@ class Lower {
 		w.pos = fi.pos;
 		w.args = [for (a in fi.args) new Local(a.id, a.name, a.ty)];
 		w.ret = fi.ret;
-		var call = ECall(fi, [for (a in w.args) (ELocal(a) : Ex)]);
-		w.body.push(SExpr(ECallHost("rt_blocking_leave", [], TVoid)));
-		if (fi.ret == TVoid) {
-			w.body.push(SExpr(call));
-			w.body.push(SExpr(ECallHost("rt_blocking_enter", [], TVoid)));
-			w.body.push(SReturn(null));
-		} else {
+		var call = ECall(fi, w.args.mapToVector(a -> (ELocal(a) : Ex)));
+		if (fi.ret == TVoid)
+			w.body = vector(SExpr(ECallHost("rt_blocking_leave", vector(), TVoid)), SExpr(call), SExpr(ECallHost("rt_blocking_enter", vector(), TVoid)), SReturn(null));
+		else {
 			var r = new Local(w.args.length, "r", fi.ret);
 			w.locals.push(r);
-			w.body.push(SSet(r, call));
-			w.body.push(SExpr(ECallHost("rt_blocking_enter", [], TVoid)));
-			w.body.push(SReturn(ELocal(r)));
+			w.body = vector(SExpr(ECallHost("rt_blocking_leave", vector(), TVoid)), SSet(r, call), SExpr(ECallHost("rt_blocking_enter", vector(), TVoid)), SReturn(ELocal(r)));
 		}
 		prog.funcs.push(w);
 	}
@@ -1054,7 +1058,11 @@ class Lower {
 				case _: signature(fi, tf, TRef(RObj(root)));
 			}
 		} else signature(fi, tf, TRef(RObj(root)));
-		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> new FnLower(this, fi, ci, null).run(tf))));
+		pending.push(guarded(fi, () -> lowerBody(fi, cf, () -> {
+			var fl = new FnLower(this, fi, ci, null);
+			fl.run(tf);
+			fl.finish();
+		})));
 		defaultsEntry(fi, ci);
 		return fi;
 	}
@@ -1083,7 +1091,11 @@ class Lower {
 		w.display = fi.display;
 		fi.dfltEntry = w;
 		prog.funcs.push(w);
-		pending.push(guarded(w, () -> lowerBody(w, null, () -> new FnLower(this, w, ci, null).forwardDefaults(fi))));
+		pending.push(guarded(w, () -> lowerBody(w, null, () -> {
+			var fl = new FnLower(this, w, ci, null);
+			fl.forwardDefaults(fi);
+			fl.finish();
+		})));
 	}
 
 	public function ctor(c:TClass):FuncInfo {
@@ -1103,7 +1115,11 @@ class Lower {
 		var tf = funcOf(c.clConstructor);
 		signature(fi, tf, TRef(RObj(ci)));
 		fi.ret = TVoid;
-		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> new FnLower(this, fi, ci, null).run(tf, true))));
+		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> {
+			var fl = new FnLower(this, fi, ci, null);
+			fl.run(tf, true);
+			fl.finish();
+		})));
 		return fi;
 	}
 
@@ -1121,7 +1137,11 @@ class Lower {
 		var tf = funcOf(c.clConstructor);
 		signature(fi, tf, TI64);
 		fi.ret = TVoid;
-		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> new FnLower(this, fi, null, null).runStructCtor(tf))));
+		pending.push(guarded(fi, () -> lowerBody(fi, c.clConstructor, () -> {
+			var fl = new FnLower(this, fi, null, null);
+			fl.runStructCtor(tf);
+			fl.finish();
+		})));
 		return fi;
 	}
 
@@ -1142,7 +1162,11 @@ class Lower {
 		}
 		prog.lambdas.push(li);
 		prog.funcs.push(fi);
-		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> body(new FnLower(this, fi, null, li)))));
+		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> {
+			var fl = new FnLower(this, fi, null, li);
+			body(fl);
+			fl.finish();
+		})));
 		return li;
 	}
 
@@ -1352,7 +1376,11 @@ class Lower {
 		initOf.set(fi, c);
 		// (a class's __init__ runs whether or not live code reads its statics: Reach)
 		if (c.clInit != null) prog.roots.push(fi);
-		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> new FnLower(this, fi, null, null).runInit(c))));
+		pending.push(guarded(fi, () -> lowerBody(fi, null, () -> {
+			var fl = new FnLower(this, fi, null, null);
+			fl.runInit(c);
+			fl.finish();
+		})));
 	}
 
 	public function rootClass():ClassInfo

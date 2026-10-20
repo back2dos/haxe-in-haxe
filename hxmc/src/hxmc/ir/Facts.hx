@@ -1,6 +1,9 @@
 package hxmc.ir;
 
 import hxmc.ir.Ir;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // The program-wide preparation hxmc's code generator and data share
 // (hxmc.Prep), from the part of hxc's C emitter that did not write C
@@ -382,8 +385,8 @@ class Facts {
 
 	// e with its subexpressions replaced by f's results (iterEx's order)
 	public static function mapEx(f:Ex->Ex, e:Ex):Ex {
-		inline function all(a:Array<Ex>)
-			return [for (x in a) f(x)];
+		inline function all(a:Vector<Ex>)
+			return a.map(f);
 		return switch e {
 			case EInt(_) | EF64(_) | EStr(_) | ENull(_) | ELocal(_) | EGlobal(_, _) | EType(_) | ENewObj(_): e;
 			case EBin(o, a, b): EBin(o, f(a), f(b));
@@ -651,7 +654,7 @@ class Facts {
 		var next = 0;
 		function gcFree(e:Ex):Bool
 			return GcPoints.gcPoint(e) == 0 && !GcPoints.nestedGc(e);
-		function mark(ss:Array<Stmt>) {
+		function mark(ss:Vector<Stmt>) {
 			for (k in 0...ss.length) {
 				var st = ss[k];
 				switch st {
