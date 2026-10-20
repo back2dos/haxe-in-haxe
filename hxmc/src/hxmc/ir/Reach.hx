@@ -53,10 +53,10 @@ class Reach {
 	var p:Program;
 	var live = new Map<FuncInfo, Bool>();
 	var work:Array<FuncInfo> = [];
-	var inst:Array<Bool>; // by class id
+	var inst:haxe.ds.Vector<Bool>; // by class id
 	var valueClasses = new Map<ClassInfo, Bool>(); // class values (EType) in live code
 	var shapes = new Map<ShapeInfo, Bool>(); // the object literals' layouts live code makes or reads
-	var selLive:Array<Bool>;
+	var selLive:haxe.ds.Vector<Bool>;
 	var names = new Map<String, Bool>();
 	var anyName:Null<String> = null; // the function passing a computed name, once one does
 	var setters = new Map<Int, Array<FuncInfo>>(); // global -> the static initializers setting it
@@ -121,8 +121,8 @@ class Reach {
 	];
 
 	function analyze() {
-		inst = [for (_ in p.classes) false];
-		selLive = [for (_ in p.selectors) false];
+		inst = new haxe.ds.Vector(p.classes.length);
+		selLive = new haxe.ds.Vector(p.selectors.length);
 		for (i in 0...p.classes.length)
 			if (p.classes[i].id != i) throw "hxmc: reach: classes out of order";
 		findSinks();
@@ -165,7 +165,7 @@ class Reach {
 				if (valueClasses.exists(c)) statics(c);
 			// the methods callable on an instance now
 			var n = p.classes.length;
-			var below = [for (_ in 0...n + 1) 0]; // instantiated classes with an id below k
+			var below = new haxe.ds.Vector<Int>(n + 1); // instantiated classes with an id below k
 			for (i in 0...n)
 				below[i + 1] = below[i] + (inst[i] ? 1 : 0);
 			var rest = [];

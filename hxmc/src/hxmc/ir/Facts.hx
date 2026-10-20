@@ -2,6 +2,7 @@ package hxmc.ir;
 
 import hxmc.ir.Ir;
 import haxe.ds.Vector;
+import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
 
@@ -41,11 +42,11 @@ class Facts {
 	// the numbering does.
 	public var ids = new Map<String, Int>(); // id name -> value
 	public var idOrder:Array<String> = [];
-	public var typeNames:Array<String> = []; // type index -> its name (program types: TY_* ids)
+	public var typeNames:Vector<String> = vector(); // type index -> its name (program types: TY_* ids)
 	public var fidNames = new Map<String, String>();
-	public var sigNames:Array<String> = [];
-	public var globalNames:Array<String> = [];
-	public var selNames:Array<String> = [];
+	public var sigNames:Vector<String> = vector();
+	public var globalNames:Vector<String> = vector();
+	public var selNames:Vector<String> = vector();
 
 	public function new(p:Program) {
 		this.p = p;
@@ -113,7 +114,7 @@ class Facts {
 
 	// Names for keys: `prefix` + the key as an identifier; keys mapping to the
 	// same identifier get a suffix by their sorted rank. Values become ids.
-	function nameIds(prefix:String, keys:Array<String>, values:Null<Array<Int>>):Array<String> {
+	function nameIds(prefix:String, keys:Array<String>, values:Null<Array<Int>>):Vector<String> {
 		var cands = [for (k in keys) prefix + ident(k)];
 		var groups = new Map<String, Array<String>>();
 		for (i in 0...keys.length) {
@@ -121,7 +122,7 @@ class Facts {
 			if (g == null) groups.set(cands[i], g = []);
 			g.push(keys[i]);
 		}
-		var names = [];
+		var names = new Vector<String>(keys.length);
 		for (i in 0...keys.length) {
 			var g = groups.get(cands[i]);
 			var n = cands[i];
@@ -129,7 +130,7 @@ class Facts {
 				g.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
 				n += "_" + g.indexOf(keys[i]);
 			}
-			names.push(n);
+			names[i] = n;
 			if (values != null) {
 				if (ids.exists(n)) throw "duplicate name " + n;
 				ids.set(n, values[i]);
@@ -146,7 +147,9 @@ class Facts {
 			vals.push(i);
 		}
 		var tn = nameIds("TY_", keys, vals);
-		typeNames = [for (i in 0...types.length) i < T_FIRST ? Std.string(i) : tn[i - T_FIRST]];
+		typeNames = new Vector(types.length);
+		for (i in 0...types.length)
+			typeNames[i] = i < T_FIRST ? Std.string(i) : tn[i - T_FIRST];
 		var fn = nameIds("FID_", fieldNames, [for (i in 0...fieldNames.length) i]);
 		for (i in 0...fieldNames.length)
 			fidNames.set(fieldNames[i], fn[i]);

@@ -73,7 +73,7 @@ class Escape {
 
 	// per type (the symbol of its index, or #index), which slots hold
 	// references (Driver sets it; read only)
-	public static var refSlots:Null<Map<String, Array<Bool>>>;
+	public static var refSlots:Null<Map<String, Vector<Bool>>>;
 
 	// (HXMC_ESCAPE_LOG=1) what happens to each allocation that is analyzed
 	static var log = Sys.getEnv("HXMC_ESCAPE_LOG") == "1";
@@ -110,10 +110,10 @@ class Escape {
 	var inSet:Vector<Bool>;
 	var repl:Vector<Int>; // trivial phis -> their value (-1)
 	var closure:Array<Int> = [];
-	var parent:Array<Int> = []; // union-find of sites
-	var escaped:Array<Bool> = [];
-	var uniform:Array<Bool> = [];
-	var whys:Array<Null<String>> = [];
+	var parent:Vector<Int> = vector(); // union-find of sites
+	var escaped:Vector<Bool> = vector();
+	var uniform:Vector<Bool> = vector();
+	var whys:Vector<Null<String>> = vector();
 	var lastFail:Null<MIns>;
 
 	public function new(f:MFunc)
@@ -699,9 +699,9 @@ class Escape {
 		cellStores = [];
 		cellDone = [];
 		cellVps = [];
-		parent = [for (k in 0...sites.length) k];
-		escaped = [for (_ in sites) false];
-		whys = [for (_ in sites) null];
+		parent = MFunc.iota(sites.length);
+		escaped = new Vector(sites.length);
+		whys = new Vector(sites.length);
 		// the closure: what may be an alias
 		closure = [];
 		inline function add(x:Int) {
@@ -774,7 +774,7 @@ class Escape {
 			if (s >= 0) src[x] = find(s);
 		}
 		// one layout per group; (boxes) one per block
-		uniform = [for (_ in sites) true];
+		uniform = new Vector(sites.length, true);
 		var boxAt = new Map<Int, Int>();
 		for (k in 0...sites.length) {
 			var r = find(k);
@@ -1235,7 +1235,7 @@ class Escape {
 
 	// the groups that do not escape, with their accesses
 	function check():Array<Group> {
-		var acc:Array<Null<Group>> = [for (_ in sites) null];
+		var acc = new Vector<Null<Group>>(sites.length);
 		for (x in closure) {
 			if (x >= nv) continue;
 			var s = src[x];
@@ -1632,7 +1632,9 @@ class Escape {
 			if (v != null) cur[v] = storedValue(i, v);
 		}
 		// the variables' values at the end of the blocks, then a reader each
-		var endsOf = [for (_ in 0...n) MFunc.ints(nb, NONE)];
+		var endsOf = new Vector<Vector<Int>>(n);
+		for (v in 0...n)
+			endsOf[v] = MFunc.ints(nb, NONE);
 		for (b in blocks) {
 			var cur = MFunc.ints(n, NONE);
 			for (i in b.ins)
@@ -1640,23 +1642,22 @@ class Escape {
 			for (v in 0...n)
 				endsOf[v][b.id] = cur[v];
 		}
-		var readers = [
-			for (v in 0...n) {
-				var ty = vars[v].ty;
-				new Reader(f.entry, NONE, endsOf[v], MFunc.ints(nb, NOTSET), b -> {
-					var phi = new MIns(Phi, ty);
-					phi.id = f.vals.length;
-					f.vals.push(phi);
-					phi.block = b;
-					var k = 0;
-					while (k < b.ins.length && b.ins[k].op == Phi)
-						k++;
-					b.ins.insert(k, phi);
-					newPhis.push(phi);
-					phi.id;
-				}, (p, args) -> f.vals[p].args = args);
-			}
-		];
+		var readers = new Vector<Reader>(n);
+		for (v in 0...n) {
+			var ty = vars[v].ty;
+			readers[v] = new Reader(f.entry, NONE, endsOf[v], MFunc.ints(nb, NOTSET), b -> {
+				var phi = new MIns(Phi, ty);
+				phi.id = f.vals.length;
+				f.vals.push(phi);
+				phi.block = b;
+				var k = 0;
+				while (k < b.ins.length && b.ins[k].op == Phi)
+					k++;
+				b.ins.insert(k, phi);
+				newPhis.push(phi);
+				phi.id;
+			}, (p, args) -> f.vals[p].args = args);
+		}
 		// the reads
 		for (b in blocks) {
 			var cur = MFunc.ints(n, NONE);

@@ -386,7 +386,7 @@ class Program {
 	public var roots:Array<FuncInfo> = []; // live whatever reaches them (Reach)
 	// (Reach) the live functions and the selectors live code dispatches on; null: all
 	public var live:Null<Map<FuncInfo, Bool>> = null;
-	public var liveSelectors:Null<Array<Bool>> = null;
+	public var liveSelectors:Null<Vector<Bool>> = null;
 
 	public function new() {}
 

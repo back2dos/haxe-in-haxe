@@ -17,7 +17,7 @@ class Driver {
 	var o:Options;
 	var out:String;
 	var dumpSet:Null<Map<String, Bool>>;
-	var tm = [0.0, 0.0, 0.0, 0.0];
+	var tm = new haxe.ds.Vector<Float>(4); // cpu seconds: mir, isel, regalloc, emit
 	var slow:Array<{name:String, t:Float}> = [];
 
 	function new(prog:Program, out:String, o:Options) {
@@ -299,11 +299,11 @@ class Driver {
 		}
 		Escape.ctorTags = tags;
 		// (the slots of each type that hold references: Escape keeps them on the shadow stack)
-		var refs = new Map<String, Array<Bool>>();
+		var refs = new Map<String, haxe.ds.Vector<Bool>>();
 		var types = prep.e.types;
 		for (ti in 0...types.length) {
 			var sym = prep.tySym(ti);
-			refs.set(sym != null ? sym : "#" + ti, [for (s in types[ti].slots) s != null && s.match(TRef(_))]);
+			refs.set(sym != null ? sym : "#" + ti, core.ds.VectorTools.mapToVector(types[ti].slots, s -> s != null && s.match(TRef(_))));
 		}
 		Escape.refSlots = refs;
 	}

@@ -2,6 +2,7 @@ package hxmc;
 
 import haxe.ds.Vector;
 import hxmc.Mir;
+import core.ds.VectorTools;
 import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
@@ -136,7 +137,7 @@ class Opt {
 		var idom = dom.idom;
 		var inOrder = order[0].mark; // (set by dominators: tmp is the reverse postorder index)
 		var vals = f.vals;
-		var body:Array<Bool> = [];
+		var body = new Vector<Bool>(n); // (the blocks of the loop, by rpo index)
 		var inv:Array<Bool> = [];
 		var moved = false;
 		var nextBlock = 0;
@@ -156,8 +157,7 @@ class Opt {
 				}
 			if (latches.length == 0) continue;
 			// the loop: the blocks reaching a latch without passing the header
-			body.resize(0);
-			body.resize(n);
+			body.fill(false);
 			body[k] = true;
 			var members = [h];
 			var stack = [];
@@ -367,7 +367,7 @@ class Opt {
 
 	// immediate dominators (Cooper, Harvey and Kennedy) as reverse postorder
 	// indices, and the dominator tree's children lists
-	function dominators(order:Array<MBlock>):{idom:Vector<Int>, childHead:Vector<Int>, childNext:Vector<Int>} {
+	function dominators(order:Vector<MBlock>):{idom:Vector<Int>, childHead:Vector<Int>, childNext:Vector<Int>} {
 		var n = order.length;
 		var inOrder = f.newMark();
 		for (k in 0...n) {
@@ -744,7 +744,7 @@ class Opt {
 		}
 	}
 
-	function rpo():Array<MBlock> {
+	function rpo():Vector<MBlock> {
 		var seen = f.newMark();
 		var post = [];
 		var stack:Array<MBlock> = [f.entry];
@@ -768,8 +768,7 @@ class Opt {
 				post.push(b);
 			}
 		}
-		post.reverse();
-		return post;
+		return VectorTools.ofArrayReversed(post);
 	}
 
 	inline function res(x:Int):Int {
@@ -823,7 +822,7 @@ class Opt {
 	// the memory versions: per block in reverse postorder, from its
 	// predecessors' (a loop header: new versions of what the loop writes),
 	// through its instructions; recorded per load
-	function versions(order:Array<MBlock>) {
+	function versions(order:Vector<MBlock>) {
 		var n = order.length;
 		var inOrder = f.newMark();
 		for (k in 0...n) {
@@ -955,7 +954,7 @@ class Opt {
 	// is an entry too, under the key of the load of its address, which then
 	// takes the stored value (store-to-load forwarding: a value kept in a
 	// shadow-stack slot and read back before the next call)
-	function gvn(order:Array<MBlock>) {
+	function gvn(order:Vector<MBlock>) {
 		var n = order.length;
 		var inOrder = f.newMark();
 		for (k in 0...n) {
@@ -965,7 +964,9 @@ class Opt {
 		// immediate dominators (Cooper, Harvey and Kennedy), as rpo indices
 		var idom = MFunc.ints(n, -1);
 		idom[0] = 0;
-		var preds = [for (b in order) [for (p in b.preds) if (p.mark == inOrder) p.tmp]];
+		var preds = new Vector<Array<Int>>(n);
+		for (k in 0...n)
+			preds[k] = [for (p in order[k].preds) if (p.mark == inOrder) p.tmp];
 		var changed = true;
 		while (changed) {
 			changed = false;
