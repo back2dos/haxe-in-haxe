@@ -60,11 +60,11 @@ class Lookup<V> {
 /* not mutable, might be be shared */
 class MethodCapture {
 	public final cMap:IntMap<Int>;
-	public final cVars:Array<TVar>;
+	public final cVars:Vector<TVar>;
 	public final cType:Ttype;
 	public final cGroup:Bool;
 
-	public function new(cMap:IntMap<Int>, cVars:Array<TVar>, cType:Ttype, cGroup:Bool) {
+	public function new(cMap:IntMap<Int>, cVars:Vector<TVar>, cType:Ttype, cGroup:Bool) {
 		this.cMap = cMap;
 		this.cVars = cVars;
 		this.cType = cType;
@@ -161,7 +161,7 @@ class HlContext {
 	// port: the (string * path) keys of cfids.map, for `check`
 	public var cfidsKeys:Array<{name:String, path:GlobalTypePath, id:Int}> = [];
 	public var cfunctions:Array<Fundecl> = [];
-	public var cconstants:Lookup<{g:Int, fields:Array<Int>}> = new Lookup();
+	public var cconstants:Lookup<{g:Int, fields:Vector<Int>}> = new Lookup();
 	public var hlVer:String;
 	public var optimize:Bool;
 	public var wNullCompare:Bool;
@@ -226,9 +226,9 @@ class Genhl {
 	static final cHRefBool = HRef(HBool);
 	static final cHFunBytes = HFun([], HBytes);
 
-	static function makeAssigns(l:Array<Lassign>, sorted:Bool = false):Array<Assign> {
+	static function makeAssigns(l:Array<Lassign>, sorted:Bool = false):Vector<Assign> {
 		var l = if (sorted) listSort((a:Lassign, b:Lassign) -> a.laPos - b.laPos, l) else l;
-		return [for (a in l) {name: a.laName, pos: a.laPos, scopeEnd: a.laScopeEnd}];
+		return l.mapToVector((a:Lassign) -> ({name: a.laName, pos: a.laPos, scopeEnd: a.laScopeEnd} : Assign));
 	}
 
 	public static function compareVersion(v1:String, v2:String):Int
@@ -306,12 +306,12 @@ class Genhl {
 		var key = HFun(tl, HVoid);
 		var ct = ctx.cachedTuples.get(key);
 		if (ct != null) return ct;
-		var ct = HEnum(new EnumProto("", 0, null, [{name: "", nid: 0, args: tl.copy()}]));
+		var ct = HEnum(new EnumProto("", 0, null, vector({name: "", nid: 0, args: Vector.fromArrayCopy(tl)})));
 		ctx.cachedTuples.set(key, ct);
 		return ct;
 	}
 
-	static final nullCapture:MethodCapture = new MethodCapture(new IntMap(), [], HVoid, false);
+	static final nullCapture:MethodCapture = new MethodCapture(new IntMap(), vector(), HVoid, false);
 
 	static function lookup<V>(l:Lookup<V>, v:String, fb:Void->V):Int {
 		var id = l.map.get(v);
@@ -416,7 +416,7 @@ class Genhl {
 
 	static function setCurpos(ctx:HlContext, p:Pos):Void ctx.m.mcurpos = p;
 
-	static function makeDebug(ctx:HlContext, arr:Array<Pos>):Array<DebugInfo> {
+	static function makeDebug(ctx:HlContext, arr:Array<Pos>):Vector<DebugInfo> {
 		function getRelativePath(p:Pos):String {
 			return if (Gctx.defined(ctx.com, Define.AbsolutePath)) {
 				if (core.OcamlFilename.isRelative(p.pfile)) core.OcamlFilename.concat(core.OcamlFilename.sysGetcwd(), p.pfile) else p.pfile;
@@ -426,7 +426,7 @@ class Genhl {
 		var curFile = 0;
 		var curLine = 0;
 		var cur = Globals.nullPos;
-		var out = [];
+		var out = new Vector<DebugInfo>(arr.length);
 		for (i in 0...arr.length) {
 			var p = arr[i];
 			if (p != cur) {
@@ -439,7 +439,7 @@ class Genhl {
 				}
 				cur = p;
 			}
-			out.push(pos);
+			out[i] = pos;
 		}
 		return out;
 	}
@@ -536,7 +536,7 @@ class Genhl {
 				var fields = [for (k in sortedKeys(a.aFields)) cfieldType(ctx, a.aFields.get(k))];
 				fields.reverse();
 				var fields = listSort((f1:HField, f2:HField) -> strCompare(f1.name, f2.name), fields);
-				vp.vfields = fields;
+				vp.vfields = Vector.fromArrayCopy(fields);
 				for (i in 0...vp.vfields.length) vp.vindex.set(vp.vfields[i].name, i);
 				return t;
 			case TDynamic(_):
@@ -725,7 +725,7 @@ class Genhl {
 			}
 			var fields = loop(c);
 			var fields = listSort((f1:HField, f2:HField) -> strCompare(f1.name, f2.name), fields);
-			vp.vfields = fields;
+			vp.vfields = Vector.fromArrayCopy(fields);
 			for (i in 0...vp.vfields.length) vp.vindex.set(vp.vfields[i].name, i);
 			return t;
 		}
@@ -742,11 +742,11 @@ class Genhl {
 			p.pnfields = 1;
 		}
 		var tsup = if (c.clSuper != null && !statics) classType(ctx, c.clSuper.cls, [], statics) else if (statics) classType(ctx, ctx.baseClass, [], false) else null;
-		var startField:Int, virtuals:Array<Int>;
+		var startField:Int, virtuals:Vector<Int>;
 		switch tsup {
 			case null:
 				startField = 0;
-				virtuals = [];
+				virtuals = vector();
 			case HObj(psup) | HStruct(psup):
 				if (isStruct(t) != isStruct(tsup))
 					Error.abort(if (isStruct(t)) "Struct cannot extend a not struct class" else "Class cannot extend a struct", c.clPos);
@@ -760,7 +760,7 @@ class Genhl {
 		}
 		var fa:Array<HField> = [];
 		var pa:Array<FieldProto> = [];
-		var virtuals = virtuals.copy();
+		var virtuals = virtuals.toArray();
 		function addField(name:String, getT:Void->Ttype):Int {
 			var fid = fa.length + startField;
 			var str = allocString(ctx, name);
@@ -845,9 +845,9 @@ class Genhl {
 			}
 		}
 		p.pnfields = fa.length + startField;
-		p.pfields = fa;
-		p.pproto = pa;
-		p.pvirtuals = virtuals;
+		p.pfields = Vector.fromArrayCopy(fa);
+		p.pproto = Vector.fromArrayCopy(pa);
+		p.pvirtuals = Vector.fromArrayCopy(virtuals);
 		ctx.ctDepth = ctx.ctDepth - 1;
 		if (ctx.ctDepth == 0) {
 			var todo = ctx.ctDelayed;
@@ -864,21 +864,19 @@ class Genhl {
 		var cached = ctx.cachedTypes.get(keyPath);
 		if (cached != null) return cached;
 		var ename = sTypePath(e.ePath);
-		var et = new EnumProto(ename, allocString(ctx, ename), null, []);
+		var et = new EnumProto(ename, allocString(ctx, ename), null, vector());
 		var t = HEnum(et);
 		if (tref != null) tref.v = t;
 		ctx.cachedTypes.set(keyPath, t);
-		et.efields = [
-			for (n in e.eNames) {
-				var f = e.eConstrs.get(n);
-				if (f == null) throw NotFound.raise();
-				var args = switch f.efType {
-					case TFun(s): [for (a in s.args) toType(ctx, a.type)];
-					case _: [];
-				}
-				{name: f.efName, nid: allocString(ctx, f.efName), args: args};
+		et.efields = e.eNames.mapToVector(n -> {
+			var f = e.eConstrs.get(n);
+			if (f == null) throw NotFound.raise();
+			var args:Vector<Ttype> = switch f.efType {
+				case TFun(s): s.args.mapToVector(a -> toType(ctx, a.type));
+				case _: vector();
 			}
-		];
+			({name: f.efName, nid: allocString(ctx, f.efName), args: args} : EField);
+		});
 		var ct = enumClass(ctx, e);
 		et.eglobal = allocGlobal(ctx, switch ct {
 			case HObj(o): o.pname;
@@ -928,7 +926,7 @@ class Genhl {
 					var retReg = allocFresh(ctx, tret);
 					op(ctx, OMakeEnum(retReg, ef.efIndex, argRegs));
 					op(ctx, ORet(retReg));
-					var hlf = new Fundecl({fst: "", snd: ""}, eid, HFun(fargs, tret), ctx.m.mregs.copy(), ctx.m.mops.copy(), makeDebug(ctx, ctx.m.mdebug),
+					var hlf = new Fundecl({fst: "", snd: ""}, eid, HFun(fargs, tret), Vector.fromArrayCopy(ctx.m.mregs), Vector.fromArrayCopy(ctx.m.mops), makeDebug(ctx, ctx.m.mdebug),
 						makeAssigns(ctx.m.massign), false);
 					ctx.m = old;
 					ctx.definedFuns.set(eid, true);
@@ -939,7 +937,7 @@ class Genhl {
 			}
 		}
 		p.pnfields = fa.length;
-		p.pfields = fa;
+		p.pfields = Vector.fromArrayCopy(fa);
 		p.psuper = psuper;
 		return t;
 	}
@@ -1904,12 +1902,12 @@ class Genhl {
 			case CString(s): "S" + s;
 		}
 		var cidx = lookup(ctx.cconstants, key, () -> {
-			var fields:Array<Int>, t:Ttype;
+			var fields:Vector<Int>, t:Ttype;
 			switch c {
 				case CString(s):
 					var u = toUtf8(s, p);
 					var l = allocI32(ctx, u.len);
-					fields = [allocString(ctx, u.str), l];
+					fields = vector(allocString(ctx, u.str), l);
 					t = ctx.tstring;
 			}
 			var g = lookupAlloc(ctx.cglobals, t);
@@ -2872,7 +2870,7 @@ class Genhl {
 					}
 					if (max > 255 || cases.length == 0) throw new ExitException();
 					var ridx = evalTo(ctx, en, HI32);
-					var indexes = [for (_ in 0...max + 1) 0];
+					var indexes = new Vector(max + 1, 0);
 					op(ctx, OSwitch(ridx, indexes, 0));
 					var switchPos = currentPos(ctx);
 					switch def {
@@ -3603,6 +3601,7 @@ class Genhl {
 		loop(f.tfExpr);
 		var cvars = [for (v in usedVars) if (!ignoredVars.exists(v.vId)) v];
 		ocamlArraySort((v1:TVar, v2:TVar) -> v1.vId - v2.vId, cvars);
+		var cvars = Vector.fromArrayCopy(cvars);
 		var indexes = new IntMap<Int>();
 		var v0t = if (cvars.length == 1) toType(ctx, cvars[0].vType) else HDyn;
 		var ct:Ttype, group:Bool;
@@ -3677,7 +3676,7 @@ class Genhl {
 		var rret = allocTmp(ctx, iret);
 		op(ctx, OCallClosure(rret, rfun, casts));
 		op(ctx, ORet(castTo(ctx, rret, tret, p)));
-		var f = new Fundecl({fst: "", snd: ""}, fid, HFun([rt].concat(targs), tret), ctx.m.mregs.copy(), ctx.m.mops.copy(), makeDebug(ctx, ctx.m.mdebug),
+		var f = new Fundecl({fst: "", snd: ""}, fid, HFun([rt].concat(targs), tret), Vector.fromArrayCopy(ctx.m.mregs), Vector.fromArrayCopy(ctx.m.mops), makeDebug(ctx, ctx.m.mdebug),
 			makeAssigns(ctx.m.massign), false);
 		ctx.m = old;
 		ctx.cfunctions.push(f);
@@ -3689,7 +3688,7 @@ class Genhl {
 		var capt = buildCaptureVars(ctx, f);
 		var hasCapturedVars = capt.cVars.length > 0;
 		var useParentCapture = false;
-		if (cparent != null && hasCapturedVars && core.ds.ArrayTools.foreach(capt.cVars, v -> cparent.cMap.exists(v.vId))) {
+		if (cparent != null && hasCapturedVars && capt.cVars.foreach(v -> cparent.cMap.exists(v.vId))) {
 			capt = cparent;
 			useParentCapture = true;
 		}
@@ -3839,7 +3838,7 @@ class Genhl {
 			genContent();
 
 		var fargs = (if (tthis == null) [] else [tthis]).concat(if (rcapt == null) [] else [rtype(ctx, rcapt)]).concat(args);
-		var hlf = new Fundecl(name, fidx, HFun(fargs, tret), ctx.m.mregs.copy(), ctx.m.mops.copy(), makeDebug(ctx, ctx.m.mdebug),
+		var hlf = new Fundecl(name, fidx, HFun(fargs, tret), Vector.fromArrayCopy(ctx.m.mregs), Vector.fromArrayCopy(ctx.m.mops), makeDebug(ctx, ctx.m.mdebug),
 			makeAssigns(ctx.m.massign, true), genContent == null || !(name.fst == "" && name.snd == ""));
 		ctx.m = old;
 		ctx.definedFuns.set(fidx, true);
@@ -4466,8 +4465,8 @@ class Genhl {
 		for (i in code.ints) ch.addInt32(i);
 		for (f in code.floats) ch.addDouble(f);
 
-		function writeStrings(strings:Array<String>):Void {
-			var bytes = [for (s in strings) haxe.io.Bytes.ofString(s)];
+		function writeStrings(strings:Vector<String>):Void {
+			var bytes = strings.map(s -> haxe.io.Bytes.ofString(s));
 			var strLength = 0;
 			for (b in bytes) strLength += b.length + 1;
 			ch.addInt32(strLength);
@@ -4479,7 +4478,7 @@ class Genhl {
 		}
 		writeStrings(code.strings);
 
-		function writeBytes(bytes:Array<haxe.io.Bytes>):Void {
+		function writeBytes(bytes:Vector<haxe.io.Bytes>):Void {
 			var bytesLength = 0;
 			for (b in bytes) bytesLength += b.length;
 			ch.addInt32(bytesLength);
@@ -4590,7 +4589,7 @@ class Genhl {
 			}
 		}
 
-		function writeDebugInfos(debug:Array<DebugInfo>):Void {
+		function writeDebugInfos(debug:Vector<DebugInfo>):Void {
 			var curfile = -1;
 			var curpos = 0;
 			var rcount = 0;
@@ -4812,10 +4811,11 @@ class Genhl {
 
 	static function buildCode(ctx:HlContext, types:Array<ModuleType>, main:Null<TExpr>):Code {
 		var ep = generateStaticInit(ctx, types, main);
-		var bytes = ctx.cbytes.arr.copy();
-		return new Code(if (compareVersion(ctx.hlVer, "2.0.0") >= 0) 6 else if (bytes.length == 0) 4 else 5, ep, ctx.cstrings.arr.copy(),
-			ctx.cints.arr.copy(), ctx.cfloats.arr.copy(), bytes, ctx.cglobals.arr.copy(), ctx.cnatives.arr.copy(), ctx.cfunctions.copy(), ctx.cdebugFiles.arr.copy(),
-			ctx.cconstants.arr.copy());
+		var bytes = Vector.fromArrayCopy(ctx.cbytes.arr);
+		return new Code(if (compareVersion(ctx.hlVer, "2.0.0") >= 0) 6 else if (bytes.length == 0) 4 else 5, ep, Vector.fromArrayCopy(ctx.cstrings.arr),
+			Vector.fromArrayCopy(ctx.cints.arr), Vector.fromArrayCopy(ctx.cfloats.arr), bytes, Vector.fromArrayCopy(ctx.cglobals.arr),
+			Vector.fromArrayCopy(ctx.cnatives.arr), Vector.fromArrayCopy(ctx.cfunctions), Vector.fromArrayCopy(ctx.cdebugFiles.arr),
+			Vector.fromArrayCopy(ctx.cconstants.arr));
 	}
 
 	static function check(ctx:HlContext):Void {
@@ -4863,7 +4863,7 @@ class Genhl {
 		addTypes(ctx, com.types);
 
 		var code = buildCode(ctx, com.types, com.main.mainExpr);
-		ocamlArraySort((n1:Native, n2:Native) -> n1.lib - n2.lib, code.natives);
+		ocamlVectorSort((n1:Native, n2:Native) -> n1.lib - n2.lib, code.natives);
 
 		if (ctx.optimize) {
 			var t = core.Timer.startTimer(com.timerCtx, ["generate", "hl", "opt"]);
@@ -4908,7 +4908,7 @@ class Genhl {
 		var t = core.Timer.startTimer(com.timerCtx, ["generate", "hl", "write"]);
 
 		if (core.Path.fileExtension(com.file) == "c") {
-			var gnames = [for (_ in 0...code.globals.length) ""];
+			var gnames = new Vector(code.globals.length, "");
 			for (n in ctx.cglobals.map.keys()) gnames[ctx.cglobals.map.get(n)] = n;
 			if (!Gctx.defined(com, Define.SourceHeader)) {
 				var versionMajor = com.version.major;
