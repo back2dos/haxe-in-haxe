@@ -50,11 +50,14 @@ class Unwind {
 
 	// ---- DWARF call frame information
 
+	// the DWARF numbers of x86-64 registers 0-7 by the emitter's number (rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi)
+	static final X64_DWARF:haxe.ds.Vector<Int> = core.ds.VectorTools.vector(0, 2, 1, 3, 7, 6, 4, 5);
+
 	// the DWARF number of an emitter's register
 	static function dwarfReg(r:Int, arm:Bool):Int {
 		if (arm) return r < 32 ? r : 64 + (r - 32);
 		if (r >= 16) return 17 + (r - 16);
-		return [0, 2, 1, 3, 7, 6, 4, 5][r & 7] + (r & 8);
+		return X64_DWARF[r & 7] + (r & 8);
 	}
 
 	// the CIE every FDE shares: x86-64 CFA = rsp + 8, the return address at

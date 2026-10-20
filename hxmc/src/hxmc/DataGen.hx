@@ -123,8 +123,10 @@ class DataGen {
 			case _: "p".code;
 		};
 
+	static final TKS:Vector<String> = vector("TK_RUNTIME", "TK_CLASS", "TK_INTERFACE", "TK_ENUM", "TK_CTOR", "TK_ANON", "TK_CLOSURE", "TK_BOUND");
+
 	static function tk(s:String):Int
-		return ["TK_RUNTIME", "TK_CLASS", "TK_INTERFACE", "TK_ENUM", "TK_CTOR", "TK_ANON", "TK_CLOSURE", "TK_BOUND"].indexOf(s);
+		return TKS.indexOf(s);
 
 	// ---- everything
 

@@ -176,9 +176,11 @@ class ModuleInterface {
 		}
 	}
 
+	static final KEEPS_BODY:Array<core.MetaList.StrictMeta> = [Generic, Extern, Build];
+
 	static function strippable(name:String, access:Array<Access>, meta:Metadata, f:Func):Bool {
 		if (access.indexOf(AInline) >= 0 || access.indexOf(AMacro) >= 0 || access.indexOf(AExtern) >= 0) return false;
-		if (hasMeta(meta, [Generic, Extern, Build])) return false;
+		if (hasMeta(meta, KEEPS_BODY)) return false;
 		if (f.fType == null && name != "new") return false;
 		for (a in f.fArgs)
 			if (a.type == null) return false;
