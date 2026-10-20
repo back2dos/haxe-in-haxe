@@ -788,16 +788,13 @@ class SwfLoader {
 				}
 			}
 			f.hlf_code = code;
-			f.hlf_trys = [
-				for (t in f.hlf_trys)
-					({
-						hltc_start: positions[t.hltc_start],
-						hltc_end: positions[t.hltc_end],
-						hltc_handle: positions[t.hltc_handle],
-						hltc_type: t.hltc_type,
-						hltc_name: t.hltc_name,
-					} : HlTryCatch)
-			];
+			f.hlf_trys = f.hlf_trys.map(t -> ({
+				hltc_start: positions[t.hltc_start],
+				hltc_end: positions[t.hltc_end],
+				hltc_handle: positions[t.hltc_handle],
+				hltc_type: t.hltc_type,
+				hltc_name: t.hltc_name,
+			} : HlTryCatch));
 			return f;
 		};
 		return libs.swflib.As3hlparse.flatten(hl.map(loop_static));
