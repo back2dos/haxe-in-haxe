@@ -170,7 +170,7 @@ class TexprConverter {
 				case TEnum(en, _):
 					if (!deep) {
 						var names = [for (n in en.eConstrs.keys()) n];
-						names.sort(Reflect.compare);
+						names.sort(core.ds.Key.compareStrings);
 						for (n in names) all.push(({
 							kind: ConEnum(en, en.eConstrs.get(n)),
 							pos: nullPos
@@ -233,7 +233,7 @@ class TexprConverter {
 				});
 			case _: unmatched.map(function(u) return Constructor.toString(u.con));
 		};
-		sl.sort(Reflect.compare);
+		sl.sort(core.ds.Key.compareStrings);
 		var s = unmatched.length == 0 ? "_" : sl.join(" | ");
 		return Error.raiseTypingError("Unmatched patterns: " + sSubject(lookup, s, e), e.epos);
 	}
