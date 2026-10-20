@@ -36,7 +36,7 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	// (IdHash.seen), 1 unused, then cap slots of two elements: the key's
 	// hash and its entry + 1 (0: an empty slot)
 	var slots:MapSlots<Int>;
-	// the entries' keys and values, interleaved (2 * room, room = cap * 3 / 4:
+	// the entries' keys and values, interleaved (2 * room, room = cap / 2:
 	// the entries that fit before the next growth)
 	var kvs:RefSlots;
 	// the removed entries, null until the first removal
@@ -122,7 +122,7 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 		}
 		// the allocations first: a collection they run moves keys, so the
 		// hash is taken after them
-		if (used >= ((mask + 1) * 3) >> 2) grow();
+		if (used >= (mask + 1) >> 1) grow();
 		#if !hxmc.wasm_gc
 		if (nyoung == youngCap && IdHash.young(k)) growYoung();
 		sync();
@@ -182,7 +182,7 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	**/
 	public function remove(k:K):Bool {
 		if (live == 0) return false;
-		if (dead == null) dead = new MapSlots<Bool>(((mask + 1) * 3) >> 2); // (before the hash)
+		if (dead == null) dead = new MapSlots<Bool>((mask + 1) >> 1); // (before the hash)
 		sync();
 		var slots = this.slots, kvs = this.kvs, mask = this.mask;
 		var h = hashOf(k);
@@ -203,14 +203,14 @@ class ObjectMap<K:{}, T> implements haxe.Constraints.IMap<K, T> {
 	}
 
 	// rebuild with removed entries dropped and room for twice the live ones
-	// (a table that only grows doubles: at 3/4 full, to 3/8; removals cost at most one entry moved each);
+	// (a table that only grows doubles: at 1/2 full, to 1/4; removals cost at most one entry moved each);
 	// the index is up to date, or there is no live entry
 	function grow() {
 		var okvs = kvs, od = dead, on = used;
 		var cap = 8;
-		while (cap * 3 < live * 8)
+		while (cap < live * 4)
 			cap *= 2;
-		var room = (cap * 3) >> 2;
+		var room = cap >> 1;
 		var s = new MapSlots<Int>(2 + 2 * cap);
 		kvs = new RefSlots(2 * room);
 		// (a collection may have run during these allocations: the hashes are

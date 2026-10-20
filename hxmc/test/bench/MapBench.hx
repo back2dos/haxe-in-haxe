@@ -1,7 +1,7 @@
 // Identity-keyed and string-keyed maps: haxe.ds.ObjectMap get/set/exists on
 // objects (hits and misses, keys looked up in a shuffled order), and
 // StringMap's for comparison (make bench-maps; MAP_BENCH_ARGS: keys, rounds).
-// Prints the median nanoseconds per operation of each workload.
+// Prints the fastest and the median nanoseconds per operation of each workload.
 class MapBench {
 	static var sink = 0;
 
@@ -23,6 +23,7 @@ class MapBench {
 				order[j] = t;
 			}
 			var shuffled = [for (i in order) keys[i]];
+			var othersShuffled = [for (i in order) others[i]];
 			var reps = Std.int(Math.max(1, 1000000 / size));
 			var results = new Map<String, Array<Float>>();
 			function time(name:String, ops:Int, f:Void->Void) {
@@ -51,7 +52,7 @@ class MapBench {
 				});
 				time("obj get (miss)", size * reps, () -> for (_ in 0...reps) {
 					var s = 0;
-					for (k in others) if (m.get(k) == null) s++;
+					for (k in othersShuffled) if (m.get(k) == null) s++;
 					sink += s;
 				});
 				time("obj set (update)", size * reps, () -> for (_ in 0...reps) {
@@ -80,13 +81,13 @@ class MapBench {
 					sink += t;
 				});
 			}
-			Sys.println('$size keys (${reps}x), median ns/op over $rounds rounds:');
+			Sys.println('$size keys (${reps}x), ns/op over $rounds rounds, min / median:');
 			var names = [for (k in results.keys()) k];
 			names.sort(Reflect.compare);
 			for (name in names) {
 				var a = results.get(name);
 				a.sort(Reflect.compare);
-				Sys.println('  ${StringTools.rpad(name, " ", 20)} ${Math.round(a[a.length >> 1] * 10) / 10}');
+				Sys.println('  ${StringTools.rpad(name, " ", 20)} ${Math.round(a[0] * 10) / 10} / ${Math.round(a[a.length >> 1] * 10) / 10}');
 			}
 		}
 		if (sink == 42) Sys.println("");
