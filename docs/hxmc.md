@@ -375,10 +375,25 @@ added young, removals, keys that never move, keys allocated in the old
 space, threads reading one map), natively, on wasm32 and on WasmGC
 (`GcCheck`); `make bench-maps` measures them (`hxmc/test/bench/MapBench.hx`;
 the numbers of 2026-10-20 below, Linux x86-64, nanoseconds per operation,
-the fastest of 11 rounds, before (16-bit header hashes, a 4-byte index
+the fastest of 11 rounds (a range: two runs), before (16-bit header hashes, a 4-byte index
 without hashes, tombstones, up to 3/4 full) and after):
 
-MAPBENCH_TABLE
+| | 10k keys before | after | 1M keys before | after | Go 1.24, 1M |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ObjectMap get (hit) | 9.9 | 8.2 | 152 | 116-133 | 125 |
+| exists (hit) | 8.9 | 8.0 | 160 | 96-117 | 86 |
+| get (miss) | 12.1 | 4.0 | 137 | 54 | 45 |
+| set (insert) | 32 | 23 | 151 | 123-134 | 181 |
+| set (update) | 11.3 | 10.0 | 167 | 93-131 | 107 |
+| remove + set | 47 | 37 | 375 | 377-381 | 196 |
+| StringMap get (hit) | 11.0 | 9.6 | 69 | 58 | 144 |
+
+A lookup in a large map is two cache misses (the index, the entry), as in
+Go's; before, the 16-bit header hashes collided past 65,536 keys and their
+probes read the entries. The TypeScript compiler's port (tsc-haxe, the
+ts6-compiler check) runs 2.3% fewer instructions (ObjectMap.get 1.10 to 0.73
+billion, the header hash's 0.22 billion gone; bringing indexes up to date
+0.08 billion of 28.7), the port's self-build 0.9% fewer.
 
 ## Module cache
 
