@@ -61,6 +61,10 @@ import macros.MacroApi.MacroApiImpl;
 import macros.MacroApi.InvalidExpr;
 import macros.eval.EvalValue.Value;
 import macros.eval.EvalContext.RunTimeException;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // port: upstream's `Interp` module is `include InterpImpl (= Eval, (* Hlmacro *)) include BuiltApi (MacroApiImpl)`;
 // here `Interp.f` is the Eval module that defines `f` upstream (EvalContext, EvalMain,
@@ -1062,7 +1066,7 @@ class MacroContext {
 		return {mctx: mctx, meth: meth, call: call};
 	}
 
-	public static function typeMacro(ctx:TyperContext, mode:MacroMode, cpath:GlobalTypePath, f:String, el:Array<Expr>, p:Pos):MacroResult {
+	public static function typeMacro(ctx:TyperContext, mode:MacroMode, cpath:GlobalTypePath, f:String, el:Vector<Expr>, p:Pos):MacroResult {
 		var mctx = getMacroContext(ctx);
 		var api = makeMacroApi(ctx, mctx, p);
 		var loaded = loadMacro(ctx, ctx.com, mctx, api, mode == MDisplay, cpath, f, p);
@@ -1134,20 +1138,20 @@ class MacroContext {
 			if (lastIsExprArray) {
 				var acc1:Array<Expr> = [], acc2:Array<Expr> = [];
 				var i = 0, j = 0;
-				var result:{el:Array<Expr>, el2:Array<Expr>} = null;
+				var result:{el:Vector<Expr>, el2:Vector<Expr>} = null;
 				while (result == null) {
 					var n1 = el.length - i, n2 = margs.length - j;
 					if (n1 == 0 && n2 == 0) {
-						result = {el: acc1, el2: acc2};
+						result = {el: Vector.fromArrayCopy(acc1), el2: Vector.fromArrayCopy(acc2)};
 					} else if (n1 == 0 && n2 == 1) {
-						acc1.push({expr: EArrayDecl([]), pos: p});
-						result = {el: acc1, el2: []};
+						acc1.push({expr: EArrayDecl(vector()), pos: p});
+						result = {el: Vector.fromArrayCopy(acc1), el2: vector()};
 					} else if (n1 == 0) {
 						// not enough arguments, will be handled by unify_call_args
-						result = {el: acc1, el2: acc2};
+						result = {el: Vector.fromArrayCopy(acc1), el2: Vector.fromArrayCopy(acc2)};
 					} else if (n2 == 1) {
 						var e1 = el[i++];
-						acc1.push({expr: EArrayDecl([]), pos: p});
+						acc1.push({expr: EArrayDecl(vector()), pos: p});
 						acc2 = [e1];
 						j++;
 					} else if (n2 == 0) {
@@ -1158,7 +1162,7 @@ class MacroContext {
 					}
 				}
 				result;
-			} else {el: el, el2: []};
+			} else {el: el, el2: vector()};
 		};
 		var el = split.el, el2 = split.el2;
 		var args = {
@@ -1216,7 +1220,7 @@ class MacroContext {
 				};
 				// let's track the index by doing [e][index] (we will keep the expression type this way)
 				index++;
-				return {expr: EArray({expr: EArrayDecl([e]), pos: p}, {expr: EConst(Int(Std.string(index), null)), pos: p}), pos: p};
+				return {expr: EArray({expr: EArrayDecl(vector(e)), pos: p}, {expr: EConst(Int(Std.string(index), null)), pos: p}), pos: p};
 			});
 			var elt = CallUnification.unifyCallArgs(mctx, constants, eargs.map(function(a) return a.arg), tDynamic, p, false, false, false);
 			if (eargs.length != elt.length)
@@ -1250,7 +1254,7 @@ class MacroContext {
 			];
 		};
 		var args = el2.length == 0 ? args : args.slice(0, args.length == 0 ? 0 : args.length - 1)
-			.concat([macros.eval.EvalEncode.encodeArray(el2.map(MacroApiImpl.encodeExpr))]);
+			.concat([macros.eval.EvalEncode.encodeArray(el2.mapToArray(MacroApiImpl.encodeExpr))]);
 		function call():MacroResult {
 			var v = callMacro(args);
 			if (v == null)
@@ -1274,9 +1278,9 @@ class MacroContext {
 									function() return MacroApiImpl.decodeField(f)));
 						};
 						return MSuccess({
-							expr: EVars([
+							expr: EVars(vector(
 								mkEvar({name: "fields", pos: Globals.nullPos}, {type: CTAnonymous(fields), pos: p})
-							]),
+							)),
 							pos: p
 						});
 					};
@@ -1292,7 +1296,7 @@ class MacroContext {
 							MacroApiImpl.decodeType(v);
 						};
 						ctx.e.ret = t;
-						return MSuccess({expr: EBlock([]), pos: p});
+						return MSuccess({expr: EBlock(vector()), pos: p});
 					};
 			}
 			return safeDecode(ctx.com, v, expected, mret, p, process);
@@ -1301,17 +1305,17 @@ class MacroContext {
 		return e;
 	}
 
-	public static function callMacro(mctx:TyperContext, args:Array<Expr>, margs:Array<{name:String, optional:Bool, type:T}>,
+	public static function callMacro(mctx:TyperContext, args:Vector<Expr>, margs:Array<{name:String, optional:Bool, type:T}>,
 			call:Array<Value>->Null<Value>, p:Pos):Null<Value> {
 		var el = CallUnification.unifyCallArgs(mctx, args, margs, tDynamic, p, false, false, false);
-		return call(el.map(function(e) return try MacroApiImpl.makeConst(e) catch (_:Exit)
+		return call(el.mapToArray(function(e) return try MacroApiImpl.makeConst(e) catch (_:Exit)
 			Error.raiseTypingError("Argument should be a constant", e.epos)));
 	}
 
 	public static function resolveInitMacro(com:CommonContext, e:String):{
 		path:GlobalTypePath,
 		meth:String,
-		args:Array<Expr>,
+		args:Vector<Expr>,
 		pos:Pos
 	} {
 		var p = Globals.fakePos("--macro " + e);

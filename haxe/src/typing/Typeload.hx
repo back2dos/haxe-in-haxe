@@ -64,6 +64,7 @@ using Lambda;
 using core.ds.ArrayTools;
 
 import core.Define;
+import core.ds.VectorTools.vector;
 
 // Type instance and type parameter handling.
 enum LoadInstanceParamMode {
@@ -274,12 +275,12 @@ class Typeload {
 		});
 		if (values.length > 0) addMeta({
 			meta: MetaTag.Value,
-			exprs: [{expr: EObjectDecl(values), pos: Globals.nullPos}],
+			exprs: vector({expr: EObjectDecl(haxe.ds.Vector.fromArrayCopy(values)), pos: Globals.nullPos}),
 			pos: Globals.nullPos
 		});
 		if (args.exists(arg -> arg.meta.length > 0)) addMeta({
 			meta: MetaTag.HaxeArguments,
-			exprs: [
+			exprs: vector(
 				{
 					expr: EFunction(FKAnonymous, {
 						fParams: [],
@@ -289,7 +290,7 @@ class Typeload {
 					}),
 					pos: Globals.nullPos
 				}
-			],
+			),
 			pos: Globals.nullPos
 		});
 	}

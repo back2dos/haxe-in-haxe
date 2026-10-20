@@ -24,6 +24,7 @@ import compiler.hxb.HxbData.CachedChunks;
 import compiler.hxb.HxbReaderApi;
 import context.HxbReaderStats.HxbReaderStatsData;
 import haxe.io.Bytes;
+import core.ds.VectorTools.vector;
 
 // port: representation notes:
 // - `hxb_reader_stats` is context.HxbReaderStats (shared with Common), so
@@ -88,7 +89,7 @@ class ClassFieldInfos {
 		infos.infos.push(info);
 		var np = Globals.nullPos;
 		cf.cfMeta = [
-			({meta: meta, exprs: [], pos: new Pos(np.pfile, index, np.pmax)} : MetadataEntry)
+			({meta: meta, exprs: vector(), pos: new Pos(np.pfile, index, np.pmax)} : MetadataEntry)
 		].concat(cf.cfMeta);
 	}
 }
@@ -304,6 +305,14 @@ class HxbReader {
 		return [for (_ in 0...l) f()];
 	}
 
+	// port: read_list into a Vector (an AST list kept as one), allocated at its length
+	public inline function readVector<A>(f:Void->A):haxe.ds.Vector<A> {
+		var l = uleb();
+		var v = new haxe.ds.Vector<A>(l);
+		for (i in 0...l) v[i] = f();
+		return v;
+	}
+
 	public inline function readOption<A>(f:Void->A):Null<A> {
 		return switch readByte() {
 			case 0: null;
@@ -351,7 +360,7 @@ class HxbReader {
 	public function readMetadataEntry():MetadataEntry {
 		var name = readString();
 		var p = readPos();
-		var el = readList(readExpr);
+		var el = readVector(readExpr);
 		return {meta: core.Meta.fromString(name), exprs: el, pos: p};
 	}
 
@@ -665,7 +674,7 @@ class HxbReader {
 			case 8:
 				EParenthesis(readExpr());
 			case 9:
-				var fields = readList(function():ObjectField {
+				var fields = readVector(function():ObjectField {
 					var n = readString();
 					var p = readPos();
 					var qs = switch readByte() {
@@ -678,22 +687,22 @@ class HxbReader {
 				});
 				EObjectDecl(fields);
 			case 10:
-				var el = readList(readExpr);
+				var el = readVector(readExpr);
 				EArrayDecl(el);
 			case 11:
 				var e = readExpr();
-				var el = readList(readExpr);
+				var el = readVector(readExpr);
 				ECall(e, el);
 			case 12:
 				var ptp = readPlacedTypePath();
-				var el = readList(readExpr);
+				var el = readVector(readExpr);
 				ENew(ptp, el);
 			case 13:
 				var u = getUnop(readByte());
 				var e = readExpr();
 				EUnop(u.op, u.flag, e);
 			case 14:
-				var vl = readList(function():EVar {
+				var vl = readVector(function():EVar {
 					var name = readPlacedName();
 					var final_ = readBool();
 					var static_ = readBool();
@@ -723,7 +732,7 @@ class HxbReader {
 				var f = readFunc();
 				EFunction(fk, f);
 			case 16:
-				EBlock(readList(readExpr));
+				EBlock(readVector(readExpr));
 			case 17:
 				var e1 = readExpr();
 				var e2 = readExpr();
@@ -747,8 +756,8 @@ class HxbReader {
 				EWhile(e1, e2, DoWhile);
 			case 22:
 				var e1 = readExpr();
-				var cases = readList(function():SwitchCase {
-					var el = readList(readExpr);
+				var cases = readVector(function():SwitchCase {
+					var el = readVector(readExpr);
 					var eg = readOption(readExpr);
 					var eo = readOption(readExpr);
 					var p = readPos();
@@ -767,7 +776,7 @@ class HxbReader {
 				ESwitch(e1, cases, def);
 			case 23:
 				var e1 = readExpr();
-				var catches = readList(function():Catch {
+				var catches = readVector(function():Catch {
 					var pn = readPlacedName();
 					var th = readOption(readTypeHint);
 					var e = readExpr();
@@ -1203,7 +1212,7 @@ class HxbReader {
 			}
 			return fctx.pos;
 		}
-		var loopEl:Void->Array<TExpr> = null;
+		var loopEl:Void->haxe.ds.Vector<TExpr> = null;
 		function loop():TExpr {
 			var e:TExprDef;
 			var t:Null<T>;
@@ -1265,20 +1274,22 @@ class HxbReader {
 
 				// blocks 30-49
 				case 30:
-					e = TBlock([]);
+					e = TBlock(vector());
 					t = null;
 				case i = 31 | 32 | 33 | 34 | 35:
 					var l = i - 30;
-					var el = [for (_ in 0...l) loop()];
+					var el = new haxe.ds.Vector<TExpr>(l);
+					for (j in 0...l) el[j] = loop();
 					e = TBlock(el);
 					t = null;
 				case 36:
 					var l = readByte();
-					var el = [for (_ in 0...l) loop()];
+					var el = new haxe.ds.Vector<TExpr>(l);
+					for (j in 0...l) el[j] = loop();
 					e = TBlock(el);
 					t = null;
 				case 39:
-					var el = readList(loop);
+					var el = readVector(loop);
 					e = TBlock(el);
 					t = null;
 
@@ -1312,7 +1323,7 @@ class HxbReader {
 					e = TArrayDecl(loopEl());
 					t = null;
 				case 63:
-					var fl = readList(function() {
+					var fl = readVector(function() {
 						var name = readString();
 						var p = readPos();
 						var qs = switch readByte() {
@@ -1334,16 +1345,17 @@ class HxbReader {
 				// calls 70 - 79
 				case 70:
 					var e1 = loop();
-					e = TCall(e1, []);
+					e = TCall(e1, vector());
 					t = null;
 				case i = 71 | 72 | 73 | 74:
 					var e1 = loop();
-					var el = [for (_ in 0...(i - 70)) loop()];
+					var el = new haxe.ds.Vector<TExpr>(i - 70);
+					for (j in 0...i - 70) el[j] = loop();
 					e = TCall(e1, el);
 					t = null;
 				case 79:
 					var e1 = loop();
-					var el = readList(loop);
+					var el = readVector(loop);
 					e = TCall(e1, el);
 					t = null;
 
@@ -1361,7 +1373,7 @@ class HxbReader {
 					t = null;
 				case 82:
 					var subject = loop();
-					var cases = readList(function():TSwitchCase {
+					var cases = readVector(function():TSwitchCase {
 						var patterns = loopEl();
 						var ec = loop();
 						return {casePatterns: patterns, caseExpr: ec};
@@ -1376,7 +1388,7 @@ class HxbReader {
 					t = null;
 				case 83:
 					var e1 = loop();
-					var catches = readList(function() {
+					var catches = readVector(function() {
 						var v = declareLocal();
 						var e = loop();
 						return {variable: v, expr: e};
@@ -1562,7 +1574,7 @@ class HxbReader {
 			};
 			return e;
 		}
-		loopEl = function() return readList(loop);
+		loopEl = function() return readVector(loop);
 		return loop();
 	}
 

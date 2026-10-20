@@ -32,6 +32,9 @@ import libs.extlib.IO;
 import libs.swflib.Swf;
 import libs.swflib.As3;
 import libs.swflib.As3hl;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 private typedef MetaTag = core.MetaList.StrictMeta;
 
@@ -325,7 +328,7 @@ class SwfLoader {
 			function mk_meta():Metadata {
 				return [
 					for (m in meta)
-						({meta: m.m, exprs: [for (c in m.cl) ({expr: EConst(c), pos: pos} : Expr)], pos: pos} : MetadataEntry)
+						({meta: m.m, exprs: m.cl.mapToVector(c -> ({expr: EConst(c), pos: pos} : Expr)), pos: pos} : MetadataEntry)
 				];
 			}
 			var cf:ClassField = {
@@ -538,7 +541,7 @@ class SwfLoader {
 				cffPos: pos,
 				cffDoc: null,
 				cffAccess: flags,
-				cffMeta: [({meta: MetaTag.FlashProperty, exprs: [], pos: pos} : MetadataEntry)].concat(meta),
+				cffMeta: [({meta: MetaTag.FlashProperty, exprs: vector(), pos: pos} : MetadataEntry)].concat(meta),
 				cffKind: FProp(read_access, write_access, property_typehint, null),
 			};
 			return [prop].concat(fields);
@@ -618,7 +621,7 @@ class SwfLoader {
 				meta: [
 					{
 						meta: MetaTag.Native,
-						exprs: [{expr: EConst(String(native_path, SDoubleQuotes)), pos: nullPos}],
+						exprs: vector({expr: EConst(String(native_path, SDoubleQuotes)), pos: nullPos}),
 						pos: nullPos
 					}
 				],
@@ -636,7 +639,7 @@ class SwfLoader {
 						[
 							{
 								meta: MetaTag.Native,
-								exprs: [{expr: EConst(String(native_path, SDoubleQuotes)), pos: pos}],
+								exprs: vector({expr: EConst(String(native_path, SDoubleQuotes)), pos: pos}),
 								pos: pos
 							}
 						];

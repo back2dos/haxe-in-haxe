@@ -6,6 +6,9 @@ import core.TUnification.*;
 import core.TUnification;
 import core.TOther.*;
 import context.Common;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 // -------------------------------------------------------------------------- //
 // FIX OVERRIDES
@@ -91,10 +94,10 @@ class FixOverrides {
 			if (changed.length > 0) {
 				var el = switch expr.eexpr {
 					case TBlock(el): el;
-					case _: [expr];
+					case _: vector(expr);
 				};
 				var p = el.length == 0 ? expr.epos : el[0].epos;
-				var decls = changed.map(function(pair) return mk(TVar(pair.original,
+				var decls = changed.mapToVector(function(pair) return mk(TVar(pair.original,
 					mk(TCast(mk(TLocal(pair.replacement), pair.replacement.vType, p), null), pair.original.vType, p)),
 					com.basic.tvoid, p));
 				expr = {eexpr: TBlock(decls.concat(el)), etype: expr.etype, epos: expr.epos};

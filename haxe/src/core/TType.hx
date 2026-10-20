@@ -16,6 +16,7 @@ import core.Globals.Pos;
 import core.Message.CompilerMessage;
 import haxe.ds.IntMap;
 import haxe.ds.StringMap;
+import haxe.ds.Vector;
 
 // port: the PMap-typed fields (fields of anonymous structures and classes, constraint fields) are
 // StringMaps; code that iterates them goes through core.ds.PMap (sorted keys).
@@ -346,18 +347,18 @@ enum TExprDef {
 	TField(expr:TExpr, access:TFieldAccess);
 	TTypeExpr(type:ModuleType);
 	TParenthesis(expr:TExpr);
-	TObjectDecl(fields:Array<{var key:{var name:String; var pos:Pos; var quote:QuoteStatus;}; var expr:TExpr;}>);
-	TArrayDecl(values:Array<TExpr>);
-	TCall(expr:TExpr, args:Array<TExpr>);
-	TNew(cls:TClass, params:TParams, args:Array<TExpr>);
+	TObjectDecl(fields:Vector<{var key:{var name:String; var pos:Pos; var quote:QuoteStatus;}; var expr:TExpr;}>);
+	TArrayDecl(values:Vector<TExpr>);
+	TCall(expr:TExpr, args:Vector<TExpr>);
+	TNew(cls:TClass, params:TParams, args:Vector<TExpr>);
 	TUnop(op:Unop, flag:UnopFlag, expr:TExpr);
 	TFunction(func:TFunc);
 	TVar(variable:TVar, expr:Null<TExpr>);
-	TBlock(exprs:Array<TExpr>);
+	TBlock(exprs:Vector<TExpr>);
 	TIf(condition:TExpr, thenExpr:TExpr, elseExpr:Null<TExpr>);
 	TWhile(condition:TExpr, body:TExpr, flag:WhileFlag);
 	TSwitch(switchExpr:TSwitch);
-	TTry(expr:TExpr, catches:Array<{var variable:TVar; var expr:TExpr;}>);
+	TTry(expr:TExpr, catches:Vector<{var variable:TVar; var expr:TExpr;}>);
 	TReturn(expr:Null<TExpr>);
 	TBreak;
 	TContinue;
@@ -371,11 +372,11 @@ enum TExprDef {
 
 @:structInit class TSwitch {
 	public var switchSubject:TExpr;
-	public var switchCases:Array<TSwitchCase>;
+	public var switchCases:Vector<TSwitchCase>;
 	public var switchDefault:Null<TExpr>;
 	public var switchExhaustive:Bool;
 
-	public inline function new(switchSubject:TExpr, switchCases:Array<TSwitchCase>, switchDefault:Null<TExpr>, switchExhaustive:Bool) {
+	public inline function new(switchSubject:TExpr, switchCases:Vector<TSwitchCase>, switchDefault:Null<TExpr>, switchExhaustive:Bool) {
 		this.switchSubject = switchSubject;
 		this.switchCases = switchCases;
 		this.switchDefault = switchDefault;
@@ -386,10 +387,10 @@ enum TExprDef {
 }
 
 @:structInit class TSwitchCase {
-	public var casePatterns:Array<TExpr>;
+	public var casePatterns:Vector<TExpr>;
 	public var caseExpr:TExpr;
 
-	public inline function new(casePatterns:Array<TExpr>, caseExpr:TExpr) {
+	public inline function new(casePatterns:Vector<TExpr>, caseExpr:TExpr) {
 		this.casePatterns = casePatterns;
 		this.caseExpr = caseExpr;
 	}

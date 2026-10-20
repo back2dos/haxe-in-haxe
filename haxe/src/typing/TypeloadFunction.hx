@@ -45,6 +45,11 @@ import context.Typecore;
 import context.TyperPass;
 import context.Typecore.TyperManager;
 import typing.FunctionArguments;
+import core.ds.VectorTools;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // Typing of functions and their arguments.
 
@@ -73,7 +78,7 @@ class TypeloadFunction {
 				// when we don't care because we're in display mode, just act like
 				// the function has an empty block body. this is fine even if function
 				// defines a return type, because returns aren't checked in this mode
-				syntax = {expr: EBlock([]), pos: p};
+				syntax = {expr: EBlock(vector()), pos: p};
 			else if (ctx.e.curfun == FunMember && hasClassFlag(ctx.c.curclass,
 				CAbstract)) raiseTypingError("Function body or abstract modifier required", p);
 			else raiseTypingError("Function body required", p);
@@ -146,7 +151,7 @@ class TypeloadFunction {
 			var sup = superConstructor();
 			if (sup != null) try {
 				findSuper(e);
-				if (sup.wasForced) e = concat(mk(TCall(mk(TConst(TSuper), sup.type, e.epos), []), ctx.t.tvoid, e.epos), e);
+				if (sup.wasForced) e = concat(mk(TCall(mk(TConst(TSuper), sup.type, e.epos), vector()), ctx.t.tvoid, e.epos), e);
 				else displayError(ctx.com, "Missing super constructor call", p);
 			} catch (_:core.ds.Exit) {}
 		}
@@ -155,21 +160,21 @@ class TypeloadFunction {
 			var ev = mk(TVar(v, mk(TConst(TThis), ctx.c.tthis, p)), ctx.t.tvoid, p);
 			switch e.eexpr {
 				case TBlock(l):
-					if (ctx.com.config.pfThisBeforeSuper) e = mk(TBlock([ev].concat(l)), e.etype, e.epos);
+					if (ctx.com.config.pfThisBeforeSuper) e = mk(TBlock(VectorTools.cons(ev, l)), e.etype, e.epos);
 					else {
 						function hasV(e:TExpr):Bool return switch e.eexpr {
 							case TLocal(v1) if (v1 == v): true;
 							case _: Texpr.checkExpr(hasV, e);
 						};
-						function insert(l:Array<TExpr>):Array<TExpr> {
-							if (l.length == 0) return []; // should not happen...
+						function insert(l:Vector<TExpr>):Vector<TExpr> {
+							if (l.length == 0) return vector(); // should not happen...
 							var first = l[0];
-							return hasV(first) ? [ev].concat(l) : [first].concat(insert(l.slice(1)));
+							return hasV(first) ? VectorTools.cons(ev, l) : VectorTools.cons(first, insert(l.slice(1)));
 						}
 						e = mk(TBlock(insert(l)), e.etype, e.epos);
 					}
 				case _:
-					e = mk(TBlock([ev, e]), e.etype, p);
+					e = mk(TBlock(vector(ev, e)), e.etype, p);
 			}
 		}
 		for (r in ctx.e.opened) r.aStatus = Closed;
@@ -288,7 +293,7 @@ class TypeloadFunction {
 					defaultValue: arg.defaultValue
 				});
 				var superCall = mk(TCall(mk(TConst(TSuper), TInst(csup, cparams), cp),
-					vars.map(arg -> mk(TLocal(arg.variable), arg.variable.vType, cp))),
+					vars.mapToVector(arg -> mk(TLocal(arg.variable), arg.variable.vType, cp))),
 					ctx.t.tvoid, cp);
 				var constr = mk(TFunction({tfArgs: vars, tfType: ctx.t.tvoid, tfExpr: superCall}), TFun({
 					args: vars.map(arg -> {name: arg.variable.vName, optional: arg.defaultValue != null, type: arg.variable.vType}),
@@ -302,12 +307,12 @@ class TypeloadFunction {
 			cf.cfType = TLazy(r);
 			c.clConstructor = cf;
 		} else if (forceConstructor) {
-			var constr = mk(TFunction({tfArgs: [], tfType: ctxC.t.tvoid, tfExpr: mk(TBlock([]), ctxC.t.tvoid, p)}),
+			var constr = mk(TFunction({tfArgs: [], tfType: ctxC.t.tvoid, tfExpr: mk(TBlock(vector()), ctxC.t.tvoid, p)}),
 				tfun([], ctxC.t.tvoid), p);
 			var cf = mkField("new", constr.etype, p, Globals.nullPos);
 			cf.cfExpr = constr;
 			cf.cfType = constr.etype;
-			cf.cfMeta = [{meta: MetaTag.CompilerGenerated, exprs: [], pos: Globals.nullPos}];
+			cf.cfMeta = [{meta: MetaTag.CompilerGenerated, exprs: vector(), pos: Globals.nullPos}];
 			cf.cfKind = Method(MethNormal);
 			c.clConstructor = cf;
 		}

@@ -53,6 +53,7 @@ import context.TyperPass;
 import context.display.DeprecationCheck;
 import typing.Typeload.*;
 import typing.TypeloadCheck.BuildCanceled;
+import core.ds.VectorTools.vector;
 
 using Lambda;
 using core.ds.ArrayTools;
@@ -225,7 +226,7 @@ class TypeloadModule {
 						aExtern: d.flags.contains(AbExtern),
 						aEnum: d.flags.contains(AbEnum) || enumPos != null};
 					if (enumPos == null) {
-						if (a.aEnum) a.aMeta.unshift({meta: MetaTag.Enum, exprs: [], pos: nullPos}); // HAXE5: remove
+						if (a.aEnum) a.aMeta.unshift({meta: MetaTag.Enum, exprs: vector(), pos: nullPos}); // HAXE5: remove
 					} else Common.moduleWarning(com, ctx.m.curmod, WDeprecatedEnumAbstract, Warning.fromMeta(d.meta),
 						"`@:enum abstract` is deprecated in favor of `enum abstract`", enumPos);
 					add(decl, TAbstractDecl(a));
@@ -242,7 +243,7 @@ class TypeloadModule {
 						}
 						var fields = d.data.map(function(f) return TypeloadFields.transformAbstractField(com, thisType, aType, a, f)),
 							meta:Metadata = [];
-						if (MetadataTools.has(MetaTag.Dce, a.aMeta)) meta.unshift({meta: MetaTag.Dce, exprs: [], pos: nullPos});
+						if (MetadataTools.has(MetaTag.Dce, a.aMeta)) meta.unshift({meta: MetaTag.Dce, exprs: vector(), pos: nullPos});
 						var cd:ClassDefinition = {
 							name: {name: d.name.name + "_Impl_", pos: d.name.pos},
 							flags: [HPrivate],
@@ -532,7 +533,7 @@ class TypeloadModule {
 		}
 		e.eNames = names;
 		Typecore.unify(local, TType(enumModuleType(e), []), e.eType, p);
-		if (flat.value) e.eMeta = [({meta: MetaTag.FlatEnum, exprs: [], pos: nullPos} : MetadataEntry)].concat(e.eMeta);
+		if (flat.value) e.eMeta = [({meta: MetaTag.FlatEnum, exprs: vector(), pos: nullPos} : MetadataEntry)].concat(e.eMeta);
 		if (MetadataTools.has(MetaTag.InheritDoc, e.eMeta)) delay(local.g, PConnectField, function() InheritDoc.buildEnumDoc(local, e));
 		if (local.com.platform == Jvm && !hasEnumFlag(e, EnExtern)) delay(local.g, PTypeField, function() {
 			e.eMeta = StrictMeta.checkStrictMeta(local, e.eMeta).concat(e.eMeta);

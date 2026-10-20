@@ -21,6 +21,8 @@ package core;
 
 import core.Globals.Pos;
 import core.Globals.GlobalTypePath;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 // port: the module Printer is AstPrinter.hx, map_expr's local functions are AstExprMapper.hx,
 // unescape (and Invalid_escape_sequence) is in syntax/Lexer.hx. The functions of the module Expr
@@ -299,10 +301,10 @@ enum ImportMode {
 
 @:structInit class MetadataEntry {
 	public var meta:Dynamic;
-	public var exprs:Array<Expr>;
+	public var exprs:Vector<Expr>;
 	public var pos:Pos;
 
-	public inline function new(meta:Dynamic, exprs:Array<Expr>, pos:Pos) {
+	public inline function new(meta:Dynamic, exprs:Vector<Expr>, pos:Pos) {
 		this.meta = meta;
 		this.exprs = exprs;
 		this.pos = pos;
@@ -574,19 +576,19 @@ enum ExprDef {
 	EBinop(op:Binop, left:Expr, right:Expr);
 	EField(expr:Expr, field:String, kind:EFieldKind);
 	EParenthesis(expr:Expr);
-	EObjectDecl(fields:Array<ObjectField>);
-	EArrayDecl(values:Array<Expr>);
-	ECall(expr:Expr, args:Array<Expr>);
-	ENew(path:PlacedTypePath, args:Array<Expr>);
+	EObjectDecl(fields:Vector<ObjectField>);
+	EArrayDecl(values:Vector<Expr>);
+	ECall(expr:Expr, args:Vector<Expr>);
+	ENew(path:PlacedTypePath, args:Vector<Expr>);
 	EUnop(op:Unop, flag:UnopFlag, expr:Expr);
-	EVars(vars:Array<EVar>);
+	EVars(vars:Vector<EVar>);
 	EFunction(kind:FunctionKind, func:Func);
-	EBlock(exprs:Array<Expr>);
+	EBlock(exprs:Vector<Expr>);
 	EFor(iterator:Expr, body:Expr);
 	EIf(condition:Expr, thenExpr:Expr, elseExpr:Null<Expr>);
 	EWhile(condition:Expr, body:Expr, flag:WhileFlag);
-	ESwitch(expr:Expr, cases:Array<SwitchCase>, defaultCase:Null<SwitchDefault>);
-	ETry(expr:Expr, catches:Array<Catch>);
+	ESwitch(expr:Expr, cases:Vector<SwitchCase>, defaultCase:Null<SwitchDefault>);
+	ETry(expr:Expr, catches:Vector<Catch>);
 	EReturn(expr:Null<Expr>);
 	EBreak;
 	EContinue;
@@ -623,12 +625,12 @@ enum TypeDef {
 }
 
 @:structInit class SwitchCase {
-	public var values:Array<Expr>;
+	public var values:Vector<Expr>;
 	public var guard:Null<Expr>;
 	public var expr:Null<Expr>;
 	public var pos:Pos;
 
-	public inline function new(values:Array<Expr>, guard:Null<Expr>, expr:Null<Expr>, pos:Pos) {
+	public inline function new(values:Vector<Expr>, guard:Null<Expr>, expr:Null<Expr>, pos:Pos) {
 		this.values = values;
 		this.guard = guard;
 		this.expr = expr;
@@ -1292,15 +1294,15 @@ class Ast {
 	/* module Expr */
 	public static function ensureBlock(e:Expr):Expr return switch e.expr {
 		case EBlock(_): e;
-		case _: {expr: EBlock([e]), pos: pos(e)};
+		case _: {expr: EBlock(vector(e)), pos: pos(e)};
 	};
 
-	public static function fieldAssoc(name:String, fl:Array<ObjectField>):Expr {
+	public static function fieldAssoc(name:String, fl:Vector<ObjectField>):Expr {
 		for (f in fl) if (f.key.name == name) return f.expr;
 		throw core.ds.NotFound.raise();
 	}
 
-	public static function fieldMemAssoc(name:String, fl:Array<ObjectField>):Bool {
+	public static function fieldMemAssoc(name:String, fl:Vector<ObjectField>):Bool {
 		for (f in fl) if (f.key.name == name) return true;
 		return false;
 	}

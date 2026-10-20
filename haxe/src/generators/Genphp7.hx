@@ -27,6 +27,10 @@ import generators.Gctx;
 import generators.genphp7.TypeWrappers;
 import generators.genphp7.CodeWriter;
 import generators.genphp7.TypeBuilders;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 typedef UsedType = {
 	var utAlias:String;
@@ -711,7 +715,14 @@ class Genphp7 {
 	/**
 		Writes arguments list to output buffer
 	*/
-	public static function writeArgs<A>(strWriter:String->Void, argWriter:A->Void, args:Array<A>):Void {
+	extern overload public static inline function writeArgs<A>(strWriter:String->Void, argWriter:A->Void, args:Array<A>):Void {
+		for (i in 0...args.length) {
+			if (i > 0) strWriter(", ");
+			argWriter(args[i]);
+		}
+	}
+
+	extern overload public static inline function writeArgs<A>(strWriter:String->Void, argWriter:A->Void, args:Vector<A>):Void {
 		for (i in 0...args.length) {
 			if (i > 0) strWriter(", ");
 			argWriter(args[i]);
@@ -742,7 +753,7 @@ class Genphp7 {
 	/**
 		Inserts `null`s if there are missing optional args before empty rest arguments.
 	*/
-	public static function fixCallArgs(basic:BasicTypes, calleeType:T, exprs:Array<TExpr>):Array<TExpr> {
+	public static function fixCallArgs(basic:BasicTypes, calleeType:T, exprs:Vector<TExpr>):Vector<TExpr> {
 		var args = switch followWithCoro(calleeType) {
 			case Coro(sig): context.Common.expandCoroType(basic, sig.args, sig.ret).args;
 			case NotCoro(TFun(sig)): sig.args;
@@ -770,7 +781,7 @@ class Genphp7 {
 							ei++;
 						}
 					}
-					result;
+					Vector.fromArrayCopy(result);
 				} else exprs;
 		}
 	}
@@ -807,7 +818,7 @@ class Genphp7 {
 		@return New TBlock expression which is composed of setting default values for optional arguments and function body.
 	*/
 	public static function injectDefaults(ctx:PhpGeneratorContext, func:TFunc):TExpr {
-		function inject(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, bodyExprs:Array<TExpr>):Array<TExpr> {
+		function inject(args:Array<{variable:TVar, defaultValue:Null<TExpr>}>, bodyExprs:Vector<TExpr>):Vector<TExpr> {
 			var result = [];
 			for (a in args) switch a.defaultValue {
 				case null:
@@ -815,11 +826,12 @@ class Genphp7 {
 				case const:
 					result.push(Texpr.setDefault(ctx.pgcCommon.basic, a.variable, const, func.tfExpr.epos));
 			}
-			return result.concat(bodyExprs);
+			for (e in bodyExprs) result.push(e);
+			return Vector.fromArrayCopy(result);
 		}
 		var exprs = switch func.tfExpr.eexpr {
 			case TBlock(exprs): inject(func.tfArgs, exprs);
-			case _: inject(func.tfArgs, [func.tfExpr]);
+			case _: inject(func.tfArgs, vector(func.tfExpr));
 		}
 		return {
 			eexpr: TBlock(exprs),
@@ -932,8 +944,8 @@ class Genphp7 {
 			case TBlock(exprs):
 				var lastExpr = exprs[exprs.length - 1];
 				var returnExpr:TExpr = {eexpr: TReturn(lastExpr), etype: lastExpr.etype, epos: lastExpr.epos};
-				var exprs = exprs.slice(0, exprs.length - 1);
-				exprs.push(returnExpr);
+				var exprs = exprs.copy();
+				exprs[exprs.length - 1] = returnExpr;
 				{eexpr: TBlock(exprs), etype: blockExpr.etype, epos: blockExpr.epos};
 			case _: fail(blockExpr.epos, "genphp7.ensure_return_in_block");
 		}
@@ -943,9 +955,9 @@ class Genphp7 {
 		If `expr` is a block, then return list of expressions in that block.
 		Otherwise returns a list with `expr` as a single item.
 	*/
-	public static function unpackBlock(expr:TExpr):Array<TExpr> return switch expr.eexpr {
+	public static function unpackBlock(expr:TExpr):Vector<TExpr> return switch expr.eexpr {
 		case TBlock(exprs): exprs;
-		case _: [expr];
+		case _: vector(expr);
 	}
 
 	/**

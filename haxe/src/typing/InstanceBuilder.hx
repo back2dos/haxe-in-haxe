@@ -25,9 +25,9 @@ import context.display.DeprecationCheck;
 @:structInit class MacroCallPath {
 	public var path:GlobalTypePath;
 	public var field:String;
-	public var args:Array<Expr>;
+	public var args:haxe.ds.Vector<Expr>;
 
-	public inline function new(path:GlobalTypePath, field:String, args:Array<Expr>) {
+	public inline function new(path:GlobalTypePath, field:String, args:haxe.ds.Vector<Expr>) {
 		this.path = path;
 		this.field = field;
 		this.args = args;
@@ -37,7 +37,7 @@ import context.display.DeprecationCheck;
 }
 
 class InstanceBuilder {
-	public static function getMacroPath(ctx:Typer, e:Expr, args:Array<Expr>, p:Pos):MacroCallPath {
+	public static function getMacroPath(ctx:Typer, e:Expr, args:haxe.ds.Vector<Expr>, p:Pos):MacroCallPath {
 		function loop(e:Expr):Array<String> return switch e.expr {
 			case EField(e, f, _): [f].concat(loop(e));
 			case EConst(Ident(i)): [i];

@@ -232,7 +232,7 @@ class Genjson {
 	public static function generateMetadataEntry(ctx:GenjsonContext, m:MetadataEntry):JsonValue {
 		return jobject([
 			kv("name", jstring(Meta.toString(m.meta))),
-			kv("args", jlist(generateExpr.bind(ctx), m.exprs)),
+			kv("args", jlist(generateExpr.bind(ctx), m.exprs.toArray())),
 			kv("pos", generatePos(ctx, m.pos))
 		]);
 	}

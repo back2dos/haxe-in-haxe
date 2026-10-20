@@ -7,6 +7,9 @@ import core.Globals;
 import optimization.AnalyzerConfig;
 import optimization.Analyzer;
 import filters.RenameVars;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 class AddFieldInits {
 	public static function addFieldInits(clPath:core.Globals.GlobalTypePath, locals:RenameVars.RenameInit,
@@ -45,7 +48,7 @@ class AddFieldInits {
 				var ce = TypeOps.mk(TFunction({
 					tfArgs: [],
 					tfType: scom.basic.tvoid,
-					tfExpr: TypeOps.mk(TBlock(el), scom.basic.tvoid, c.clPos)
+					tfExpr: TypeOps.mk(TBlock(haxe.ds.Vector.fromArrayCopy(el)), scom.basic.tvoid, c.clPos)
 				}), ct, c.clPos);
 				cf = TypeOps.mkField("new", ct, c.clPos, Globals.nullPos);
 				cf.cfKind = Method(MethNormal);
@@ -56,12 +59,12 @@ class AddFieldInits {
 					case {eexpr: TFunction(f)}:
 						var bl = switch f.tfExpr.eexpr {
 							case TBlock(b): b;
-							case _: [f.tfExpr];
+							case _: vector(f.tfExpr);
 						};
 						cf.cfExpr = TypeOps.mk(TFunction({
 							tfArgs: f.tfArgs,
 							tfType: f.tfType,
-							tfExpr: TypeOps.mk(TBlock(el.concat(bl)), scom.basic.tvoid, c.clPos)
+							tfExpr: TypeOps.mk(TBlock(bl.prependArray(el)), scom.basic.tvoid, c.clPos)
 						}), cf.cfType, cf.cfPos);
 					case _:
 						throw "addFieldInits: constructor is not a function";

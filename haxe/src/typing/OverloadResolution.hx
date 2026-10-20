@@ -11,6 +11,10 @@ import core.TOther.ExtType;
 import typing.FieldCallCandidate;
 import typing.FieldCallCandidate.FieldCallCandidateData;
 import codegen.Overloads;
+import core.ds.VectorTools;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 @:structInit class ResolvedOverload {
 	public var cls:TClass;
@@ -51,12 +55,12 @@ class OverloadResolution {
 		};
 	}
 
-	public static function unifyCf(mapType:T->T, c:TClass, cf:TClassField, el:Array<TExpr>):Null<FieldCallCandidateData<ResolvedOverload>> {
+	public static function unifyCf(mapType:T->T, c:TClass, cf:TClassField, el:Vector<TExpr>):Null<FieldCallCandidateData<ResolvedOverload>> {
 		var monos = cf.cfParams.map(function(_) return mkMono());
 		var tf = follow(applyParams(cf.cfParams, monos, mapType(cf.cfType)));
 		return switch tf {
 			case TFun(signature):
-				function loop2(acc:Array<TExpr>, expressions:Array<TExpr>,
+				function loop2(acc:Array<TExpr>, expressions:Vector<TExpr>,
 						tl:Array<{name:String, optional:Bool, type:T}>):Null<FieldCallCandidateData<ResolvedOverload>> {
 					if (expressions.length > 0 && tl.length > 0) {
 						var e = expressions[0], rest = expressions.slice(1), t = tl[0].type;
@@ -76,9 +80,7 @@ class OverloadResolution {
 											unify(element, e.etype);
 											return e;
 										});
-										var ordered = acc.copy();
-										ordered.reverse();
-										FieldCallCandidate.makeFieldCallCandidate(ordered.concat(tail), signature.ret, monos, tf, cf,
+										FieldCallCandidate.makeFieldCallCandidate(VectorTools.ofArrayReversed(acc).concat(tail), signature.ret, monos, tf, cf,
 											({cls: c, field: cf, monos: monos} : ResolvedOverload));
 									} catch (_:Dynamic) {
 										null;
@@ -89,9 +91,7 @@ class OverloadResolution {
 						}
 					}
 					if (expressions.length == 0 && tl.length == 0) {
-						var ordered = acc.copy();
-						ordered.reverse();
-						return FieldCallCandidate.makeFieldCallCandidate(ordered, signature.ret, monos, tf, cf,
+						return FieldCallCandidate.makeFieldCallCandidate(VectorTools.ofArrayReversed(acc), signature.ret, monos, tf, cf,
 							({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
 					}
 					return null;
@@ -102,7 +102,7 @@ class OverloadResolution {
 	}
 
 	public static function findOverload(mapType:T->T, c:TClass, cf:TClassField,
-			el:Array<TExpr>):Array<FieldCallCandidateData<ResolvedOverload>> {
+			el:Vector<TExpr>):Array<FieldCallCandidateData<ResolvedOverload>> {
 		var result = [];
 		for (field in [cf].concat(cf.cfOverloads)) {
 			var candidate = unifyCf(mapType, c, field, el);
@@ -122,7 +122,7 @@ class OverloadResolution {
 	}
 
 	public static function resolveInstanceOverload(isCtor:Bool, mapType:T->T, c:TClass, name:String,
-			el:Array<TExpr>):Null<ResolvedOverload> {
+			el:Vector<TExpr>):Null<ResolvedOverload> {
 		var candidates:Array<FieldCallCandidateData<ResolvedOverload>> = [];
 		inline function hasFunction(t1:T, fcc2:FieldCallCandidateData<ResolvedOverload>):Bool return switch [follow(t1), fcc2.fcType] {
 			case [TFun(s1), TFun(s2)]: typeIseq(TFun({args: s1.args, ret: tDynamic}), TFun({args: s2.args, ret: tDynamic}));
@@ -159,14 +159,14 @@ class OverloadResolution {
 	}
 
 	public static function maybeResolveInstanceOverload(isCtor:Bool, mapType:T->T, c:TClass, cf:TClassField,
-			el:Array<TExpr>):Null<ResolvedOverload> {
+			el:Vector<TExpr>):Null<ResolvedOverload> {
 		if (hasClassFieldFlag(cf,
 			CfOverload) || cf.cfOverloads.length > 0) return resolveInstanceOverload(isCtor, mapType, c, cf.cfName, el);
 		var candidate = unifyCf(mapType, c, cf, el);
 		return candidate == null ? {cls: c, field: cf, monos: extractParamTypes(cf.cfParams)} : candidate.fcData;
 	}
 
-	public static function maybeResolveConstructorOverload(c:TClass, tl:TParams, el:Array<TExpr>):Null<ResolvedOverload> {
+	public static function maybeResolveConstructorOverload(c:TClass, tl:TParams, el:Vector<TExpr>):Null<ResolvedOverload> {
 		var ctor = getConstructorClass(c, tl);
 		return maybeResolveInstanceOverload(true, function(t) return applyParams(ctor.cls.clParams, ctor.params, t), ctor.cls, ctor.field,
 			el);

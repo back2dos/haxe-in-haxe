@@ -21,6 +21,10 @@ import context.Common;
 import context.PlatformConfig;
 import macros.eval.EvalValue.Value;
 import haxe.ds.StringMap;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // port: haxe/src/macro/macroApi.ml: the compiler side of the macro API (`compiler_api`)
 // and the encoding/decoding of compiler values. Upstream is a functor over the
@@ -80,7 +84,7 @@ typedef CompilerApi = {
 	var allowPackage:String->Void;
 	var getLocalType:Void->Null<T>;
 	var getExpectedType:Void->Null<T>;
-	var getCallArguments:Void->Null<Array<Expr>>;
+	var getCallArguments:Void->Null<Vector<Expr>>;
 	var getLocalMethod:Void->String;
 	var getLocalImports:Void->Array<Import>;
 	var getLocalUsing:Void->Array<TClass>;
@@ -510,7 +514,7 @@ class MacroApiImpl {
 	public static function encodeMetaEntry(m:MetadataEntry):Value {
 		return encodeObj([
 			fld("name", encodeString(Meta.toString(m.meta))),
-			fld("params", encodeArray(m.exprs.map(encodeExpr))),
+			fld("params", encodeArray(m.exprs.mapToArray(encodeExpr))),
 			fld("pos", encodePos(m.pos)),
 		]);
 	}
@@ -733,7 +737,7 @@ class MacroApiImpl {
 					{
 						tag: 5,
 						pl: [
-							encodeArray(fl.map(of -> encodeObj([
+							encodeArray(fl.mapToArray(of -> encodeObj([
 								fld("field", encodeString(of.key.name)),
 								fld("name_pos", encodePos(of.key.pos)),
 								fld("quotes", encodeEnum(IQuoteStatus, switch of.key.quote {
@@ -745,11 +749,11 @@ class MacroApiImpl {
 						]
 					};
 				case EArrayDecl(el):
-					{tag: 6, pl: [encodeArray(el.map(loop))]};
+					{tag: 6, pl: [encodeArray(el.mapToArray(loop))]};
 				case ECall(e, el):
-					{tag: 7, pl: [loop(e), encodeArray(el.map(loop))]};
+					{tag: 7, pl: [loop(e), encodeArray(el.mapToArray(loop))]};
 				case ENew(p, el):
-					{tag: 8, pl: [encodeAstPath(p), encodeArray(el.map(loop))]};
+					{tag: 8, pl: [encodeAstPath(p), encodeArray(el.mapToArray(loop))]};
 				case EUnop(op, flag, e):
 					{
 						tag: 9,
@@ -766,7 +770,7 @@ class MacroApiImpl {
 					{
 						tag: 10,
 						pl: [
-							encodeArray(vl.map(v -> encodeObj([
+							encodeArray(vl.mapToArray(v -> encodeObj([
 								fld("name", encodePlacedName(v.evName)),
 								fld("namePos", encodePos(v.evName.pos)),
 								fld("isFinal", vbool(v.evFinal)),
@@ -780,7 +784,7 @@ class MacroApiImpl {
 				case EFunction(kind, f):
 					{tag: 11, pl: [encodeFunctionKind(kind), encodeFun(f)]};
 				case EBlock(el):
-					{tag: 12, pl: [encodeArray(el.map(loop))]};
+					{tag: 12, pl: [encodeArray(el.mapToArray(loop))]};
 				case EFor(e, eloop):
 					{tag: 13, pl: [loop(e), loop(eloop)]};
 				case EIf(econd, e, eelse):
@@ -802,8 +806,8 @@ class MacroApiImpl {
 						tag: 16,
 						pl: [
 							loop(e),
-							encodeArray(cases.map(c -> encodeObj([
-								fld("values", encodeArray(c.values.map(loop))),
+							encodeArray(cases.mapToArray(c -> encodeObj([
+								fld("values", encodeArray(c.values.mapToArray(loop))),
 								fld("guard", vnullOr(loop, c.guard)),
 								fld("expr", vnullOr(loop, c.expr)),
 								fld("pos", encodePos(c.pos)),
@@ -816,7 +820,7 @@ class MacroApiImpl {
 						tag: 17,
 						pl: [
 							loop(e),
-							encodeArray(catches.map(c -> encodeObj([
+							encodeArray(catches.mapToArray(c -> encodeObj([
 								fld("name", encodePlacedName(c.name)),
 								fld("name_pos", encodePos(c.name.pos)),
 								fld("type", vnullOr(encodeCtype, c.type)),
@@ -985,6 +989,18 @@ class MacroApiImpl {
 
 	static function decodeOptArray<A>(f:Value->A, v:Value):Array<A> return isNull(v) ? [] : decodeArray(v).map(f);
 
+	// port: `List.map f (decode_array v)` for the AST lists, which are Vectors here:
+	// allocated at the array's length and filled in order, with no list in between
+	static inline function mapDecodedArray<A>(v:Value, f:Value->A):Vector<A> {
+		var va = macros.eval.EvalDecode.decodeVarray(v);
+		var r = new Vector<A>(va.alength);
+		for (i in 0...va.alength) r[i] = f(va.avalues[i]);
+		return r;
+	}
+
+	// port: `decode_opt_array` for the AST lists
+	static inline function decodeOptVector<A>(f:Value->A, v:Value):Vector<A> return isNull(v) ? vector() : mapDecodedArray(v, f);
+
 	public static function decodeSubErrors(sub:Value):Array<core.Error.MacroError> {
 		function decodeSub(o:Value):core.Error.MacroError {
 			var msg = decodeString(field(o, "msg"));
@@ -1081,7 +1097,7 @@ class MacroApiImpl {
 	public static function decodeMetaEntry(v:Value):MetadataEntry {
 		return {
 			meta: Meta.fromString(decodeString(field(v, "name"))),
-			exprs: decodeOptArray(decodeExpr, field(v, "params")),
+			exprs: decodeOptVector(decodeExpr, field(v, "params")),
 			pos: decodePos(field(v, "pos"))
 		};
 	}
@@ -1193,7 +1209,7 @@ class MacroApiImpl {
 			case {index: 4, args: [e]}:
 				EParenthesis(loop(e));
 			case {index: 5, args: [a]}:
-				EObjectDecl(decodeArray(a).map(o -> {
+				EObjectDecl(mapDecodedArray(a, o -> {
 					var pn = decodePlacedName(field(o, "name_pos"), field(o, "field"));
 					var vquotes = field(o, "quotes");
 					var quotes = if (isNull(vquotes)) NoQuotes else switch decodeEnum(vquotes) {
@@ -1204,15 +1220,15 @@ class MacroApiImpl {
 						({key: {name: pn.name, pos: pn.pos, quote: quotes}, expr: loop(field(o, "expr"))} : ObjectField);
 				}));
 			case {index: 6, args: [a]}:
-				EArrayDecl(decodeArray(a).map(loop));
+				EArrayDecl(mapDecodedArray(a, loop));
 			case {index: 7, args: [e, el]}:
-				ECall(loop(e), decodeArray(el).map(loop));
+				ECall(loop(e), mapDecodedArray(el, loop));
 			case {index: 8, args: [t, el]}:
-				ENew(decodeAstPath(t), decodeArray(el).map(loop));
+				ENew(decodeAstPath(t), mapDecodedArray(el, loop));
 			case {index: 9, args: [op, f, e]}:
 				EUnop(decodeUnop(op), if (decodeBool(f)) Postfix else Prefix, loop(e));
 			case {index: 10, args: [vl]}:
-				EVars(decodeArray(vl).map(v -> {
+				EVars(mapDecodedArray(vl, v -> {
 					var vfinal = field(v, "isFinal");
 					var isFinal = if (isNull(vfinal)) false else decodeBool(vfinal);
 					var vstatic = field(v, "isStatic");
@@ -1229,7 +1245,7 @@ class MacroApiImpl {
 			case {index: 11, args: [kind, f]}:
 				EFunction(decodeFunctionKind(kind), decodeFun(f));
 			case {index: 12, args: [el]}:
-				EBlock(decodeArray(el).map(loop));
+				EBlock(mapDecodedArray(el, loop));
 			case {index: 13, args: [e1, e2]}:
 				EFor(loop(e1), loop(e2));
 			case {index: 14, args: [e1, e2, e3]}:
@@ -1237,8 +1253,8 @@ class MacroApiImpl {
 			case {index: 15, args: [e1, e2, flag]}:
 				EWhile(loop(e1), loop(e2), if (decodeBool(flag)) NormalWhile else DoWhile);
 			case {index: 16, args: [e, cases, eo]}:
-				var cases = decodeArray(cases).map(c -> ({
-					values: decodeArray(field(c, "values")).map(loop),
+				var cases = mapDecodedArray(cases, c -> ({
+					values: mapDecodedArray(field(c, "values"), loop),
 					guard: opt(loop, field(c, "guard")),
 					expr: opt(loop, field(c, "expr")),
 					pos: maybeDecodePos(field(c, "pos"))
@@ -1246,7 +1262,7 @@ class MacroApiImpl {
 				ESwitch(loop(e), cases,
 					opt(v -> ({expr: if (isNull(field(v, "expr"))) null else decodeExpr(v), pos: p} : SwitchDefault), eo));
 			case {index: 17, args: [e, catches]}:
-				var catches = decodeArray(catches).map(c -> ({
+				var catches = mapDecodedArray(catches, c -> ({
 					name: decodePlacedName(field(c, "name_pos"), field(c, "name")),
 					type: opt(decodeCtype, field(c, "type")),
 					expr: loop(field(c, "expr")),
@@ -1298,7 +1314,7 @@ class MacroApiImpl {
 		return encodeObj([
 			fld("get", vfun0(() -> encodeMetaContent(meta))),
 			fld("add", vfun3((k, vl, p) -> {
-				var el = decodeArray(vl).map(decodeExpr);
+				var el = mapDecodedArray(vl, decodeExpr);
 				var entry:MetadataEntry = {meta: Meta.fromString(decodeString(k)), exprs: el, pos: decodePos(p)};
 				meta = [entry].concat(meta);
 				set(meta);
@@ -1834,7 +1850,7 @@ class MacroApiImpl {
 					{
 						tag: 7,
 						pl: [
-							encodeArray(fl.map(f -> {
+							encodeArray(fl.mapToArray(f -> {
 								var expr = loop(f.expr);
 								encodeObj([fld("name", encodeString(f.key.name)), fld("expr", expr),]);
 							}))
@@ -1869,19 +1885,19 @@ class MacroApiImpl {
 					{tag: 17, pl: [loop(econd), v1, vflag]};
 				case TSwitch(sw):
 					var switchSubject = if (sw.switchExhaustive) {
-						var meta:MetadataEntry = {meta: core.MetaList.StrictMeta.Exhaustive, exprs: [], pos: Globals.nullPos};
+						var meta:MetadataEntry = {meta: core.MetaList.StrictMeta.Exhaustive, exprs: vector(), pos: Globals.nullPos};
 						new TExpr(TMeta(meta, sw.switchSubject), sw.switchSubject.etype, sw.switchSubject.epos);
 					} else {
 						sw.switchSubject;
 					}
 					var vdefault = vopt(encodeTexpr, sw.switchDefault);
-					var vcases = encodeArray(sw.switchCases.map(c -> {
+					var vcases = encodeArray(sw.switchCases.mapToArray(c -> {
 						var expr = loop(c.caseExpr);
 						encodeObj([fld("values", encodeTexprList(c.casePatterns)), fld("expr", expr)]);
 					}));
 					{tag: 18, pl: [loop(switchSubject), vcases, vdefault]};
 				case TTry(e1, catches):
-					var vcatches = encodeArray(catches.map(c -> {
+					var vcatches = encodeArray(catches.mapToArray(c -> {
 						var expr = loop(c.expr);
 						encodeObj([fld("v", encodeTvar(c.variable)), fld("expr", expr)]);
 					}));
@@ -1915,7 +1931,7 @@ class MacroApiImpl {
 		return loop(e);
 	}
 
-	public static function encodeTexprList(el:Array<TExpr>):Value return encodeArray(el.map(encodeTexpr));
+	public static function encodeTexprList(el:Vector<TExpr>):Value return encodeArray(el.mapToArray(encodeTexpr));
 
 	// ---------------------------------------------------------------------- //
 	// TEXPR Decoding
@@ -2045,7 +2061,7 @@ class MacroApiImpl {
 			case {index: 4, args: [v1, fa]}: TField(loop(v1), decodeFieldAccess(fa));
 			case {index: 5, args: [mt]}: TTypeExpr(decodeModuleType(mt));
 			case {index: 6, args: [v1]}: TParenthesis(loop(v1));
-			case {index: 7, args: [v]}: TObjectDecl(decodeArray(v).map(v -> {
+			case {index: 7, args: [v]}: TObjectDecl(mapDecodedArray(v, v -> {
 					key: {
 						name: decodeString(field(v, "name")),
 						pos: p,
@@ -2053,13 +2069,13 @@ class MacroApiImpl {
 					},
 					expr: loop(field(v, "expr"))
 				}));
-			case {index: 8, args: [vl]}: TArrayDecl(decodeArray(vl).map(loop));
-			case {index: 9, args: [v1, vl]}: TCall(loop(v1), decodeArray(vl).map(loop));
-			case {index: 10, args: [c, tl, vl]}: TNew(decodeRef(c), decodeArray(tl).map(decodeType), decodeArray(vl).map(loop));
+			case {index: 8, args: [vl]}: TArrayDecl(mapDecodedArray(vl, loop));
+			case {index: 9, args: [v1, vl]}: TCall(loop(v1), mapDecodedArray(vl, loop));
+			case {index: 10, args: [c, tl, vl]}: TNew(decodeRef(c), decodeArray(tl).map(decodeType), mapDecodedArray(vl, loop));
 			case {index: 11, args: [op, pf, v1]}: TUnop(decodeUnop(op), if (decodeBool(pf)) Postfix else Prefix, loop(v1));
 			case {index: 12, args: [f]}: TFunction(decodeTfunc(f));
 			case {index: 13, args: [v, eo]}: TExprDef.TVar(decodeTvar(v), opt(loop, eo));
-			case {index: 14, args: [vl]}: TBlock(decodeArray(vl).map(loop));
+			case {index: 14, args: [vl]}: TBlock(mapDecodedArray(vl, loop));
 			// 15 was TFor
 			case {index: 16, args: [vif, vthen, velse]}: TIf(loop(vif), loop(vthen), opt(loop, velse));
 			case {index: 17, args: [vcond, v1, b]}: TWhile(loop(vcond), loop(v1), if (decodeBool(b)) NormalWhile else DoWhile);
@@ -2075,15 +2091,15 @@ class MacroApiImpl {
 					return def != null || loop(e1);
 				}
 				var subject = loop(v1);
-				var cases = decodeArray(cl).map(v -> ({
-					casePatterns: decodeArray(field(v, "values")).map(loop),
+				var cases = mapDecodedArray(cl, v -> ({
+					casePatterns: mapDecodedArray(field(v, "values"), loop),
 					caseExpr: loop(field(v, "expr"))
 				} : TSwitchCase));
 				var def = opt(loop, vdef);
 				var sw = core.Texpr.mkSwitch(subject, cases, def, isExhaustive(subject, def));
 				TExprDef.TSwitch(sw);
 			case {index: 19, args: [v1, cl]}: TTry(loop(v1),
-					decodeArray(cl).map(v -> {variable: decodeTvar(field(v, "v")), expr: loop(field(v, "expr"))}));
+					mapDecodedArray(cl, v -> {variable: decodeTvar(field(v, "v")), expr: loop(field(v, "expr"))}));
 			case {index: 20, args: [vo]}: TReturn(opt(loop, vo));
 			case {index: 21, args: []}: TBreak;
 			case {index: 22, args: []}: TContinue;
@@ -2354,9 +2370,9 @@ class MacroApiImpl {
 			case TParenthesis(e) | TMeta(_, e) | TCast(e, null):
 				makeConst(e);
 			case TObjectDecl(el):
-				encodeObj(el.map(f -> fld(f.key.name, makeConst(f.expr))));
+				encodeObj(el.mapToArray(f -> fld(f.key.name, makeConst(f.expr))));
 			case TArrayDecl(al):
-				encodeArray(al.map(makeConst));
+				encodeArray(al.mapToArray(makeConst));
 			case _:
 				throw core.ds.Exit.raise();
 		}
@@ -2646,7 +2662,7 @@ class MacroApiImpl {
 			{
 				name: "unify",
 				value: vfun2((t1, t2) -> {
-					var e1 = mk(TObjectDecl([]), decodeType(t1), Globals.nullPos);
+					var e1 = mk(TObjectDecl(vector()), decodeType(t1), Globals.nullPos);
 					vbool(getApi().castOrUnify(decodeType(t2), e1, Globals.nullPos));
 				})
 			},
@@ -2899,7 +2915,7 @@ class MacroApiImpl {
 				value: vfun0(() -> {
 					switch getApi().getCallArguments() {
 						case null: vnull;
-						case el: encodeArray(el.map(encodeExpr));
+						case el: encodeArray(el.mapToArray(encodeExpr));
 					}
 				})
 			},

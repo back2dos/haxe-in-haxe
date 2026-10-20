@@ -58,6 +58,10 @@ import generators.jvm.JvmFunctions;
 import typing.TanonIdentification;
 import typing.OverloadResolution;
 import filters.exception.ExceptionFunctions;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 private typedef MetaTag = core.MetaList.StrictMeta;
 
@@ -443,14 +447,14 @@ class Genjvm {
 	}
 
 	public static function isConstIntPattern(c:TSwitchCase):Bool {
-		return Lambda.foreach(c.casePatterns, function(e) return switch e.eexpr {
+		return c.casePatterns.foreach(function(e) return switch e.eexpr {
 			case TConst(TInt(_)): true;
 			case _: false;
 		});
 	}
 
 	public static function isConstStringPattern(c:TSwitchCase):Bool {
-		return Lambda.foreach(c.casePatterns, function(e) return switch e.eexpr {
+		return c.casePatterns.foreach(function(e) return switch e.eexpr {
 			case TConst(TString(_)): true;
 			case _: false;
 		});
@@ -1231,7 +1235,7 @@ class AnnotationHandler {
 				case EConst(String(s, _)): AnnotationKind.AString(s);
 				case EConst(Ident("true")): ABool(true);
 				case EConst(Ident("false")): ABool(false);
-				case EArrayDecl(el): AArray(el.map(parseValue));
+				case EArrayDecl(el): AArray(el.mapToArray(parseValue));
 				case EField(e1, "class", _):
 					var path = parsePath(e1);
 					var jsig = try {
@@ -1254,7 +1258,7 @@ class AnnotationHandler {
 					var path = parsePath(e1);
 					var name = StringTools.replace(path.name, ".", "$");
 					var path:JPath = {pack: path.pack, name: name};
-					var values = el.map(parseValuePair);
+					var values = el.mapToArray(parseValuePair);
 					AAnnotation(JObject(path, []), values);
 				case _:
 					core.Error.raiseTypingError("Expected value expression", e.pos);
@@ -1276,7 +1280,7 @@ class AnnotationHandler {
 					var path = parsePath(e1);
 					var name = StringTools.replace(path.name, ".", "$");
 					var path:JPath = {pack: path.pack, name: name};
-					var values = el.map(parseValuePair);
+					var values = el.mapToArray(parseValuePair);
 					{path: path, values: values};
 				case _:
 					core.Error.raiseTypingError("Call expression expected", e.pos);
@@ -1887,9 +1891,9 @@ class TexprToJvm {
 		/* TODO: this seems to be missing the default, though in that case there probably wouldn't be a TSwitch in the AST */
 		if (cases.length == 0)
 			texpr(ret, e1)
-		else if (Lambda.foreach(cases, Genjvm.isConstIntPattern)) {
-			var cases = cases.map(function(c) {
-				var il = c.casePatterns.map(function(e) return switch e.eexpr {
+		else if (cases.foreach(Genjvm.isConstIntPattern)) {
+			var cases = cases.mapToArray(function(c) {
+				var il = c.casePatterns.mapToArray(function(e) return switch e.eexpr {
 					case TConst(TInt(i32)): i32;
 					case _: die("", "generators/genjvm.ml");
 				});
@@ -1902,9 +1906,9 @@ class TexprToJvm {
 			texpr(Genjvm.rvalueAny, e1);
 			jm.cast_(JInt);
 			jm.intSwitch(needVal, cases, def);
-		} else if (Lambda.foreach(cases, Genjvm.isConstStringPattern)) {
-			var cases = cases.map(function(c) {
-				var sl = c.casePatterns.map(function(e) return switch e.eexpr {
+		} else if (cases.foreach(Genjvm.isConstStringPattern)) {
+			var cases = cases.mapToArray(function(c) {
+				var sl = c.casePatterns.mapToArray(function(e) return switch e.eexpr {
 					case TConst(TString(s)): s;
 					case _: die("", "generators/genjvm.ml");
 				});
@@ -2460,7 +2464,7 @@ class TexprToJvm {
 	}
 
 	/* calls */
-	public function callArguments(?doCast:Bool = true, t:T, el:Array<TExpr>):{tl:Array<JSignature>, tr:Null<JSignature>} {
+	public function callArguments(?doCast:Bool = true, t:T, el:Vector<TExpr>):{tl:Array<JSignature>, tr:Null<JSignature>} {
 		var tl, tr;
 		switch followWithCoro(t) {
 			case NotCoro(TFun(s)):
@@ -2471,7 +2475,7 @@ class TexprToJvm {
 				tl = s.args;
 				tr = Genjvm.returnOfType(gctx, s.ret);
 			case _:
-				tl = el.map(function(e) return {name: "", optional: false, type: e.etype});
+				tl = el.mapToArray(function(e) return {name: "", optional: false, type: e.etype});
 				tr = objectSig;
 		}
 		var acc:Array<JSignature> = [];
@@ -2505,7 +2509,7 @@ class TexprToJvm {
 				switch TFunctions.follow(t) {
 					case TAbstract({aPath: {pack: ["haxe"], name: "Rest"}}, [t1]):
 						var jsig = Genjvm.jsignatureOfType(gctx, t);
-						newNativeArray(Genjvm.jsignatureOfType(gctx, t1), []);
+						newNativeArray(Genjvm.jsignatureOfType(gctx, t1), vector());
 						acc.push(jsig);
 					case _:
 				}
@@ -2524,7 +2528,7 @@ class TexprToJvm {
 		return {tl: acc, tr: tr};
 	}
 
-	public function call(ret:Ret, tr:T, e1:TExpr, el:Array<TExpr>):Void {
+	public function call(ret:Ret, tr:T, e1:TExpr, el:Vector<TExpr>):Void {
 		function invoke(t:T):Null<JSignature> {
 			jm.cast_(haxeFunctionSig);
 			/* We don't want to cast because typed functions handle that for us. */
@@ -2796,7 +2800,7 @@ class TexprToJvm {
 	}
 
 	/* exceptions */
-	public function tryCatch(ret:Ret, e1:TExpr, catches:Array<{variable:TVar, expr:TExpr}>):Void {
+	public function tryCatch(ret:Ret, e1:TExpr, catches:Vector<{variable:TVar, expr:TExpr}>):Void {
 		var restore = jm.startBranch();
 		var fpFrom = code.getFp();
 		var oldExceptions = caughtExceptions;
@@ -2882,8 +2886,8 @@ class TexprToJvm {
 		}
 	}
 
-	public function newNativeArray(jsig:JSignature, el:Array<TExpr>):Void {
-		jm.newNativeArray(jsig, el.map(function(e) return function() texpr(Genjvm.rvalueSig(jsig), e)));
+	public function newNativeArray(jsig:JSignature, el:Vector<TExpr>):Void {
+		jm.newNativeArray(jsig, el.mapToArray(function(e) return function() texpr(Genjvm.rvalueSig(jsig), e)));
 	}
 
 	public function spawnCompiledPatternField(s1:String, s2:String):JvmMethodBuilder {
@@ -3197,7 +3201,7 @@ class TexprToJvm {
 								lut.set(name, load);
 							}
 							/* Step 2: Fields in order of constructor arguments */
-							var order = fl.copy();
+							var order = fl.toArray();
 							haxe.ds.ArraySort.sort(order, function(a, b) return TypedefInterfaces.compareStrings(a.key.name, b.key.name));
 							return order.map(function(f) {
 								var name = f.key.name;
@@ -3316,7 +3320,7 @@ class TclassToJvm {
 			}
 			// port: guarded (see Genjvm.guardUnify)
 			return Genjvm.guardUnify(gctx, function() return OverloadResolution.resolveInstanceOverload(false, mapType, c, cf.cfName,
-				tl.map(function(a) return TexprBuilder.makeNull(a.type, nullPos))));
+				tl.mapToVector(function(a) return TexprBuilder.makeNull(a.type, nullPos))));
 		}
 		function ifMethod(f:TClassField->Void, cf:TClassField) {
 			switch cf.cfKind {
@@ -3549,7 +3553,7 @@ class TclassToJvm {
 						acc.unshift(TexprBuilder.makeString(gctx.gctx.basic, name, nullPos));
 						return acc;
 					}, []);
-					var e = mk(TArrayDecl(el), gctx.gctx.basic.tarray(gctx.gctx.basic.tstring), nullPos);
+					var e = mk(TArrayDecl(Vector.fromArrayCopy(el)), gctx.gctx.basic.tarray(gctx.gctx.basic.tstring), nullPos);
 					default_(e);
 				}
 			case e if (mtype != MethodType.MStatic):

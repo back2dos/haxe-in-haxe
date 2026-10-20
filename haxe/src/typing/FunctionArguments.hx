@@ -30,6 +30,7 @@ import context.TyperPass;
 import context.AbstractCast;
 import context.SafeCom;
 import optimization.Optimizer;
+import core.ds.VectorTools.vector;
 
 @:structInit class ArgumentWithDefault {
 	public var name:String;
@@ -188,7 +189,7 @@ class FunctionArguments {
 			var typed = withDefault[i];
 			if (i == 0 && offset == 1) {
 				var v = makeLocal(typed.name, VAbstractThis, typed.type, [], Globals.nullPos);
-				v.vMeta.unshift({meta: MetaTag.This, exprs: [], pos: Globals.nullPos});
+				v.vMeta.unshift({meta: MetaTag.This, exprs: vector(), pos: Globals.nullPos});
 				acc.unshift({variable: v, defaultValue: null});
 				continue;
 			}

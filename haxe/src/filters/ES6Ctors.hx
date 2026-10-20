@@ -29,6 +29,9 @@ import core.Meta;
 import core.Texpr;
 import core.Texpr.Builder;
 import generators.Gctx;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 private class AccessedThis extends haxe.Exception {
 	public final e:TExpr;
@@ -145,7 +148,7 @@ class ES6Ctors {
 
 		var eEmptySuperCall = /* super() */ {
 			var eSuper = mk(TConst(TSuper), tDynamic, nullPos);
-			mk(TCall(eSuper, []), com.basic.tvoid, nullPos);
+			mk(TCall(eSuper, vector()), com.basic.tvoid, nullPos);
 		}
 
 		var activated = false;
@@ -206,14 +209,14 @@ class ES6Ctors {
 						}
 
 						function makeHxCtorCall(eSkipFlag:TExpr):TExpr { /* this._hx_constructor(a,b,c) */
-							var hxctorCallArgs = [for (a in tfCtor.tfArgs) Builder.makeLocal(a.variable, nullPos)];
+							var hxctorCallArgs = tfCtor.tfArgs.mapToVector(a -> Builder.makeLocal(a.variable, nullPos));
 							var hxCtorCall = mk(TCall(eHxCtor, hxctorCallArgs), com.basic.tvoid, nullPos);
-							return if (doesCtorSkipping != null) mk(TBlock([
+							return if (doesCtorSkipping != null) mk(TBlock(vector(
 								mk(TBinop(OpAssign, eSkipFlag, eTrue), com.basic.tbool, nullPos),
 								eEmptySuperCall,
 								mk(TBinop(OpAssign, eSkipFlag, eFalse), com.basic.tbool, nullPos),
 								hxCtorCall
-							]), com.basic.tvoid, nullPos) else hxCtorCall;
+							)), com.basic.tvoid, nullPos) else hxCtorCall;
 						}
 
 						function makeSkipFlag(rootCl:TClass):TExpr { /* TopClass._hx_skip_constructor */
@@ -230,7 +233,7 @@ class ES6Ctors {
 
 										var eSkipFlag = makeSkipFlag(root);
 
-										var eCtorReplaced:TExpr = {eexpr: TBlock([makeHxCtorCall(eSkipFlag)]), etype: tfCtor.tfExpr.etype, epos: tfCtor.tfExpr.epos};
+										var eCtorReplaced:TExpr = {eexpr: TBlock(vector(makeHxCtorCall(eSkipFlag))), etype: tfCtor.tfExpr.etype, epos: tfCtor.tfExpr.epos};
 										cfCtor.cfExpr = {
 											eexpr: TFunction({tfArgs: removeDefaultArgValues(tfCtor.tfArgs), tfType: tfCtor.tfType, tfExpr: eCtorReplaced}),
 											etype: ctorExpr.etype,
@@ -252,16 +255,16 @@ class ES6Ctors {
 											eReturn
 										else
 											/* `{ super(); return; }` */
-											mk(TBlock([eEmptySuperCall, eReturn,]), com.basic.tvoid, nullPos);
+											mk(TBlock(vector(eEmptySuperCall, eReturn,)), com.basic.tvoid, nullPos);
 									}
 
 									var eSkipFlag = makeSkipFlag(root);
 
 									var eCtorReplaced:TExpr = {
-										eexpr: TBlock([
+										eexpr: TBlock(vector(
 											mk(TIf(Builder.mkParent(eSkipFlag), eSkip, null), com.basic.tvoid, nullPos),
 											makeHxCtorCall(eSkipFlag)
-										]),
+										)),
 										etype: tfCtor.tfExpr.etype,
 										epos: tfCtor.tfExpr.epos
 									};
@@ -300,7 +303,7 @@ class ES6Ctors {
 						eexpr: TFunction({
 							tfArgs: tf.tfArgs,
 							tfType: tf.tfType,
-							tfExpr: {eexpr: TBlock([eEmptySuperCall, tf.tfExpr]), etype: tf.tfExpr.etype, epos: tf.tfExpr.epos}
+							tfExpr: {eexpr: TBlock(vector(eEmptySuperCall, tf.tfExpr)), etype: tf.tfExpr.etype, epos: tf.tfExpr.epos}
 						}),
 						etype: eCtor.etype,
 						epos: eCtor.epos

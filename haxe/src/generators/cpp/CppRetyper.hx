@@ -19,6 +19,9 @@ import generators.cpp.CppError;
 import generators.cpp.CppError.CppErrorKind;
 import generators.cpp.filters.CppFilterValueType;
 import generators.cpp.filters.CppFilterAutoCast;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // port: value-type handlers (`unit -> marshal_type_state`).
 typedef ValueTypeHandler = Void->MarshalTypeState;
@@ -80,7 +83,7 @@ class CppRetyper {
 												});
 												var rev = acc.copy();
 												rev.reverse();
-												var fcc = typing.FieldCallCandidate.makeFieldCallCandidate(rev.concat(el), ret, monos, tf, cf,
+												var fcc = typing.FieldCallCandidate.makeFieldCallCandidate(Vector.fromArrayCopy(rev.concat(el)), ret, monos, tf, cf,
 													({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
 												fcc;
 											} catch (_:Dynamic) null;
@@ -92,7 +95,7 @@ class CppRetyper {
 						case [[], []]:
 							var rev = acc.copy();
 							rev.reverse();
-							typing.FieldCallCandidate.makeFieldCallCandidate(rev, ret, monos, tf, cf,
+							typing.FieldCallCandidate.makeFieldCallCandidate(Vector.fromArrayCopy(rev), ret, monos, tf, cf,
 								({cls: c, field: cf, monos: monos} : typing.OverloadResolution.ResolvedOverload));
 						case _:
 							null;
@@ -1114,7 +1117,7 @@ private class ExpressionRetyper {
 		inline function cppTypeOfWith(handler:ValueTypeHandler, t:T):Tcpp return this.cppTypeOf(handler, t);
 		function cppTypeOf(t:T):Tcpp return this.cppTypeOf(CppRetyper.withReferenceValueType, t);
 		function mkCppexpr(newExpr:TcppExprExpr, newType:Tcpp):TcppExpr return {cppexpr: newExpr, cpptype: newType, cpppos: expr.epos};
-		function retypeFunctionArgs(retyperCtx:RetyperCtx, args:Array<TExpr>, argTypes:Array<Tcpp>):{ctx:RetyperCtx, args:Array<TcppExpr>} {
+		function retypeFunctionArgs(retyperCtx:RetyperCtx, args:Vector<TExpr>, argTypes:Array<Tcpp>):{ctx:RetyperCtx, args:Array<TcppExpr>} {
 			// port: ExtList.List.fold_left2 raises on lists of different lengths.
 			if (args.length != argTypes.length) throw new core.ds.InvalidArgument("fold_left2");
 			var c = retyperCtx;
@@ -1127,7 +1130,7 @@ private class ExpressionRetyper {
 			return {ctx: c, args: acc};
 		}
 		function res(c:RetyperCtx, e:TcppExprExpr, t:Tcpp):{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} return {c: c, e: e, t: t};
-		function argTypesOf(args:Array<TExpr>):Array<Tcpp> return args.map(function(a) return cppTypeOf(a.etype));
+		function argTypesOf(args:Vector<TExpr>):Array<Tcpp> return args.mapToArray(function(a) return cppTypeOf(a.etype));
 
 		var r:{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} = switch expr.eexpr {
 			case TEnumParameter(enumObj, enumField, enumIndex):
@@ -1452,7 +1455,7 @@ private class ExpressionRetyper {
 				var cl = bl.resolver(r2.ctx);
 				res(cl.ctx, CppWhile(r1.expr, r2.expr, flag, cl.id), TCppVoid);
 			case TArrayDecl(el):
-				var elTypes = el.map(function(e) return cppTypeOf(e.etype));
+				var elTypes = el.mapToArray(function(e) return cppTypeOf(e.etype));
 				var rr = retypeFunctionArgs(retyperCtx, el, elTypes);
 				res(rr.ctx, CppArrayDecl(rr.args), cppTypeOf(expr.etype));
 			case TBlock(exprList):
@@ -1495,7 +1498,7 @@ private class ExpressionRetyper {
 				var elExprs = el.map(function(f) return f.expr);
 				var elNames = el.map(function(f) return f.key.name);
 
-				var rr = retypeFunctionArgs(retyperCtx, elExprs, el.map(function(f) return cppTypeOf(f.expr.etype)));
+				var rr = retypeFunctionArgs(retyperCtx, elExprs, el.mapToArray(function(f) return cppTypeOf(f.expr.etype)));
 				var joined = [for (i in 0...elNames.length) {name: elNames[i], e: rr.args[i]}];
 
 				switch returnType {
@@ -1591,7 +1594,7 @@ private class ExpressionRetyper {
 						for (sc in cases) {
 							var rb = retype(curCtx, TCppVoid, mkBlock(sc.caseExpr));
 							curCtx = rb.ctx;
-							acc.push({values: sc.casePatterns.map(constIntOf), e: rb.expr});
+							acc.push({values: sc.casePatterns.mapToArray(constIntOf), e: rb.expr});
 						}
 						res(curCtx, CppIntSwitch(condition, acc, cppDef), TCppVoid);
 					} catch (_:NotFound) {
@@ -1863,11 +1866,11 @@ private class ExpressionRetyper {
 		}
 	}
 
-	function retypeCall(retyperCtx:RetyperCtx, returnType:Tcpp, expr:TExpr, func:TExpr, args:Array<TExpr>):{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} {
+	function retypeCall(retyperCtx:RetyperCtx, returnType:Tcpp, expr:TExpr, func:TExpr, args:Vector<TExpr>):{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} {
 		function cppTypeOf(t:T):Tcpp return this.cppTypeOf(CppRetyper.withReferenceValueType, t);
 		function mkCppexpr(newExpr:TcppExprExpr, newType:Tcpp):TcppExpr return {cppexpr: newExpr, cpptype: newType, cpppos: expr.epos};
 		function res(c:RetyperCtx, e:TcppExprExpr, t:Tcpp):{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} return {c: c, e: e, t: t};
-		function retypeFunctionArgs(retyperCtx:RetyperCtx, args:Array<TExpr>, argTypes:Array<Tcpp>):{ctx:RetyperCtx, args:Array<TcppExpr>} {
+		function retypeFunctionArgs(retyperCtx:RetyperCtx, args:Vector<TExpr>, argTypes:Array<Tcpp>):{ctx:RetyperCtx, args:Array<TcppExpr>} {
 			// port: ExtList.List.fold_left2 raises on lists of different lengths.
 			if (args.length != argTypes.length) throw new core.ds.InvalidArgument("fold_left2");
 			var c = retyperCtx;
@@ -1879,7 +1882,7 @@ private class ExpressionRetyper {
 			}
 			return {ctx: c, args: acc};
 		}
-		function argTypesOf(args:Array<TExpr>):Array<Tcpp> return args.map(function(a) return cppTypeOf(a.etype));
+		function argTypesOf(args:Vector<TExpr>):Array<Tcpp> return args.mapToArray(function(a) return cppTypeOf(a.etype));
 		function withName(member:TClassField, name:String):TClassField {
 			var m = member.clone();
 			m.cfName = name;
@@ -1912,12 +1915,12 @@ private class ExpressionRetyper {
 		}
 	}
 
-	function retypeCallDefault(retyperCtx:RetyperCtx, returnType:Tcpp, expr:TExpr, func:TExpr, args:Array<TExpr>,
+	function retypeCallDefault(retyperCtx:RetyperCtx, returnType:Tcpp, expr:TExpr, func:TExpr, args:Vector<TExpr>,
 			retypedFunc:TcppExpr):{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} {
 		function cppTypeOf(t:T):Tcpp return this.cppTypeOf(CppRetyper.withReferenceValueType, t);
 		function mkCppexpr(newExpr:TcppExprExpr, newType:Tcpp):TcppExpr return {cppexpr: newExpr, cpptype: newType, cpppos: expr.epos};
 		function res(c:RetyperCtx, e:TcppExprExpr, t:Tcpp):{c:RetyperCtx, e:TcppExprExpr, t:Tcpp} return {c: c, e: e, t: t};
-		function retypeFunctionArgs(retyperCtx:RetyperCtx, args:Array<TExpr>, argTypes:Array<Tcpp>):{ctx:RetyperCtx, args:Array<TcppExpr>} {
+		function retypeFunctionArgs(retyperCtx:RetyperCtx, args:Vector<TExpr>, argTypes:Array<Tcpp>):{ctx:RetyperCtx, args:Array<TcppExpr>} {
 			// port: ExtList.List.fold_left2 raises on lists of different lengths.
 			if (args.length != argTypes.length) throw new core.ds.InvalidArgument("fold_left2");
 			var c = retyperCtx;
@@ -1929,7 +1932,7 @@ private class ExpressionRetyper {
 			}
 			return {ctx: c, args: acc};
 		}
-		function argTypesOf(args:Array<TExpr>):Array<Tcpp> return args.map(function(a) return cppTypeOf(a.etype));
+		function argTypesOf(args:Vector<TExpr>):Array<Tcpp> return args.mapToArray(function(a) return cppTypeOf(a.etype));
 		function withName(member:TClassField, name:String):TClassField {
 			var m = member.clone();
 			m.cfName = name;
@@ -1938,7 +1941,7 @@ private class ExpressionRetyper {
 			var cppType = cppTypeOf(expr.etype);
 			return switch retypedFunc.cppexpr {
 				case CppFunction(FuncFromStaticFunction, returnType):
-					var argTypes = args.map(function(a) return cppTypeOf(a.etype));
+					var argTypes = args.mapToArray(function(a) return cppTypeOf(a.etype));
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					switch ra.args {
 						case [{cppexpr: CppFunction(FuncStatic(clazz, false, member, []), funcReturn)}]:
@@ -1955,7 +1958,7 @@ private class ExpressionRetyper {
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					res(ra.ctx, CppCall(FuncInstance(obj, InstPtr(tcpp), withName(member, "removeRange"), templateParams), ra.args), TCppVoid);
 				case CppFunction(FuncInstance(obj, InstPtr(tcpp), member, templateParams), _) if (isArrayConcatCall(obj, member)):
-					var argTypes = args.map(function(_) return obj.cpptype);
+					var argTypes = args.mapToArray(function(_) return obj.cpptype);
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					res(ra.ctx, CppCall(FuncInstance(obj, InstPtr(tcpp), member, templateParams), ra.args), returnType);
 				case CppFunction(FuncStatic(obj, false, member, _), _) if (member.cfName == "::hx::AddressOf"):
@@ -2111,7 +2114,7 @@ private class ExpressionRetyper {
 							res(ra.ctx, CppCall(FuncExpression(retypedFunc), ra.args), TCppDynamic);
 					}
 				case CppExtern(name, isGlobal):
-					var argTypes = args.map(function(_) return TCppUnchanged);
+					var argTypes = args.mapToArray(function(_) return TCppUnchanged);
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					res(ra.ctx, CppCall(FuncExtern(name, isGlobal), ra.args), cppType);
 				case CppVar(VarLocal({tcppvType: TCppCallable(callableArgs, callableRet)}) | VarClosure({tcppvType: TCppCallable(callableArgs, callableRet)})):
@@ -2130,7 +2133,7 @@ private class ExpressionRetyper {
 							CppError.cppAbort(InternalError, expr.epos);
 					}
 
-					var argTypes = args.map(function(_) return TCppUnchanged);
+					var argTypes = args.mapToArray(function(_) return TCppUnchanged);
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 
 					res(ra.ctx, CppCall(FuncExpression(er.expr), ra.args), er.ret);
@@ -2139,14 +2142,14 @@ private class ExpressionRetyper {
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					res(ra.ctx, CppCall(FuncExpression(retypedFunc), ra.args), cls.closeType);
 				case o:
-					var argTypes = args.map(function(_) return TCppDynamic);
+					var argTypes = args.mapToArray(function(_) return TCppDynamic);
 					var ra = retypeFunctionArgs(retyperCtx, args, argTypes);
 					res(ra.ctx, CppCall(FuncExpression(retypedFunc), ra.args), TCppDynamic);
 			}
 	}
 
 	// port: List.hd.
-	static function listHd<A>(l:Array<A>):A {
+	static function listHd<A>(l:Vector<A>):A {
 		if (l.length == 0) throw new core.ds.Failure("hd");
 		return l[0];
 	}

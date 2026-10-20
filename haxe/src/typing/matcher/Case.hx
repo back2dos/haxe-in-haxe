@@ -20,6 +20,8 @@ import context.AbstractCast;
 import typing.matcher.Pattern;
 import typing.matcher.Bind;
 
+using core.ds.VectorTools;
+
 @:structInit class CaseData {
 	public var caseGuard:Null<TExpr>;
 	public var caseExpr:Null<TExpr>;
@@ -174,13 +176,13 @@ class Case {
 		return {subst: subst, rebindUnrefined: rebindUnrefined, unsubst: unsubst};
 	}
 
-	public static function make(ctx:Typer, t:T, freeMonos:Array<TMono>, el:Array<Expr>, eg:Null<Expr>, eoAst:Null<Expr>,
+	public static function make(ctx:Typer, t:T, freeMonos:Array<TMono>, el:haxe.ds.Vector<Expr>, eg:Null<Expr>, eoAst:Null<Expr>,
 			withType:WithTypeValue, postfixMatch:Bool, p:Pos):{
 		caseData:CaseData,
 		bindings:Array<Bind>,
 		pattern:PatternData
 	} {
-		function collapseCase(values:Array<Expr>):Expr {
+		function collapseCase(values:haxe.ds.Vector<Expr>):Expr {
 			if (values.length == 0) return raiseTypingError("case without pattern", p);
 			if (values.length == 1) return values[0];
 			var e = values[0], e2 = collapseCase(values.slice(1));

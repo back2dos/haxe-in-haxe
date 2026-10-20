@@ -7,6 +7,7 @@ import core.TType;
 import core.TFunctions;
 import core.TFunctions.*;
 import haxe.ds.StringMap;
+import core.ds.VectorTools.vector;
 
 // port: from haxe/src/core/tOther.ml.
 class TExprToExpr {
@@ -126,7 +127,7 @@ class TExprToExpr {
 			case TField(e, f): EField(convertExpr(e), fieldName(f), EFNormal);
 			case TTypeExpr(t): Ast.exprOfTypePath(fullTypePath(t), e.epos).expr;
 			case TParenthesis(e): EParenthesis(convertExpr(e));
-			case TObjectDecl(fl): EObjectDecl([for (f in fl) {key: f.key, expr: convertExpr(f.expr)}]);
+			case TObjectDecl(fl): EObjectDecl(fl.map(f -> ({key: f.key, expr: convertExpr(f.expr)} : ObjectField)));
 			case TArrayDecl(el): EArrayDecl(el.map(convertExpr));
 			case TCall(e, el): ECall(convertExpr(e), el.map(convertExpr));
 			case TNew(c, pl, el):
@@ -151,19 +152,17 @@ class TExprToExpr {
 					fType: mkTypeHint(f.tfType, Globals.nullPos),
 					fExpr: convertExpr(f.tfExpr)
 				});
-			case TVar(v, eo): EVars([
+			case TVar(v, eo): EVars(vector(
 					Ast.mkEVar({name: v.vName, pos: v.vPos}, hasVarFlag(v, VFinal), false, mkTypeHint(v.vType, v.vPos), eopt(eo), v.vMeta)
-				]);
+				));
 			case TBlock(el): EBlock(el.map(convertExpr));
 			case TIf(e, e1, e2): EIf(convertExpr(e), convertExpr(e1), eopt(e2));
 			case TWhile(e1, e2, flag): EWhile(convertExpr(e1), convertExpr(e2), flag);
 			case TSwitch(s):
-				var cases = [
-					for (c in s.switchCases) ({
+				var cases = s.switchCases.map(c -> ({
 						values:c.casePatterns.map(convertExpr), guard:null,
 						expr:c.caseExpr.eexpr.match(TBlock([])) ? null : convertExpr(c.caseExpr), pos:c.caseExpr.epos
-					} : core.Ast.SwitchCase)
-				];
+					} : core.Ast.SwitchCase));
 				var de = eopt(s.switchDefault);
 				var def = de == null ? null : de.expr.match(EBlock([])) ? ({
 					expr: null,
@@ -174,18 +173,16 @@ class TExprToExpr {
 			case TEnumIndex(_) | TEnumParameter(_, _, _): throw "Complex enum AST requires @:ast metadata";
 			case TTry(e, catches):
 				var e1 = convertExpr(e);
-				ETry(e1, [
-					for (c in catches) {
+				ETry(e1, catches.map(c -> {
 						var ct = try convertTypeHint(c.variable.vType) catch (_:TypeExit) throw "Unconvertible catch type";
 						var e = convertExpr(c.expr);
-						{
+						({
 							name: {name: c.variable.vName, pos: c.variable.vPos},
 							type: ct,
 							expr: e,
 							pos: e.pos
-						};
-					}
-				]);
+						} : core.Ast.Catch);
+					}));
 			case TReturn(e): EReturn(eopt(e));
 			case TBreak: EBreak;
 			case TContinue: EContinue;

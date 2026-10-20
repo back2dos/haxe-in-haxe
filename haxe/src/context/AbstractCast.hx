@@ -18,6 +18,7 @@ import core.Error.ErrorMsg;
 import typing.CallUnification;
 import core.ds.NotFound;
 import context.SafeCom.SafeContext;
+import core.ds.VectorTools.vector;
 
 // port: find_array_read_access / find_array_write_access results (OCaml tuples)
 typedef ArrayReadAccess = {field:TClassField, type:T, ret:T, index:TExpr};
@@ -37,13 +38,13 @@ class AbstractCast {
 	static final castStack:Array<TClassField> = [];
 
 	public static function makeStaticCall(ctx:context.Typecore.Typer, c:TClass, cf:TClassField, a:TAbstract, pl:TParams,
-			args:Array<TExpr>, t:T, p:Pos):TExpr {
+			args:haxe.ds.Vector<TExpr>, t:T, p:Pos):TExpr {
 		switch cf.cfKind {
 			case Method(MethMacro):
 				if (args.length != 1) throw "abstractCast: invalid macro cast argument count";
 				var pushed = Typecore.pushThis(ctx, args[0]);
 				ctx.e.withTypeStack.unshift(core.WithType.withType(t));
-				var e = switch ctx.g.doMacro(ctx, MExpr, c.clPath, cf.cfName, [pushed.expr], p) {
+				var e = switch ctx.g.doMacro(ctx, MExpr, c.clPath, cf.cfName, vector(pushed.expr), p) {
 					case MSuccess(expr): Typecore.typeExpr(ctx, expr, core.WithType.withType(t));
 					case _: Typecore.typeExpr(ctx, {expr: EConst(Ident("null")), pos: p}, core.WithType.value);
 				};
@@ -93,8 +94,8 @@ class AbstractCast {
 			if (MetadataTools.has(StrictMeta.MultiType, cf.cfMeta)) return core.TFunctions.mkCast(eright, tleft, p);
 			if (a.aImpl == null) throw "abstractCast: missing implementation";
 			return recurse(cf, function() {
-				var ret = makeStaticCall(ctx, a.aImpl, cf, a, tl, [eright], tleft, p);
-				return {eexpr: TMeta({meta: StrictMeta.ImplicitCast, exprs: [], pos: ret.epos}, ret), etype: ret.etype, epos: ret.epos};
+				var ret = makeStaticCall(ctx, a.aImpl, cf, a, tl, vector(eright), tleft, p);
+				return {eexpr: TMeta({meta: StrictMeta.ImplicitCast, exprs: vector(), pos: ret.epos}, ret), etype: ret.etype, epos: ret.epos};
 			});
 		}
 		if (core.TUnification.typeIseqCustom(uctx, tleft, eright.etype)) return eright;
@@ -371,7 +372,7 @@ class AbstractCast {
 					var ef = core.TFunctions.mk(TField(eThis, FStatic(c, cf)),
 						core.TFunctions.applyParams(cf.cfParams, found.fieldMonos, cf.cfType), e.epos);
 					var call = filters.exception.ExceptionFunctions.makeCall(scom, ef,
-						[core.TFunctions.mk(TConst(TNull), TAbstract(a, found.params), e.epos)].concat(el), m, e.epos);
+						core.ds.VectorTools.cons(core.TFunctions.mk(TConst(TNull), TAbstract(a, found.params), e.epos), el), m, e.epos);
 					{eexpr: call.eexpr, etype: m, epos: call.epos};
 				}
 			case TCall({eexpr: TField(_, FStatic(c, cf))}, [e1])
@@ -387,7 +388,7 @@ class AbstractCast {
 							var c = a.aImpl;
 							var cf = c.clStatics.get("toString");
 							if (cf == null) e; else {
-								function call():TExpr return filters.exception.ExceptionFunctions.makeStaticCall(scom, c, cf, [e1],
+								function call():TExpr return filters.exception.ExceptionFunctions.makeStaticCall(scom, c, cf, vector(e1),
 									scom.basic.tstring, e.epos);
 								if (!core.TFunctions.isNullable(e1.etype)) call();
 								else {
@@ -454,10 +455,10 @@ class AbstractCast {
 								if (core.TFunctions.hasMeta(StrictMeta.MultiType, a.aMeta)) switch core.TFunctions.follow(e1.etype) {
 									case TFun(original):
 										var args = funType.signature.args;
-										var casted:Array<TExpr> = [];
+										var casted = new haxe.ds.Vector<TExpr>(el.length);
 										for (i in 0...el.length) {
 											if (i >= args.length) {
-												casted.push(el[i]);
+												casted[i] = el[i];
 												continue;
 											}
 											var t = args[i].type;
@@ -468,7 +469,7 @@ class AbstractCast {
 													}
 												case _:
 											}
-											casted.push(maybeCast(el[i], t, el[i].epos));
+											casted[i] = maybeCast(el[i], t, el[i].epos);
 										}
 										el = casted;
 									case _:
@@ -482,7 +483,7 @@ class AbstractCast {
 										var c = a.aImpl;
 										var cf = c.clStatics.get(fname);
 										if (cf == null) throw NotFound.raise();
-										filters.exception.ExceptionFunctions.makeStaticCall(scom, c, cf, [e2].concat(el), e.etype, e.epos);
+										filters.exception.ExceptionFunctions.makeStaticCall(scom, c, cf, core.ds.VectorTools.cons(e2, el), e.etype, e.epos);
 									case _: throw NotFound.raise();
 								}
 							}

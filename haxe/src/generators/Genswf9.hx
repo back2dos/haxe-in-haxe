@@ -37,6 +37,10 @@ import core.ds.NotFound;
 import libs.swflib.As3;
 import libs.swflib.As3hl;
 import generators.FlashProps.*;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 enum TKind {
 	KInt;
@@ -128,7 +132,7 @@ class Context {
 		```
 		otherwise returns `None`
 	*/
-	public var handle_spread_args:BasicTypes->Array<TExpr>->T->(Array<TExpr>->TExpr)->Null<TExpr>;
+	public var handle_spread_args:BasicTypes->Vector<TExpr>->T->(Vector<TExpr>->TExpr)->Null<TExpr>;
 	public var cur_class:TClass;
 	public var debug:Bool;
 	public var last_line:Int;
@@ -976,7 +980,7 @@ class Genswf9 {
 		function loop_try(e:TExpr) {
 			switch e.eexpr {
 				case TFunction(_):
-				case TTry(_, catches) if (Lambda.exists(catches, is_not_rethrow)): throw Exit.raise();
+				case TTry(_, catches) if (catches.exists(is_not_rethrow)): throw Exit.raise();
 				case _: Texpr.iter(loop_try, e);
 			}
 		}
@@ -1574,7 +1578,7 @@ class Genswf9 {
 				var p = e.epos;
 				var e2 = mk(TTypeExpr(t), tDynamic, p);
 				var eis = mk(TIdent("__is__"), tDynamic, p);
-				var ecall = mk(TCall(eis, [e1, e2]), ctx.com.basic.tbool, p);
+				var ecall = mk(TCall(eis, vector(e1, e2)), ctx.com.basic.tbool, p);
 				var enot:TExpr = {eexpr: TUnop(Not, Prefix, ecall), etype: ecall.etype, epos: ecall.epos};
 				var exc = mk(TThrow(mk(TConst(TString("Class cast error")), ctx.com.basic.tstring, p)), ctx.com.basic.tvoid, p);
 				var eif = mk(TIf(enot, exc, null), ctx.com.basic.tvoid, p);
@@ -1627,7 +1631,7 @@ class Genswf9 {
 		}
 	}
 
-	static function args_as_array(ctx:Context, mandatory_args:Array<TExpr>, spread_arg:TExpr, p:Pos):TExpr {
+	static function args_as_array(ctx:Context, mandatory_args:Vector<TExpr>, spread_arg:TExpr, p:Pos):TExpr {
 		return switch mandatory_args {
 			case []:
 				spread_arg;
@@ -1635,11 +1639,11 @@ class Genswf9 {
 				var p = Texpr.punionEl(p, mandatory_args);
 				var array = mk(TArrayDecl(mandatory_args), ctx.com.basic.tarray(tDynamic), p);
 				var concat = mk(TField(array, FDynamic("concat")), tDynamic, spread_arg.epos);
-				mk(TCall(concat, [spread_arg]), ctx.com.basic.tarray(tDynamic), Ast.punion(p, spread_arg.epos));
+				mk(TCall(concat, vector(spread_arg)), ctx.com.basic.tarray(tDynamic), Ast.punion(p, spread_arg.epos));
 		}
 	}
 
-	static function gen_call(ctx:Context, retval:Bool, e:TExpr, el:Array<TExpr>, r:T):Void {
+	static function gen_call(ctx:Context, retval:Bool, e:TExpr, el:Vector<TExpr>, r:T):Void {
 		switch (el.length > 0 ? el[el.length - 1].eexpr : null) {
 			/* generate a call with `...rest` as `callee.apply(null, [param1, param2].concat(rest))` */
 			case TUnop(Spread, Prefix, rest):
@@ -1648,7 +1652,7 @@ class Genswf9 {
 				var nul = mk(TConst(TNull), tDynamic, nullPos);
 				var t = TFun({args: [{name: "thisArg", optional: false, type: tDynamic}, {name: "argArray", optional: false, type: t_array_dyn}], ret: r});
 				var apply = mk(TField(e, FDynamic("apply")), t, e.epos);
-				gen_call(ctx, retval, apply, [nul, args_as_array(ctx, el_rev, rest, e.epos)], r);
+				gen_call(ctx, retval, apply, vector(nul, args_as_array(ctx, el_rev, rest, e.epos)), r);
 				return;
 			/* normal call without `...rest` */
 			case _:
@@ -1855,7 +1859,7 @@ class Genswf9 {
 		}
 	}
 
-	static function gen_field_call(ctx:Context, retval:Bool, eobj:TExpr, f:TFieldAccess, el:Array<TExpr>, r:T):Void {
+	static function gen_field_call(ctx:Context, retval:Bool, eobj:TExpr, f:TFieldAccess, el:Vector<TExpr>, r:T):Void {
 		switch eobj {
 			case {eexpr: TConst(TSuper)}:
 				var id = this_property(f);
@@ -2016,7 +2020,7 @@ class Genswf9 {
 					var cf = c.clStatics.get("compare");
 					if (cf == null) die();
 					var f = FStatic(c, cf);
-					gen_expr(ctx, true, mk(TCall(mk(TField(mk(TTypeExpr(TClassDecl(c)), tDynamic, p), f), tDynamic, p), [e1, e2]), ctx.com.basic.tbool, p));
+					gen_expr(ctx, true, mk(TCall(mk(TField(mk(TTypeExpr(TClassDecl(c)), tDynamic, p), f), tDynamic, p), vector(e1, e2)), ctx.com.basic.tbool, p));
 			}
 		}
 		switch op {
@@ -2221,8 +2225,8 @@ class Genswf9 {
 	static function is_const(e:TExpr):Bool {
 		return switch e.eexpr {
 			case TConst(_): true;
-			case TArrayDecl(el) | TBlock(el): Lambda.foreach(el, is_const);
-			case TObjectDecl(fl): Lambda.foreach(fl, f -> is_const(f.expr));
+			case TArrayDecl(el) | TBlock(el): el.foreach(is_const);
+			case TObjectDecl(fl): fl.foreach(f -> is_const(f.expr));
 			case TParenthesis(e) | TMeta(_, e): is_const(e);
 			case TFunction(_): true;
 			case _: false;
@@ -2515,7 +2519,7 @@ class Genswf9 {
 
 	static final has_protected_meta = Meta.Custom(":has_protected");
 
-	static function mark_has_protected(c:TClass):Void c.clMeta.unshift(({meta: has_protected_meta, exprs: [], pos: nullPos} : MetadataEntry));
+	static function mark_has_protected(c:TClass):Void c.clMeta.unshift(({meta: has_protected_meta, exprs: vector(), pos: nullPos} : MetadataEntry));
 
 	static function find_first_nonextern_accessor_implementor(cl:TClass, name:String):TClass {
 		function loop(cl:TClass, cl_found:TClass):TClass {
@@ -2579,7 +2583,7 @@ class Genswf9 {
 			tfExpr: {
 				var ethis = mk(TConst(TThis), TInst(c, tl), nullPos);
 				var efield = mk(TField(ethis, FInstance(accessor_cl, accessor_tl, accessor_cf)), accessor_cf.cfType, nullPos);
-				var ecall = mk(TCall(efield, []), prop_cf.cfType, nullPos);
+				var ecall = mk(TCall(efield, vector()), prop_cf.cfType, nullPos);
 				mk(TReturn(ecall), tDynamic, nullPos);
 			}
 		};
@@ -2603,7 +2607,7 @@ class Genswf9 {
 				var ethis = mk(TConst(TThis), TInst(c, tl), nullPos);
 				var efield = mk(TField(ethis, FInstance(accessor_cl, accessor_tl, accessor_cf)), accessor_cf.cfType, nullPos);
 				var earg = mk(TLocal(varg), prop_cf.cfType, nullPos);
-				mk(TCall(efield, [earg]), prop_cf.cfType, nullPos);
+				mk(TCall(efield, vector(earg)), prop_cf.cfType, nullPos);
 			}
 		};
 	}
@@ -2646,7 +2650,7 @@ class Genswf9 {
 			tfExpr: {
 				var ethis = Builder.makeStaticThis(c, nullPos);
 				var efield = mk(TField(ethis, FStatic(c, f)), f.cfType, nullPos);
-				var ecall = mk(TCall(efield, []), prop_cf.cfType, nullPos);
+				var ecall = mk(TCall(efield, vector()), prop_cf.cfType, nullPos);
 				mk(TReturn(ecall), tDynamic, nullPos);
 			}
 		} : TFunc));
@@ -2662,7 +2666,7 @@ class Genswf9 {
 					var ethis = Builder.makeStaticThis(c, nullPos);
 					var efield = mk(TField(ethis, FStatic(c, f)), f.cfType, nullPos);
 					var earg = mk(TLocal(varg), prop_cf.cfType, nullPos);
-					mk(TCall(efield, [earg]), prop_cf.cfType, nullPos);
+					mk(TCall(efield, vector(earg)), prop_cf.cfType, nullPos);
 				}
 			} : TFunc);
 		});
@@ -2813,7 +2817,7 @@ class Genswf9 {
 						tfArgs: [],
 						tfType: ctx.com.basic.tvoid,
 						tfExpr: {
-							eexpr: TBlock([]),
+							eexpr: TBlock(vector()),
 							etype: ctx.com.basic.tvoid,
 							epos: nullPos,
 						}
@@ -3291,7 +3295,7 @@ class Genswf9 {
 		var ctx = new Context();
 		ctx.com = com;
 		ctx.need_ctor_skip = Gctx.hasFeature(com, "Type.createEmptyInstance");
-		ctx.handle_spread_args = function(basic:BasicTypes, args:Array<TExpr>, t_result:T, args_to_expr:Array<TExpr>->TExpr):Null<TExpr> {
+		ctx.handle_spread_args = function(basic:BasicTypes, args:Vector<TExpr>, t_result:T, args_to_expr:Vector<TExpr>->TExpr):Null<TExpr> {
 			if (args.length == 0) return null;
 			switch args[args.length - 1].eexpr {
 				case TUnop(Spread, Prefix, rest):
@@ -3327,7 +3331,7 @@ class Genswf9 {
 						var args = {
 							var front = args_rev.copy();
 							front.reverse();
-							front.concat(nargs(n - 1, []));
+							front.concat(VectorTools.ofArray(nargs(n - 1, [])));
 						};
 						// port: right-to-left constructor argument evaluation.
 						var e_then = args_to_expr(args);

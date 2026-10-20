@@ -334,6 +334,12 @@ class Chunk {
 		for (x in l) f(x);
 	}
 
+	// port: write_list of an AST list kept as a Vector
+	public inline function writeVector<B>(l:haxe.ds.Vector<B>, f:B->Void):Void {
+		writeUleb128(l.length);
+		for (x in l) f(x);
+	}
+
 	// port: write_dynarray is writeList: DynArray and list are both Array.
 
 	public function writeOption<B>(v:Null<B>, f:B->Void):Void {
@@ -567,12 +573,25 @@ class HxbWriter {
 		};
 	}
 
-	inline function writeInlinedList<A>(offset:Int, max:Int, fByte:Int->Void, fFirst:Void->Void, fElt:A->Void, l:Array<A>):Void {
+	extern overload inline function writeInlinedList<A>(offset:Int, max:Int, fByte:Int->Void, fFirst:Void->Void, fElt:A->Void, l:Array<A>):Void {
 		var length = l.length;
 		if (length > max) {
 			fByte(offset + 9);
 			fFirst();
 			chunk.writeList(l, fElt);
+		} else {
+			fByte(offset + length);
+			fFirst();
+			for (elt in l) fElt(elt);
+		}
+	}
+
+	extern overload inline function writeInlinedList<A>(offset:Int, max:Int, fByte:Int->Void, fFirst:Void->Void, fElt:A->Void, l:haxe.ds.Vector<A>):Void {
+		var length = l.length;
+		if (length > max) {
+			fByte(offset + 9);
+			fFirst();
+			chunk.writeVector(l, fElt);
 		} else {
 			fByte(offset + length);
 			fFirst();
@@ -629,7 +648,7 @@ class HxbWriter {
 	function writeMetadataEntry(entry:MetadataEntry):Void {
 		chunk.writeString(metadataName(entry.meta));
 		writePos(entry.pos);
-		chunk.writeList(entry.exprs, writeExpr);
+		chunk.writeVector(entry.exprs, writeExpr);
 	}
 
 	function writeMetadata(ml:Metadata):Void chunk.writeList(ml, writeMetadataEntry);
@@ -826,28 +845,28 @@ class HxbWriter {
 				writeExpr(e1);
 			case EObjectDecl(fl):
 				chunk.writeU8(9);
-				chunk.writeList(fl, function(f) {
+				chunk.writeVector(fl, function(f) {
 					writeObjectFieldKey(f.key);
 					writeExpr(f.expr);
 				});
 			case EArrayDecl(el):
 				chunk.writeU8(10);
-				chunk.writeList(el, writeExpr);
+				chunk.writeVector(el, writeExpr);
 			case ECall(e1, el):
 				chunk.writeU8(11);
 				writeExpr(e1);
-				chunk.writeList(el, writeExpr);
+				chunk.writeVector(el, writeExpr);
 			case ENew(ptp, el):
 				chunk.writeU8(12);
 				writePlacedTypePath(ptp);
-				chunk.writeList(el, writeExpr);
+				chunk.writeVector(el, writeExpr);
 			case EUnop(op, flag, e1):
 				chunk.writeU8(13);
 				chunk.writeU8(unopIndex(op, flag));
 				writeExpr(e1);
 			case EVars(vl):
 				chunk.writeU8(14);
-				chunk.writeList(vl, function(v) {
+				chunk.writeVector(vl, function(v) {
 					writePlacedName(v.evName);
 					chunk.writeBool(v.evFinal);
 					chunk.writeBool(v.evStatic);
@@ -868,7 +887,7 @@ class HxbWriter {
 				writeFunc(f);
 			case EBlock(el):
 				chunk.writeU8(16);
-				chunk.writeList(el, writeExpr);
+				chunk.writeVector(el, writeExpr);
 			case EFor(e1, e2):
 				chunk.writeU8(17);
 				writeExpr(e1);
@@ -893,8 +912,8 @@ class HxbWriter {
 			case ESwitch(e1, cases, def):
 				chunk.writeU8(22);
 				writeExpr(e1);
-				chunk.writeList(cases, function(c) {
-					chunk.writeList(c.values, writeExpr);
+				chunk.writeVector(cases, function(c) {
+					chunk.writeVector(c.values, writeExpr);
 					chunk.writeOption(c.guard, writeExpr);
 					chunk.writeOption(c.expr, writeExpr);
 					writePos(c.pos);
@@ -906,7 +925,7 @@ class HxbWriter {
 			case ETry(e1, catches):
 				chunk.writeU8(23);
 				writeExpr(e1);
-				chunk.writeList(catches, function(c) {
+				chunk.writeVector(catches, function(c) {
 					writePlacedName(c.name);
 					chunk.writeOption(c.type, writeTypeHint);
 					writeExpr(c.expr);
@@ -1430,7 +1449,7 @@ class HxbWriter {
 				return null;
 			}, function() return "var type", v.vPos);
 		}
-		var loopEl:Array<TExpr>->Void = null;
+		var loopEl:haxe.ds.Vector<TExpr>->Void = null;
 		function loop(e1:TExpr):Void {
 			var writeType = switch e1.eexpr {
 				// values 0-19
@@ -1557,7 +1576,7 @@ class HxbWriter {
 					true;
 				case TObjectDecl(fl):
 					chunk.writeU8(63);
-					chunk.writeList(fl, function(f) {
+					chunk.writeVector(fl, function(f) {
 						chunk.writeString(f.key.name);
 						writePos(f.key.pos);
 						switch f.key.quote {
@@ -1592,7 +1611,7 @@ class HxbWriter {
 				case TSwitch(s):
 					chunk.writeU8(82);
 					loop(s.switchSubject);
-					chunk.writeList(s.switchCases, function(c) {
+					chunk.writeVector(s.switchCases, function(c) {
 						loopEl(c.casePatterns);
 						loop(c.caseExpr);
 					});
@@ -1601,7 +1620,7 @@ class HxbWriter {
 				case TTry(e2, catches):
 					chunk.writeU8(83);
 					loop(e2);
-					chunk.writeList(catches, function(c) {
+					chunk.writeVector(catches, function(c) {
 						declareVar(c.variable);
 						loop(c.expr);
 					});
@@ -1771,7 +1790,7 @@ class HxbWriter {
 			}
 			fctx.posWriter.writePos(chunk, true, 0, e1.epos);
 		}
-		loopEl = function(el:Array<TExpr>) chunk.writeList(el, loop);
+		loopEl = function(el:haxe.ds.Vector<TExpr>) chunk.writeVector(el, loop);
 		loop(e);
 	}
 

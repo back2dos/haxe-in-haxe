@@ -9,8 +9,12 @@ import core.Ast.UnopFlag;
 import core.Ast.WhileFlag;
 import core.TType;
 import core.TFunctions;
+import core.ds.VectorTools;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 using core.TFunctions;
+using core.ds.VectorTools;
 
 // Lowers one function body to IR statements (A-normal form: calls and
 // allocations only as the value of an SSet/SExpr). Every lowered expression
@@ -443,7 +447,7 @@ class FnLower {
 		}
 
 	// lowers operands left to right; spills earlier ones when a later one has side effects
-	function operands(es:Array<TExpr>):Array<Ex> {
+	function operands(es:Vector<TExpr>):Array<Ex> {
 		var r = [];
 		for (e in es) {
 			var before = out.length;
@@ -485,7 +489,7 @@ class FnLower {
 	// operands converted to the given representations (missing trailing ones:
 	// defaults; `callee` the function they are of, `recv` its receiver, when
 	// one may read its arguments or `this`: defaultValue)
-	function args(es:Array<TExpr>, to:Array<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0, ?callee:FuncInfo, ?recv:() -> Ex):Array<Ex> {
+	function args(es:Vector<TExpr>, to:Array<Ty>, defaults:Null<Array<Null<TExpr>>>, offset = 0, ?callee:FuncInfo, ?recv:() -> Ex):Array<Ex> {
 		var xs = operands(es);
 		var vars = callee != null ? l.argVars.get(callee) : null;
 		var r = [], rTys = [];
@@ -1109,7 +1113,7 @@ class FnLower {
 		return true;
 	}
 
-	function tryStmt(body:TExpr, catches:Array<{variable:TVar, expr:TExpr}>, target:Null<Local>) {
+	function tryStmt(body:TExpr, catches:Vector<{variable:TVar, expr:TExpr}>, target:Null<Local>) {
 		fi.hasTry = true;
 		var b = branch(body, target);
 		var cs = [];
@@ -1276,15 +1280,15 @@ class FnLower {
 			case TArray(a, i):
 				switch tyOf(a) {
 					case TRef(RNativeArr(elem)):
-						var xs = operands([a, i]);
+						var xs = operands(vector(a, i));
 						var al = ELocal(asLocal(xs[0], tyOf(a)));
 						coerce(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elem, tyOf(e));
 					case TRef(RArr(elem)):
-						var xs = operands([a, i]);
+						var xs = operands(vector(a, i));
 						var ix = coerce(xs[1], tyOf(i), TI32);
 						coerce(isVectorData(a.etype) ? EArrGetU(elem, xs[0], ix) : EArrGet(elem, xs[0], ix), elem, tyOf(e));
 					case _:
-						var xs = operands([a, i]);
+						var xs = operands(vector(a, i));
 						var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_aget"), [coerce(xs[0], tyOf(a), TRef(RAny)), coerce(xs[1], tyOf(i), TI32)], TRef(RAny)));
 						coerce(r, TRef(RAny), tyOf(e));
 				}
@@ -1340,7 +1344,7 @@ class FnLower {
 				var xs = operands(vs);
 				ENewArr(elem, [for (i in 0...xs.length) coerce(xs[i], tyOf(vs[i]), elem)]);
 			case TObjectDecl(fs):
-				var xs = operands([for (f in fs) f.expr]);
+				var xs = operands(fs.map(f -> f.expr));
 				var fields = [for (i in 0...fs.length) {name: fs[i].key.name, ty: l.boxed(tyOf(fs[i].expr))}];
 				var sh = l.getProgram().shape(fields);
 				var vals = [];
@@ -1671,11 +1675,11 @@ class FnLower {
 				out.push(op == OpBoolAnd ? SIf(ELocal(lo), rest, []) : SIf(ELocal(lo), [], rest));
 				return ELocal(lo);
 			case OpEq | OpNotEq:
-				var xs = operands([a, b]);
+				var xs = operands(vector(a, b));
 				var eq = equality(xs[0], tyOf(a), xs[1], tyOf(b), false);
 				return op == OpEq ? eq : ENot(eq);
 			case OpLt | OpLte | OpGt | OpGte:
-				var xs = operands([a, b]);
+				var xs = operands(vector(a, b));
 				return compare(op, xs[0], tyOf(a), xs[1], tyOf(b));
 			case OpNullCoal:
 				var t = tyOf(e);
@@ -1978,7 +1982,7 @@ class FnLower {
 
 	// ---- calls
 
-	function call(f:TExpr, cargs:Array<TExpr>, e:TExpr):Ex {
+	function call(f:TExpr, cargs:Vector<TExpr>, e:TExpr):Ex {
 		var rt = tyOf(e);
 		switch strip(f).eexpr {
 			case TField(o, FStatic(c, cf)) if (overloadImpl(c, cf) != cf):
@@ -1994,7 +1998,7 @@ class FnLower {
 					case TRef(RNativeArr(t)): t;
 					case _: return fail("NativeArray." + cf.cfName + " of another type", e);
 				};
-				var xs = operands([obj].concat(cargs));
+				var xs = operands(VectorTools.cons(obj, cargs));
 				var a = ELocal(asLocal(xs[0], tyOf(obj))), i = coerce(xs[1], tyOf(cargs[0]), TI32);
 				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elem, rt);
 				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elem), elem)));
@@ -2037,7 +2041,7 @@ class FnLower {
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);
 			case TField(obj, FDynamic("cca")) if (tyOf(obj).match(TRef(RStr)) && cargs.length == 1):
 				// StringTools.fastCodeAt / unsafeCodeAt: `untyped s.cca(i)` (0 past the end, as on cpp/hl)
-				var xs = operands([obj, cargs[0]]);
+				var xs = operands(vector(obj, cargs[0]));
 				return coerceRhs(ECallHost("String_charCodeAt_i", [xs[0], coerce(xs[1], tyOf(cargs[0]), TI32)], TI32), TI32, rt);
 			case TField(_, FStatic(c, cf)) if (cf.cfKind.match(Method(MethDynamic)) && !c.hasClassFlag(CExtern)):
 				var g = staticDynMethod(c, cf);
@@ -2071,7 +2075,7 @@ class FnLower {
 					case TRef(RArr(t)): t;
 					case _: TRef(RAny);
 				};
-				var xs = operands([obj, cargs[0]]);
+				var xs = operands(vector(obj, cargs[0]));
 				var al = asLocal(xs[0], at);
 				out.push(SArrPush(elem, al, coerce(xs[1], tyOf(cargs[0]), elem)));
 				return coerce(EArrLen(ELocal(al)), TI32, rt);
@@ -2082,7 +2086,7 @@ class FnLower {
 				};
 				var name = Lower.nativeName(c) + "_" + cf.cfName;
 				var t = ty(s.ret);
-				var xs = args([obj].concat(cargs), [tyOf(obj)].concat([for (a in s.args) ty(a.type)]), null);
+				var xs = args(VectorTools.cons(obj, cargs), [tyOf(obj)].concat([for (a in s.args) ty(a.type)]), null);
 				var intrinsic = intrinsicMethod(name, xs, tyOf(obj));
 				if (intrinsic != null) return coerce(intrinsic, t, rt);
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);
@@ -2154,7 +2158,7 @@ class FnLower {
 	}
 
 	// calling a function value: a closure, or Dynamic
-	function callValue(f:TExpr, cargs:Array<TExpr>, e:TExpr):Ex {
+	function callValue(f:TExpr, cargs:Vector<TExpr>, e:TExpr):Ex {
 		var rt = tyOf(e);
 		switch tyOf(f) {
 			case TRef(RClos(s)):
@@ -2172,7 +2176,7 @@ class FnLower {
 	}
 
 	// static externs lowered to IR operations instead of runtime calls
-	function intrinsicStatic(name:String, cargs:Array<TExpr>, e:TExpr):Null<Ex> {
+	function intrinsicStatic(name:String, cargs:Vector<TExpr>, e:TExpr):Null<Ex> {
 		return switch name {
 			case "Std_int" if (cargs.length == 1):
 				var mm = intMinMax(cargs[0]);
@@ -2276,7 +2280,7 @@ class FnLower {
 
 	// calls of Ptr's extern accessors (value, [i], offset) and of Struct's layout
 	// constants; null for any other call
-	function cInteropCall(c:TClass, cf:TClassField, cargs:Array<TExpr>, e:TExpr):Null<Ex> {
+	function cInteropCall(c:TClass, cf:TClassField, cargs:Vector<TExpr>, e:TExpr):Null<Ex> {
 		switch c.clKind {
 			case KAbstractImpl(a) if (a.aPath.name == "Ptr" && a.aPath.pack.join(".") == "hxmc.unsafe"):
 				var n = cf.cfName;
@@ -2346,7 +2350,7 @@ class FnLower {
 	// a call of a C function declared by an extern (CInterop.declare): the
 	// arguments converted to their C types' representations; MirBuild applies
 	// the ABI (narrow and float32 values) and the safe region
-	function cCall(sym:String, c:TClass, cf:TClassField, s:core.TType.TSignature, cargs:Array<TExpr>, e:TExpr):Ex {
+	function cCall(sym:String, c:TClass, cf:TClassField, s:core.TType.TSignature, cargs:Vector<TExpr>, e:TExpr):Ex {
 		var sig = try CInterop.declare(sym, c, cf, s) catch (err:LowerError) {
 			if (err.where == "") err.where = where(e);
 			throw err;
@@ -2552,7 +2556,7 @@ class FnLower {
 
 	// new S(args) for a @:hxmc.struct class: its memory (a fresh slot, or
 	// into) zeroed, then the constructor called on it
-	function newStruct(c:TClass, cargs:Array<TExpr>, into:Null<Local>):Local {
+	function newStruct(c:TClass, cargs:Vector<TExpr>, into:Null<Local>):Local {
 		var t = structTy(c);
 		var s = into != null ? into : newSlot(t, true);
 		if (c.clConstructor == null) {

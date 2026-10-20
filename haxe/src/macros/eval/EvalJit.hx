@@ -34,8 +34,10 @@ import macros.eval.EvalContext;
 import macros.eval.EvalHash;
 import macros.eval.EvalEmitter;
 import macros.eval.EvalJitContext;
+import haxe.ds.Vector;
 
 using macros.eval.EvalValue.EvalValueTools;
+using core.ds.VectorTools;
 
 // port: deviations:
 // - Upstream shadows `jit_tfunction` and `jit_expr`: the recursive JIT functions
@@ -344,7 +346,7 @@ class EvalJit {
 					var execThen = jitExprRec(jit, ret, e2);
 					var execElse = if (eo == null) EvalEmitter.emitNull else jitExprRec(jit, ret, eo);
 					return EvalEmitter.emitIf(execCond, execThen, execElse);
-				case TSwitch(sw) if (isInt(sw.switchSubject.etype) && Lambda.foreach(sw.switchCases, isConstIntPattern)):
+				case TSwitch(sw) if (isInt(sw.switchSubject.etype) && sw.switchCases.foreach(isConstIntPattern)):
 					var exec = jitExprRec(jit, false, sw.switchSubject);
 					var h:GlobalsIntMap<Emitter> = GlobalsIntMap.empty();
 					var max = 0;
@@ -690,7 +692,7 @@ class EvalJit {
 	}
 
 	// port: the `TCall` case of `jit_expr`.
-	static function jitCall(jit:JitContext, ctx:Context, e:TExpr, e1:TExpr, el:Array<TExpr>):Emitter {
+	static function jitCall(jit:JitContext, ctx:Context, e:TExpr, e1:TExpr, el:Vector<TExpr>):Emitter {
 		switch e1.eexpr {
 			case TField({eexpr: TConst(TSuper), epos: pv}, FInstance(c, _, cf)):
 				var proto = EvalContext.getInstancePrototype(ctx, EvalHash.pathHash(c.clPath), e1.epos);
@@ -822,13 +824,13 @@ class EvalJit {
 				e = concat(Texpr.setDefault(ctx.curapi.getCom().basic, a.variable, a.defaultValue, e.epos), e);
 			k--;
 		}
-		inline function hasFinalReturn(el:Array<TExpr>):Bool {
+		inline function hasFinalReturn(el:Vector<TExpr>):Bool {
 			return el.length > 0 && el[el.length - 1].eexpr.match(TReturn(_));
 		}
 		switch e.eexpr {
 			case TBlock(el) if (ctx.debug.supportDebugger && core.TOther.ExtType.isVoid(follow(tf.tfType)) && !hasFinalReturn(el)):
 				var pos2:Pos = {pfile: pos.pfile, pmin: pos.pmax, pmax: pos.pmax};
-				e = mk(TBlock(el.concat([mk(TReturn(null), tDynamic, pos2)])), e.etype, e.epos);
+				e = mk(TBlock(el.snoc(mk(TReturn(null), tDynamic, pos2))), e.etype, e.epos);
 			case _:
 		}
 		// Jit the function expression.

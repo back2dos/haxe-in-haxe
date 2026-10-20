@@ -13,6 +13,7 @@ import context.Common;
 import core.Message.CompilerMessageKind;
 import core.Message.WarningMode;
 import hxmc.ModuleStore;
+import core.ds.VectorTools.vector;
 
 // The compilation server's module cache made durable (docs/plans/compiler.md, "Cached
 // modules"): a build writes the typed modules it ends with, as the server
@@ -2479,7 +2480,7 @@ class Skeletons {
 					nodes.push(mk(TTypeExpr(mt)));
 				case 1:
 					switch findType(com, i) {
-						case TClassDecl(c): nodes.push(mk(TNew(c, [], [])));
+						case TClassDecl(c): nodes.push(mk(TNew(c, [], vector())));
 						case _: return null;
 					}
 				case _:
@@ -2492,7 +2493,7 @@ class Skeletons {
 							return null;
 					}
 			}
-		return mk(TBlock(nodes));
+		return mk(TBlock(haxe.ds.Vector.fromArrayCopy(nodes)));
 	}
 
 	public static function encode(s:ModuleCacheState, sign:String, p:GlobalTypePath):Bytes {

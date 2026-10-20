@@ -76,6 +76,9 @@ import context.TyperPass;
 import typing.Typeload.*;
 import typing.TypeloadFields.FieldError.*;
 import typing.TypeloadFields.TypeloadFields.*;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 // Logic for building fields.
 @:structInit class ClassInitCtx {
@@ -221,7 +224,7 @@ class TypeloadFields {
 		throw NotFound.raise();
 	}
 
-	public static function meta(m:StrictMeta, ?p:Pos):MetadataEntry return {meta: m, exprs: [], pos: p == null ? Globals.nullPos : p};
+	public static function meta(m:StrictMeta, ?p:Pos):MetadataEntry return {meta: m, exprs: vector(), pos: p == null ? Globals.nullPos : p};
 
 	public static function ae(e:ExprDef, p:Pos):Expr return {expr: e, pos: p};
 
@@ -312,7 +315,7 @@ class TypeloadFields {
 		argsRev.reverse();
 		typesRev.reverse();
 		exprsRev.reverse();
-		return {args: argsRev, expr: mk(TCall(mk(TConst(TSuper), TInst(s.cls, s.params), p), exprsRev), ctx.t.tvoid, p), types: typesRev};
+		return {args: argsRev, expr: mk(TCall(mk(TConst(TSuper), TInst(s.cls, s.params), p), haxe.ds.Vector.fromArrayCopy(exprsRev)), ctx.t.tvoid, p), types: typesRev};
 	}
 
 	/**
@@ -362,7 +365,7 @@ class TypeloadFields {
 			tl.unshift({name: cf.cfName, optional: opt, type: t});
 		}
 		if (sup.expr != null) el.unshift(sup.expr);
-		var tf = ({tfArgs: args.concat(sup.args), tfType: ctx.t.tvoid, tfExpr: mk(TBlock(el), ctx.t.tvoid, p)} : core.TType.TFunc);
+		var tf = ({tfArgs: args.concat(sup.args), tfType: ctx.t.tvoid, tfExpr: mk(TBlock(haxe.ds.Vector.fromArrayCopy(el)), ctx.t.tvoid, p)} : core.TType.TFunc);
 		var e = mk(TFunction(tf), TFun({args: tl.concat(sup.types), ret: ctx.t.tvoid}), p),
 			cf = mkField("new", e.etype, p, Globals.nullPos);
 		cf.cfDoc = docFromString(doc.toString());
@@ -381,8 +384,8 @@ class TypeloadFields {
 			case FProp(_, _, _,
 				_) if (!stat && !hasAccess(AEnum, f.cffAccess)): raiseTypingError("Member property accessors must be get/set or never", p);
 			case FFun(fu) if (f.cffName.name == "new" && !stat):
-				inline function init(p:Pos):Expr return ae(EVars([mkEvar({name: "this", pos: Globals.nullPos}, thisT, null,
-					[meta(This)])]), p);
+				inline function init(p:Pos):Expr return ae(EVars(vector(mkEvar({name: "this", pos: Globals.nullPos}, thisT, null,
+					[meta(This)]))), p);
 				inline function ret(p:Pos):Expr return ae(EReturn(ae(ECast(ae(EConst(Ident("this")), p), null), p)), p);
 				var metadata = [meta(NoCompletion)].concat(f.cffMeta);
 				if (MetadataTools.has(MultiType, a.aMeta)) {
@@ -397,8 +400,8 @@ class TypeloadFields {
 				// We don't want the generated expression positions to shadow the real code.
 				p = Record.withFields(p, {pmax: p.pmin});
 				var expr = fu.fExpr == null ? null : switch fu.fExpr.expr {
-					case EBlock(el): ae(EBlock([init(p)].concat(el).concat([ret(p)])), p);
-					case _: ae(EBlock([init(p), fu.fExpr, ret(p)]), p);
+					case EBlock(el): ae(EBlock(core.ds.VectorTools.cons(init(p), el).snoc(ret(p))), p);
+					case _: ae(EBlock(vector(init(p), fu.fExpr, ret(p))), p);
 				};
 				Record.withFields(f, {
 					cffName: {name: "_hx_new", pos: f.cffName.pos},
@@ -473,7 +476,7 @@ class TypeloadFields {
 				}
 			case _:
 		}
-		return ae(EVars([mkEvar({name: "", pos: Globals.nullPos}, {type: CTAnonymous(fields), pos: p})]), p);
+		return ae(EVars(vector(mkEvar({name: "", pos: Globals.nullPos}, {type: CTAnonymous(fields), pos: p}))), p);
 	}
 
 	public static function resolveTypeImport(ctx:Typer, p:Pos, i:String):Array<String> {
@@ -1218,7 +1221,7 @@ class TypeloadFields {
 			}
 		}
 		cf.cfMeta = cf.cfMeta.map(m -> m.meta == core.MetaList.StrictMeta.AstSource
-			&& m.exprs.length == 0 ? Record.withFields(m, {exprs: fd.fExpr == null ? [] : [fd.fExpr]}) : m);
+			&& m.exprs.length == 0 ? Record.withFields(m, {exprs: fd.fExpr == null ? vector() : vector(fd.fExpr)}) : m);
 		if (parent != null && !MetadataTools.has(Native, cf.cfMeta)) try cf.cfMeta.unshift(MetadataTools.get(Native, parent.cfMeta))
 		catch (_:NotFound) {}
 		Typeload.generateArgsMeta(ctx.com, c, m -> cf.cfMeta.unshift(m), fd.fArgs);
@@ -1558,7 +1561,7 @@ class TypeloadFields {
 		}
 		function checkRequire(metadata:Metadata):Null<{condition:String, message:Null<String>}> {
 			for (m in metadata) if (m.meta == core.MetaList.StrictMeta.Require) {
-				var conditions:Array<Expr> = m.exprs;
+				var conditions = m.exprs;
 				for (i in 0...conditions.length) {
 					var e = conditions[i], sc = switch e.expr {
 						case EConst(Ident(s)): s;
@@ -1733,7 +1736,7 @@ class TypeBinding {
 		// force macro system loading of this class in order to get completion
 		inline function forceMacro(display:Bool):Void delay(ctx.g, PTypeField, function() {
 			try {
-				ctx.g.doMacro(ctx, MDisplay, c.clPath, cf.cfName, [], p);
+				ctx.g.doMacro(ctx, MDisplay, c.clPath, cf.cfName, vector(), p);
 			} catch (_:Exit) {} catch (error:core.Error.TypingError) {
 				if (!display) throw error;
 			}
@@ -1789,7 +1792,7 @@ class TypeBinding {
 		var p = cf.cfPos;
 		var ctx = TyperManager.cloneForExpr(ctxField, fctx.isStatic ? FunStatic : FunMember, FunNotFunction);
 		if (hasClassFlag(c, CInterface)) unexpectedExpression(ctx.com, fctx, "Initialization on field of interface", astExpr.pos);
-		cf.cfMeta.unshift({meta: StrictMeta.Value, exprs: [astExpr], pos: Globals.mkZeroRangePos(cf.cfPos)});
+		cf.cfMeta.unshift({meta: StrictMeta.Value, exprs: vector(astExpr), pos: Globals.mkZeroRangePos(cf.cfPos)});
 		inline function checkCast(e:TExpr):TExpr {
 			// insert cast to keep explicit field type (issue #1901)
 			if (typeIseq(e.etype, cf.cfType)) return e;

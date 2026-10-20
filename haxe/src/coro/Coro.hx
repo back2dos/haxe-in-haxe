@@ -22,6 +22,10 @@ import coro.CoroFunctions.*;
 import coro.ContTypes;
 import coro.CoroToTexpr;
 import coro.CoroElsewhere.TexprBuilder;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 typedef CoroCls = {var params:TypeParams; var paramTypes:Array<T>; var clsT:T; var resultType:T; var contType:T;}
 // inside = inside the continuation class
@@ -102,7 +106,7 @@ class ContinuationClassBuilder {
 		var p = cc.namePos;
 		var ethis = mk(TConst(TThis), cc.inside.clsT, p);
 		var completion = allocVar(VGenerated, "completion", cont.continuation, p);
-		var esuper = b.call(b.makeSuper(cc.inside.contType, p), [b.local(completion, p), b.int(initial, p)], basic.tvoid);
+		var esuper = b.call(b.makeSuper(cc.inside.contType, p), vector(b.local(completion, p), b.int(initial, p)), basic.tvoid);
 		inline function thisField(cf:TClassField):TExpr return b.instanceField(ethis, cc.cls, cc.inside.paramTypes, cf, cf.cfType);
 		var capture:Null<{v:TVar, e:TExpr}> = null;
 		if (captured != null) {
@@ -132,7 +136,7 @@ class ContinuationClassBuilder {
 			args.push({variable: capture.v, defaultValue: null});
 		}
 		var field = mkField("new", TFun({args: funArgs, ret: basic.tvoid}), p, p);
-		var expr = mk(TFunction({tfType: basic.tvoid, tfArgs: args, tfExpr: b.voidBlock(el)}), field.cfType, p);
+		var expr = mk(TFunction({tfType: basic.tvoid, tfArgs: args, tfExpr: b.voidBlock(Vector.fromArrayCopy(el))}), field.cfType, p);
 		field.cfExpr = expr;
 		field.cfKind = Method(MethNormal);
 		if (ctx.config.debug) Sys.println(core.TPrinting.sExprDebug(expr));
@@ -166,7 +170,7 @@ class ContinuationClassBuilder {
 		el.push(b.varInitNull(vtmpError));
 		if ((vtmpErrorUnwrapped).isVal()) el.push(b.varInitNull((vtmpErrorUnwrapped).force()));
 		el.push(eloop);
-		var expr = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: mapLoop(b.voidBlock(el))}), basic.tvoid, p);
+		var expr = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: mapLoop(b.voidBlock(Vector.fromArrayCopy(el)))}), basic.tvoid, p);
 		var field = mkField("invokeResume", TFun({args: [], ret: ret}), p, p);
 		addClassFieldFlag(field, CfOverride);
 		field.cfExpr = expr;
@@ -182,7 +186,7 @@ class ContinuationClassBuilder {
 		var ret = TInst((basic.tcoro.suspensionResultClass).force(), [cc.inside.resultType]);
 		var ethis = b.makeThis(cc.inside.clsT, p);
 		var access = b.instanceField(ethis, cc.cls, cc.inside.paramTypes, captured, captured.cfType);
-		var expr = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: b.voidBlock([b.makeReturn(b.call(access, [], ret))])}), basic.tvoid, p);
+		var expr = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: b.voidBlock(vector(b.makeReturn(b.call(access, vector(), ret))))}), basic.tvoid, p);
 		var field = mkField("invokeResume", TFun({args: [], ret: ret}), p, p);
 		addClassFieldFlag(field, CfOverride);
 		field.cfExpr = expr;
@@ -255,7 +259,7 @@ class Coro {
 		// In debug mode, insert an initial setStackItem call at the very start of
 		// invokeResume so that the continuation always has a valid stack item, even in
 		// single-state coroutines where no suspension call triggers setStackItem.
-		var eloop = b.voidBlock([stack(cc.namePos), result.expr]);
+		var eloop = b.voidBlock(vector(stack(cc.namePos), result.expr));
 		var invoke = switch mode {
 			case GenInline(_): ContinuationClassBuilder.mkInvokeResumeWithBody(ctx, cc, vcontinuation, vtmpResult, vtmpError,
 					vtmpErrorUnwrapped, exprs.eresult, eloop);
@@ -275,33 +279,33 @@ class Coro {
 			case GenInline(captured):
 				// Inline path: pass hoisted args directly to the constructor and call invokeResume()
 				// on the result — no intermediate variable, no separate field assignments.
-				var ctorArgs = [exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat(captured == null ? [] : [captured.e]);
+				var ctorArgs = Vector.fromArrayCopy([exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat(captured == null ? [] : [captured.e]));
 				var tnew = mk(TNew(cc.cls, cc.outside.paramTypes, ctorArgs), cc.outside.clsT, cc.namePos);
 				var einvoke = b.instanceField(tnew, cc.cls, cc.outside.paramTypes, invoke, TFun({args: [], ret: ret}));
-				b.makeReturn(b.call(einvoke, [], ret));
+				b.makeReturn(b.call(einvoke, vector(), ret));
 			case GenThunk(_):
 				// Thunk path: build the closure that captures outer locals, allocate the continuation
 				// (passing hoisted args to the constructor), then call invokeResume().
 				var econt = b.local(vcontinuation, cc.namePos);
 				var invokeType = applyParams(cc.inside.params, cc.outside.paramTypes, invoke.cfType);
-				var call = b.call(b.instanceField(econt, cc.cls, cc.outside.paramTypes, invoke, invokeType), [], ret);
+				var call = b.call(b.instanceField(econt, cc.cls, cc.outside.paramTypes, invoke, invokeType), vector(), ret);
 				var el = [];
 				if ((vtmpResult).isVal()) el.push(b.varInit((vtmpResult).force(), exprs.eresult));
 				el.push(b.varInitNull(vtmpError));
 				if ((vtmpErrorUnwrapped).isVal()) el.push(b.varInitNull((vtmpErrorUnwrapped).force()));
 				el.push(eloop);
 				var thunkType = TFun({args: [], ret: ret});
-				var ethunk = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: b.voidBlock(el)}), thunkType, cc.namePos);
+				var ethunk = mk(TFunction({tfType: ret, tfArgs: [], tfExpr: b.voidBlock(Vector.fromArrayCopy(el))}), thunkType, cc.namePos);
 				var vthunk = allocVar(VGenerated, "_hx_thunk", thunkType, cc.namePos);
-				var ctorArgs = [exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat([b.local(vthunk, cc.namePos)]);
+				var ctorArgs = Vector.fromArrayCopy([exprs.ecompletion].concat(hoisted.map(function(h) return h.e)).concat([b.local(vthunk, cc.namePos)]));
 				var tnew = mk(TNew(cc.cls, cc.outside.paramTypes, ctorArgs), cc.outside.clsT, cc.namePos);
 				b.meta1(core.MetaList.StrictMeta.NullSafety, {expr: core.Ast.ExprDef.EConst(Ident("Off")), pos: vcontinuation.vPos},
-					b.voidBlock([
+					b.voidBlock(vector(
 						b.varInitNull(vcontinuation),
 						b.varInit(vthunk, ethunk),
 						b.assign(b.local(vcontinuation, cc.namePos), tnew),
 						b.makeReturn(call)
-					]));
+					)));
 		};
 	}
 
@@ -334,7 +338,7 @@ class Coro {
 					ret: expanded.ret
 				});
 				recordCopy3;
-			}, vars.map(function(v) return b.local(v, p))), expanded.ret, p);
+			}, vars.mapToVector(function(v) return b.local(v, p))), expanded.ret, p);
 			cf.cfExpr = mk(TFunction({
 				tfArgs: vars.map(function(v) return {variable: v, defaultValue: null}),
 				tfType: expanded.ret,
@@ -360,7 +364,7 @@ class Coro {
 		inline function makeDeferred(build:Void->TExpr, t:T):TExpr {
 			var v = allocVar(VGenerated, "_hx_coro_deferred", tDynamic, nullPos);
 			ctx.deferredExprs.set(v.vId, build);
-			return b.call(b.local(v, v.vPos), [], t);
+			return b.call(b.local(v, v.vPos), vector(), t);
 		}
 		// These refs will be filled in after the continuation API is created (step 4).
 		var api:Null<CoroDeferredApi> = null;
@@ -464,7 +468,7 @@ class Coro {
 			etmpErrorUnwrapped: etmpErrorUnwrapped
 		};
 		function stack(pos:Pos):TExpr {
-			if (!ctx.typer.com.debug) return b.voidBlock([]);
+			if (!ctx.typer.com.debug) return b.voidBlock(vector());
 			var field = PMap.find("setStackItem", cont.baseContinuationClass.clFields);
 			// setStackItem(kind, cls, func, id, file, line, column, pmin, pmax)
 			// kind: 0 = ClassFunction, 1 = LocalFunction
@@ -485,7 +489,7 @@ class Coro {
 				b.int(pos.pmin, p),
 				b.int(pos.pmax, p)
 			]);
-			return mk(TCall(continuationField(field, field.cfType), args), basic.tvoid, p);
+			return mk(TCall(continuationField(field, field.cfType), Vector.fromArrayCopy(args)), basic.tvoid, p);
 		}
 		// 5. Fill in the deferred callback implementations now that the continuation API exists
 
@@ -501,15 +505,15 @@ class Coro {
 				stmts.push(b.assign(estate, b.int(CoroReturned, pos)));
 				if (e != null) stmts.push(b.assign(eresult, e));
 				stmts.push(b.makeReturn(econtinuation));
-				return mk(TBlock(stmts), tDynamic, pos);
+				return mk(TBlock(Vector.fromArrayCopy(stmts)), tDynamic, pos);
 			},
 			makeInlineTailCall: function(call) {
 				var r = SuspensionCalls.makeSuspendingTailCall(ctx, cont, exprs, call);
-				return b.voidBlock([stack(call.csPos), r.call, r.check]);
+				return b.voidBlock(vector(stack(call.csPos), r.call, r.check));
 			},
 			makeSyncCall: function(call, e) {
 				var r = SuspensionCalls.makeSyncCallAndCheck(ctx, cont, exprs, call, e);
-				return b.voidBlock([stack(call.csPos), r.call, r.check]);
+				return b.voidBlock(vector(stack(call.csPos), r.call, r.check));
 			},
 			makeThis: function(e) {
 				var th = (egthis).force();
@@ -529,14 +533,14 @@ class Coro {
 		else {
 			var cf = PMap.find("startException", cont.baseContinuationClass.clFields);
 			var ef = continuationField(cf, cf.cfType);
-			startException = function(e) return mk(TCall(ef, [e]), basic.texception, p);
+			startException = function(e) return mk(TCall(ef, vector(e)), basic.texception, p);
 		}
 		var tfExpr = coroToStateMachine(ctx, cc, root, exprs, args, vtmpResult, vtmpError, vtmpErrorUnwrapped, vcompletion, vcontinuation,
 			mode, stack, startException);
 		// For non-static ClassField: prepend  var _hx_this = this  to the thin wrapper so the
 		// thunk (built inside coro_to_state_machine) can capture `_hx_this` via closure, making
 		// the original class instance accessible throughout the state machine.
-		if ((vgthis).isVal()) tfExpr = b.voidBlock([b.varInit((vgthis).force(), b.makeThis(ctx.typer.c.tthis, p)), tfExpr]);
+		if ((vgthis).isVal()) tfExpr = b.voidBlock(vector(b.varInit((vgthis).force(), b.makeThis(ctx.typer.c.tthis, p)), tfExpr));
 		var tfArgs = [{variable: vcompletion, defaultValue: null}].concat(args);
 		// I'm not sure what this should be, but let's stick to the widest one for now.
 		// Cpp dies if I try to use coro_class.outside.cls_t here, which might be something

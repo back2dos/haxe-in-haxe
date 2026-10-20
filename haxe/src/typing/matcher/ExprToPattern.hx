@@ -29,6 +29,8 @@ import context.Typecore;
 import typing.matcher.Pattern;
 import typing.matcher.Constructor;
 
+using core.ds.VectorTools;
+
 typedef PatternContext = {
 	var ctx:Typer;
 	var orLocals:Null<haxe.ds.StringMap<{v:TVar, p:Pos}>>;
@@ -46,7 +48,7 @@ class BadPattern extends haxe.Exception {
 }
 
 class ExprToPattern {
-	static function fieldAssoc(name:String, fields:Array<ObjectField>):Expr {
+	static function fieldAssoc(name:String, fields:haxe.ds.Vector<ObjectField>):Expr {
 		for (field in fields) if (field.key.name == name) return field.expr;
 		throw NotFound.raise();
 	}
@@ -351,7 +353,7 @@ class ExprToPattern {
 			case EField(_, _, _): try tryTyping(e) catch (ex:Exit) fail() catch (ex:BadPattern) core.Error.raiseTypingError(ex.message, p);
 			case EArrayDecl(el):
 				function arrayPattern(t2:T):PatternKind {
-					var ps = el.map(function(e) return make(pctx, false, t2, e));
+					var ps = el.mapToArray(function(e) return make(pctx, false, t2, e));
 					return PatConstructor({kind: ConArray(ps.length), pos: e.pos}, ps);
 				}
 				function arrayAccessPattern():PatternKind {

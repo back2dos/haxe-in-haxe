@@ -29,6 +29,8 @@ import core.Meta;
 import core.Meta.MetaNotFound;
 import haxe.ds.StringMap;
 
+using core.ds.VectorTools;
+
 private typedef Attribute = {name:String, value:String};
 
 private enum RttiXml {
@@ -96,7 +98,7 @@ class Genxml {
 		return filtered.length == 0 ? [] : [
 			node("meta", [],
 				filtered.map(m -> node("m", [attr("n", Meta.toString(m.meta))],
-					m.exprs.map(e -> node("e", [], [genString(AstPrinter.sExpr(e))])))))
+					m.exprs.mapToArray(e -> node("e", [], [genString(AstPrinter.sExpr(e))])))))
 		];
 	}
 

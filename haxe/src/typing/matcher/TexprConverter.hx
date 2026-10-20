@@ -23,6 +23,11 @@ import typing.matcher.Constructor;
 import typing.matcher.Case;
 import typing.matcher.Bind;
 import typing.matcher.MatcherGlobals.*;
+import core.ds.VectorTools;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 enum MatchKind {
 	SKValue;
@@ -250,7 +255,7 @@ class TexprConverter {
 		function loop(rec:DtRecursion, params:Array<T>, dt:DecisionTreeData):Null<TExpr> {
 			if (dt.dtTexpr != null) return dt.dtTexpr;
 			var e:Null<TExpr> = switch dt.dtT {
-				case Leaf(c): c.caseExpr == null ? mk(TBlock([]), ctx.t.tvoid, c.casePos) : c.caseExpr;
+				case Leaf(c): c.caseExpr == null ? mk(TBlock(vector()), ctx.t.tvoid, c.casePos) : c.caseExpr;
 				case Switch(subject, [sc = {scCon: {kind: ConFields(_)}}], _): // TODO: Can we improve this by making it more general?
 					var e = loop(rec, params, sc.scDt);
 					e == null ? null : core.TFunctions.concat(subject, e);
@@ -297,7 +302,7 @@ class TexprConverter {
 						if (e != null) {
 							g.cons.sort(Constructor.compare);
 							ecases.push(({
-								casePatterns: g.cons.map(function(c) return constructorToTexpr(ctx, c)),
+								casePatterns: g.cons.mapToVector(function(c) return constructorToTexpr(ctx, c)),
 								caseExpr: e
 							} : core.TType.TSwitchCase));
 						}
@@ -329,7 +334,7 @@ class TexprConverter {
 								[[{eexpr: TConst(TBool(false))}], [{eexpr: TConst(TBool(true))}]]: true;
 							case _: false;
 					})) mk(TIf(subject, ecases[1].caseExpr, ecases[0].caseExpr), tSwitch,
-							dt.dtPos); else mk(TSwitch(Texpr.mkSwitch(subject, ecases,
+							dt.dtPos); else mk(TSwitch(Texpr.mkSwitch(subject, Vector.fromArrayCopy(ecases),
 						edef, edef != null || ctors.finiteness == RunTimeFinite || ctors.finiteness == CompileTimeFinite)),
 						tSwitch, dt.dtPos);
 				case Guard(cond, a, b):
@@ -370,7 +375,7 @@ class TexprConverter {
 							elseE == null ? null :
 								// In some cases like extractors, the original e expression might be significant for the
 								// output, so let's make sure it appears there (issue #11738).
-								mk(TBlock([subject, elseE]), elseE.etype, elseE.epos);
+								mk(TBlock(vector(subject, elseE)), elseE.etype, elseE.epos);
 						} else if (Common.ignoreError(com)) mk(TConst(TNull), mkMono(), b.dtPos);
 						else reportNotExhaustive(lookup, subject, [{con: {kind: ConConst(TNull), pos: dt.dtPos}, params: []}]);
 					} else {
@@ -390,7 +395,10 @@ class TexprConverter {
 						case BindUnused:
 					}
 					var e = loop(rec, params, inner);
-					e == null ? null : mk(TBlock(el.concat([e])), e.etype, inner.dtPos);
+					e == null ? null : {
+						el.push(e);
+						mk(TBlock(Vector.fromArrayCopy(el)), e.etype, inner.dtPos);
+					}
 				case Fail: null;
 			};
 			dt.dtTexpr = e;

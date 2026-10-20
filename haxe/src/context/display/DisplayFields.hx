@@ -37,6 +37,7 @@ import core.Meta;
 import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
+import core.ds.VectorTools.vector;
 
 class DisplayFields {
 	public static function getSubmoduleFields(ctx:Typer, path:GlobalTypePath):Array<CompletionItemData> {
@@ -477,8 +478,8 @@ class DisplayFields {
 		var t = r.t;
 		var cf = mkField(i, t, pfield, Globals.nullPos, false);
 		cf.cfMeta = [
-			{meta: MetaTag.CompilerGenerated, exprs: [], pos: Globals.nullPos},
-			{meta: MetaTag.NoCompletion, exprs: [], pos: Globals.nullPos}
+			{meta: MetaTag.CompilerGenerated, exprs: vector(), pos: Globals.nullPos},
+			{meta: MetaTag.NoCompletion, exprs: vector(), pos: Globals.nullPos}
 		];
 		cf.cfKind = r.kind;
 		var r = switch follow(tthis) {

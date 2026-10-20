@@ -1,6 +1,8 @@
 package codegen;
 
 import haxe.io.Bytes;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 import core.Globals;
 import core.Globals.*;
 import core.Ast;
@@ -817,7 +819,7 @@ class Converter {
 		case _: die("", "codegen/javaModern.ml");
 	}
 
-	static function meta(m:MetaTag, exprs:Array<Expr>, p:Pos):MetadataEntry return {meta: m, exprs: exprs, pos: p};
+	static function meta(m:MetaTag, exprs:Vector<Expr>, p:Pos):MetadataEntry return {meta: m, exprs: exprs, pos: p};
 
 	static function sJPath(p:GlobalTypePath):String return sTypePath(p);
 
@@ -883,7 +885,7 @@ class Converter {
 			case _:
 		}
 		var className = PathConverter.jnameToHx(jc.jcPath.name).name;
-		addMeta(Converter.meta(MetaTag.Native, [{expr: EConst(String(sJPath(jc.jcPath), SDoubleQuotes)), pos: p}], p));
+		addMeta(Converter.meta(MetaTag.Native, vector({expr: EConst(String(sJPath(jc.jcPath), SDoubleQuotes)), pos: p}), p));
 		var data = data.copy();
 		data.reverse();
 		var d:EnumDefinition = {
@@ -929,7 +931,7 @@ class Converter {
 		if (isStatic) addAccess({access: AStatic, pos: p});
 		for (a in jf.jfAttributes) switch a {
 			case AttrDeprecated if (!isPathEq(jc.jcPath, ["java", "util"], "Date")):
-				addMeta(Converter.meta(MetaTag.Deprecated, [], p));
+				addMeta(Converter.meta(MetaTag.Deprecated, vector(), p));
 			case AttrVisibleAnnotations(ann):
 				for (a in ann) switch a.annType {
 					case JObject({pack: ["java", "lang"], name: "Override"}, []):
@@ -937,11 +939,11 @@ class Converter {
 					case _:
 				}
 			case AttrCode(_) if (isInterface):
-				addMeta(Converter.meta(MetaTag.JavaDefault, [], p));
+				addMeta(Converter.meta(MetaTag.JavaDefault, vector(), p));
 			case _:
 		}
 		function addNativeMeta() {
-			addMeta(Converter.meta(MetaTag.Native, [{expr: EConst(String(jf.jfName, SDoubleQuotes)), pos: p}], p));
+			addMeta(Converter.meta(MetaTag.Native, vector({expr: EConst(String(jf.jfName, SDoubleQuotes)), pos: p}), p));
 		}
 		var name = switch jf.jfName.split("$") {
 			case ["<init>"]:
@@ -1050,7 +1052,7 @@ class Converter {
 		var meta:Metadata = [];
 		function addFlag(f:ClassFlag) flags.unshift(f);
 		function addMeta(m:MetadataEntry) meta.unshift(m);
-		addMeta(Converter.meta(MetaTag.LibType, [], p));
+		addMeta(Converter.meta(MetaTag.LibType, vector(), p));
 		var isInterface = AccessFlags.hasFlag(jc.jcFlags, MInterface);
 		if (isInterface) addFlag(HInterface) else if (AccessFlags.hasFlag(jc.jcFlags, MAbstract)) addFlag(HAbstract);
 		var isAnnotation = AccessFlags.hasFlag(jc.jcFlags, MAnnotation);
@@ -1104,13 +1106,13 @@ class Converter {
 			}
 		}
 		var className = PathConverter.jnameToHx(jc.jcPath.name).name;
-		addMeta(Converter.meta(MetaTag.Native, [{expr: EConst(String(sJPath(jc.jcPath), SDoubleQuotes)), pos: p}], p));
+		addMeta(Converter.meta(MetaTag.Native, vector({expr: EConst(String(sJPath(jc.jcPath), SDoubleQuotes)), pos: p}), p));
 		if (isAnnotation) {
-			var args:Array<Expr> = switch extractRetentionPolicy(jc.jcAttributes) {
+			var args:Vector<Expr> = switch extractRetentionPolicy(jc.jcAttributes) {
 				case null:
-					[];
+					vector();
 				case v:
-					[{expr: EConst(String(v, SDoubleQuotes)), pos: p}];
+					vector({expr: EConst(String(v, SDoubleQuotes)), pos: p});
 			}
 			addMeta(Converter.meta(MetaTag.Annotation, args, p));
 		}
@@ -1170,7 +1172,7 @@ class Converter {
 			}
 			count == 1;
 		};
-		if (hasFiAnnotation || isStructuralSam) addMeta(Converter.meta(MetaTag.FunctionalInterface, [], p));
+		if (hasFiAnnotation || isStructuralSam) addMeta(Converter.meta(MetaTag.FunctionalInterface, vector(), p));
 		var d:ClassDefinition = {
 			name: {name: className, pos: p},
 			doc: null,

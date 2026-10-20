@@ -11,6 +11,10 @@ import core.ds.AtomicLazy;
 import haxe.ds.StringMap;
 import haxe.ds.IntMap;
 import sys.thread.Mutex;
+import core.ds.VectorTools;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 // port: from haxe/src/core/tFunctions.ml.
 typedef NotFound = core.ds.NotFound;
@@ -151,7 +155,7 @@ class TFunctions {
 
 	public static function mkBlock(e:TExpr):TExpr return switch e.eexpr {
 		case TBlock(_): e;
-		case _: mk(TBlock([e]), e.etype, e.epos);
+		case _: mk(TBlock(vector(e)), e.etype, e.epos);
 	};
 
 	public static function mkCast(e:TExpr, t:T, p:Pos):TExpr return mk(TCast(e, null), t, p);
@@ -771,9 +775,9 @@ class TFunctions {
 	public static function concat(e1:TExpr, e2:TExpr):TExpr {
 		var e = switch [e1.eexpr, e2.eexpr] {
 			case [TBlock(el1), TBlock(el2)]: TBlock(el1.concat(el2));
-			case [TBlock(el), _]: TBlock(el.concat([e2]));
-			case [_, TBlock(el)]: TBlock([e1].concat(el));
-			case _: TBlock([e1, e2]);
+			case [TBlock(el), _]: TBlock(el.snoc(e2));
+			case [_, TBlock(el)]: TBlock(VectorTools.cons(e1, el));
+			case _: TBlock(vector(e1, e2));
 		};
 		return mk(e, e2.etype, AstTools.punion(e1.epos, e2.epos));
 	}

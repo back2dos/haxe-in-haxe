@@ -8,7 +8,7 @@ import core.TPrinting;
 @:structInit class FieldCallCandidateData<A> {
 	// The argument expressions for this call and whether or not the argument is optional on the
 	// target function.
-	public var fcArgs:Array<TExpr>;
+	public var fcArgs:haxe.ds.Vector<TExpr>;
 	// The applied return type.
 	public var fcRet:T;
 	// The applied function type.
@@ -20,7 +20,7 @@ import core.TPrinting;
 	// The custom data associated with this call.
 	public var fcData:A;
 
-	public inline function new(fcArgs:Array<TExpr>, fcRet:T, fcType:T, fcField:TClassField, fcMonos:Array<T>, fcData:A) {
+	public inline function new(fcArgs:haxe.ds.Vector<TExpr>, fcRet:T, fcType:T, fcField:TClassField, fcMonos:Array<T>, fcData:A) {
 		this.fcArgs = fcArgs;
 		this.fcRet = fcRet;
 		this.fcType = fcType;
@@ -34,7 +34,7 @@ import core.TPrinting;
 }
 
 class FieldCallCandidate {
-	public static function makeFieldCallCandidate<A>(args:Array<TExpr>, ret:T, monos:Array<T>, t:T, cf:TClassField,
+	public static function makeFieldCallCandidate<A>(args:haxe.ds.Vector<TExpr>, ret:T, monos:Array<T>, t:T, cf:TClassField,
 			data:A):FieldCallCandidateData<A> {
 		return {
 			fcArgs: args,

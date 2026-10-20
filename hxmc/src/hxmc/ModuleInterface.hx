@@ -423,7 +423,7 @@ class ModuleInterface {
 		}
 	}
 
-	function exprs(l:Array<Expr>) {
+	function exprs(l:haxe.ds.Vector<Expr>) {
 		b.add("[");
 		for (e in l)
 			expr(e);

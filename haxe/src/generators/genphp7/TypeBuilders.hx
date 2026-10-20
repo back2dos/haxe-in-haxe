@@ -1,5 +1,6 @@
 package generators.genphp7;
 
+import core.ds.VectorTools.vector;
 // port: the type_builder, enum_builder and class_builder classes of haxe/src/generators/genphp7.ml.
 import core.Ast;
 import core.Ast as AstTools;
@@ -716,7 +717,7 @@ class ClassBuilder extends TypeBuilder {
 						eexpr: TFunction({
 							tfArgs: [],
 							tfType: basic.tvoid,
-							tfExpr: {eexpr: TBlock([]), epos: cls.clPos, etype: basic.tvoid},
+							tfExpr: {eexpr: TBlock(vector()), epos: cls.clPos, etype: basic.tvoid},
 						}),
 						epos: cls.clPos,
 						etype: basic.tvoid,

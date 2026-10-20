@@ -38,6 +38,7 @@ import typing.TyperBase;
 import typing.TyperBase.*;
 import typing.FieldAccess;
 import typing.FieldAccess.*;
+import core.ds.VectorTools.vector;
 
 class TypeFieldConfig {
 	public var allowResolve:Bool = true;
@@ -314,7 +315,7 @@ class Fields {
 		inline function byET(f:TExpr->T->AccessKind, e:TExpr, t:T):AccessKind return f(mk(TCast(e, null), t, e.epos), followWithoutType(t));
 		inline function byE(f:TExpr->T->AccessKind, e:TExpr):AccessKind return f(e, followWithoutType(e.etype));
 		inline function byForward(f:Void->AccessKind, meta:MetaTag, a:TAbstract):AccessKind {
-			var m = Meta.get(meta, a.aMeta), el:Array<Expr> = m.exprs;
+			var m = Meta.get(meta, a.aMeta), el = m.exprs;
 			if (el.length != 0) {
 				var found = false;
 				for (e in el) {
@@ -694,7 +695,7 @@ class Fields {
 		var fields = new haxe.ds.StringMap<TClassField>();
 		if (args != null) for (arg in args) {
 			var cf = mkField(arg.name, arg.type, arg.pos, arg.pos);
-			if (arg.optional) cf.cfMeta = [{meta: MetaTag.Optional, exprs: [], pos: Globals.nullPos}];
+			if (arg.optional) cf.cfMeta = [{meta: MetaTag.Optional, exprs: vector(), pos: Globals.nullPos}];
 			cf.cfDoc = docFromStringOpt(arg.doc);
 			fields.set(cf.cfName, cf);
 		}

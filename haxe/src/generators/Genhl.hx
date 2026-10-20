@@ -38,6 +38,10 @@ import core.ds.NotFound;
 import core.ds.Failure;
 import generators.Hlcode;
 import generators.Hlcode.*;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 // port: OCaml evaluates the arguments of an application or constructor right to
 // left; where several of them have effects (register, string, function or op
@@ -1859,7 +1863,7 @@ class Genhl {
 		}
 	}
 
-	static function evalArgs(ctx:HlContext, el:Array<TExpr>, t:Ttype, p:Pos):Array<Int> {
+	static function evalArgs(ctx:HlContext, el:Vector<TExpr>, t:Ttype, p:Pos):Array<Int> {
 		var tl = switch t {
 			case HFun(args, _): args;
 			case HDyn: [for (_ in el) HDyn];
@@ -2013,7 +2017,7 @@ class Genhl {
 			case TParenthesis(e):
 				return evalExpr(ctx, e);
 			case TBlock(el):
-				function loop(el:Array<TExpr>):Int {
+				function loop(el:Vector<TExpr>):Int {
 					if (el.length == 0) return allocTmp(ctx, HVoid);
 					for (i in 0...el.length - 1) evalExpr(ctx, el[i]);
 					return evalExpr(ctx, el[el.length - 1]);
@@ -2067,7 +2071,7 @@ class Genhl {
 				}
 				var f = c.clStatics.get("_makeVarArgs");
 				if (f == null) throw NotFound.raise();
-				return evalExpr(ctx, {eexpr: TCall({eexpr: TField(ef, FStatic(c, f)), etype: e1.etype, epos: e1.epos}, [v]), etype: e.etype, epos: e.epos});
+				return evalExpr(ctx, {eexpr: TCall({eexpr: TField(ef, FStatic(c, f)), etype: e1.etype, epos: e1.epos}, vector(v)), etype: e.etype, epos: e.epos});
 			case TCall({eexpr: TField(_, FStatic(c, {cfName: "instance" | "downcast"}))}, [v, vt]) if (isPath(c.clPath, [], "Std")):
 				var r = evalExpr(ctx, v);
 				hold(ctx, r);
@@ -2233,7 +2237,7 @@ class Genhl {
 										defaultValue: if (a.optional) mk(TConst(TNull), tDynamic, nullPos) else null
 									}
 							];
-							var ecall = mk(TCall(e, [for (a in eargs) mk(TLocal(a.variable), a.variable.vType, p)]), et, p);
+							var ecall = mk(TCall(e, eargs.mapToVector(a -> mk(TLocal(a.variable), a.variable.vType, p))), et, p);
 							var f:TFunc = {
 								tfArgs: eargs,
 								tfType: et,
@@ -3015,7 +3019,7 @@ class Genhl {
 				op(ctx, OEndTrap(true));
 				var j = jump(ctx, n -> OJAlways(n));
 				setOp(ctx, pos, OTrap(rtrap, currentPos(ctx) - (pos + 1)));
-				function loop(l:Array<{variable:TVar, expr:TExpr}>, i:Int):Array<Void->Void> {
+				function loop(l:Vector<{variable:TVar, expr:TExpr}>, i:Int):Array<Void->Void> {
 					if (i == l.length) {
 						op(ctx, ORethrow(rtrap));
 						return [];
@@ -3085,7 +3089,7 @@ class Genhl {
 	}
 
 	// port: the `TCall ({ eexpr = TIdent s }, el) when s.[0] = '$'` case of eval_expr
-	static function evalNativeCall(ctx:HlContext, e:TExpr, s:String, el:Array<TExpr>):Int {
+	static function evalNativeCall(ctx:HlContext, e:TExpr, s:String, el:Vector<TExpr>):Int {
 		function invalid():Dynamic return Error.abort("Invalid native call", e.epos);
 		function bytesAccessType(eb:TExpr):Null<T> {
 			return switch follow(eb.etype) {
@@ -3974,7 +3978,7 @@ class Genhl {
 					/* function __string() { var str = this.toString(); return if (str == null) null else str.bytes; } */
 					var basic = ctx.com.basic;
 					var ethis = mk(TConst(TThis), TInst(c, extractParamTypes(c.clParams)), p);
-					var tstr = mk(TCall(mk(TField(ethis, FInstance(c, extractParamTypes(c.clParams), f)), f.cfType, p), []), basic.tstring, p);
+					var tstr = mk(TCall(mk(TField(ethis, FInstance(c, extractParamTypes(c.clParams), f)), f.cfType, p), vector()), basic.tstring, p);
 					var vtmp = TFunctions.allocVar(VGenerated, "str", basic.tstring, p);
 					var vstr = mk(TLocal(vtmp), basic.tstring, p);
 					var cstr:TClass, cfBytes:TClassField;
@@ -3989,10 +3993,10 @@ class Genhl {
 					}
 					var ebytes = mk(TField(vstr, FInstance(cstr, [], cfBytes)), cfBytes.cfType, p);
 					var econd = mk(TBinop(OpEq, vstr, mk(TConst(TNull), basic.tstring, p)), basic.tbool, p);
-					var efun = mk(TBlock([
+					var efun = mk(TBlock(vector(
 						mk(TVar(vtmp, tstr), basic.tvoid, p),
 						mk(TReturn(mk(TIf(econd, mk(TConst(TNull), cfBytes.cfType, p), ebytes), cfBytes.cfType, p)), cfBytes.cfType, p)
-					]), basic.tvoid, p);
+					)), basic.tvoid, p);
 					makeFun(ctx, {fst: sTypePath(c.clPath), snd: "__string"}, allocFunPath(ctx, c.clPath, "__string"),
 						{tfExpr: efun, tfArgs: [], tfType: cfBytes.cfType}, c, null);
 				}
@@ -4030,7 +4034,7 @@ class Genhl {
 										}
 										return if (ei.epos.pmin < e.epos.pmin || ei.epos.pmax > e.epos.pmax) loop(ei) else ei;
 									}
-									var fn2:TFunc = {tfArgs: fn.tfArgs, tfType: fn.tfType, tfExpr: {eexpr: TBlock([for (x in el) merge(x)]), etype: ef.etype, epos: ef.epos}};
+									var fn2:TFunc = {tfArgs: fn.tfArgs, tfType: fn.tfType, tfExpr: {eexpr: TBlock(el.map(merge)), etype: ef.etype, epos: ef.epos}};
 									return {eexpr: TFunction(fn2), etype: e.etype, epos: e.epos};
 							}
 						}
@@ -4284,7 +4288,7 @@ class Genhl {
 		var fid = lookupAlloc(ctx.cfids, true);
 		var exprs = initExprs.concat(exprs);
 		var initpos = fakePos("fun$init");
-		var f:TFunc = {tfExpr: mk(TBlock(exprs), tVoid, initpos), tfArgs: [], tfType: tVoid};
+		var f:TFunc = {tfExpr: mk(TBlock(Vector.fromArrayCopy(exprs)), tVoid, initpos), tfArgs: [], tfType: tVoid};
 		function genContent() generateStaticContent(ctx, types, f);
 		makeFun(ctx, {fst: "", snd: ""}, fid, f, null, null, genContent);
 		return fid;
@@ -4790,7 +4794,7 @@ class Genhl {
 											var name = prefix + nativeName(f.cfName);
 											var entry:MetadataEntry = {
 												meta: Meta.HlNative,
-												exprs: [{expr: EConst(String(lib, SDoubleQuotes)), pos: p}, {expr: EConst(String(name, SDoubleQuotes)), pos: p}],
+												exprs: vector({expr: EConst(String(lib, SDoubleQuotes)), pos: p}, {expr: EConst(String(name, SDoubleQuotes)), pos: p}),
 												pos: p
 											};
 											f.cfMeta = [entry].concat(f.cfMeta);

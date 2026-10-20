@@ -26,6 +26,8 @@ import core.Texpr;
 import filters.LocalUsage;
 import haxe.ds.IntMap;
 
+using core.ds.VectorTools;
+
 // port: persistent-map snapshots use copies. Sorted integer keys retain OCaml PMap fold order.
 class CapturedVars {
 	static function ids<T>(m:IntMap<T>):Array<Int> {
@@ -132,7 +134,7 @@ class CapturedVars {
 						ret: e.etype
 					});
 					return TypeOps.mk(TCall(Texpr.Builder.mkParent(TypeOps.mk(TFunction(fn), ft, e.epos)),
-						vars.map(v -> TypeOps.mk(TLocal(v), v.vType, e.epos))),
+						vars.mapToVector(v -> TypeOps.mk(TLocal(v), v.vType, e.epos))),
 						e.etype, e.epos);
 				case _: return core.Texpr.mapExprWith(wrap, used, e);
 			};

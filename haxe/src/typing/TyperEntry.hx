@@ -26,6 +26,7 @@ import context.Common;
 import core.Define;
 import typing.Typer.*;
 import context.Resolution.*;
+import core.ds.VectorTools.vector;
 
 class TyperEntry {
 	public static function loadStdTypes(ctx:TyperContext):Void {
@@ -310,15 +311,15 @@ private class CaptureLocalWrapper implements LocalWrapperApi {
 	public function capturedType(t:T):T return nativeClass == null ? basic.tarray(t) : TInst(nativeClass, [t]);
 
 	public function mkRef(v:TVar, value:Null<TExpr>, p:Pos):TExpr {
-		if (nativeClass == null) return mk(TArrayDecl(value == null ? [] : [value]), v.vType, p);
+		if (nativeClass == null) return mk(TArrayDecl(value == null ? vector() : vector(value)), v.vType, p);
 		if (value == null) {
 			var element = switch v.vType {
 				case TInst(_, [t]): t;
 				case _: throw "Invalid native local wrapper type";
 			};
-			return mk(TNew(nativeClass, [element], [mk(TConst(TInt(1)), basic.tint, p)]), v.vType, p);
+			return mk(TNew(nativeClass, [element], vector(mk(TConst(TInt(1)), basic.tint, p))), v.vType, p);
 		}
-		var e = Inline.mkUntypedCall("__array__", p, [value]);
+		var e = Inline.mkUntypedCall("__array__", p, vector(value));
 		e.etype = v.vType;
 		return e;
 	}
@@ -330,7 +331,7 @@ private class CaptureLocalWrapper implements LocalWrapperApi {
 
 	public function mkInit(av:TVar, v:TVar, p:Pos):TExpr {
 		var local = mk(TLocal(v), v.vType, p);
-		var array = nativeClass == null ? mk(TArrayDecl([local]), av.vType, p) : Inline.mkUntypedCall("__array__", p, [local]);
+		var array = nativeClass == null ? mk(TArrayDecl(vector(local)), av.vType, p) : Inline.mkUntypedCall("__array__", p, vector(local));
 		array.etype = av.vType;
 		return mk(TVar(av, array), basic.tvoid, p);
 	}

@@ -30,6 +30,7 @@ import core.TOther;
 import core.WithType;
 import context.Typecore.*;
 import context.Typecore;
+import core.ds.VectorTools.vector;
 
 typedef GenericSubst = {var cls:TClass; var t:T; var expr:Null<TExpr>;}
 typedef GenericContext = {var ctx:Typer; var subst:Array<GenericSubst>; var name:String; var p:Pos; var mg:Null<ModuleDef>; var genericDebug:Bool;}
@@ -327,7 +328,7 @@ class Generic {
 			case MetaTag.Access | Allow | Final | Hack | Keep | KeepSub | NoClosure | NullSafety | Pure | Struct | StructInit | Using | AutoBuild | Unreflective: true;
 			case _: false;
 		});
-		cg.clMeta.unshift({meta: MetaTag.NoDoc, exprs: [], pos: nullPos});
+		cg.clMeta.unshift({meta: MetaTag.NoDoc, exprs: vector(), pos: nullPos});
 		mg.mTypes = [TClassDecl(cg)];
 		ctx.com.moduleLut.add(mg.mPath, mg);
 		addDependency(mg, c.clModule, MDepFromTyping);
@@ -409,7 +410,7 @@ class Generic {
 		// In rare cases the class name can become too long, so let's shorten it (issue #3090).
 		if (cg.clPath.name.length > 254) {
 			var name = getShortName();
-			cg.clMeta.unshift({meta: MetaTag.Native, exprs: [{expr: EConst(String(name, SDoubleQuotes)), pos: p}], pos: nullPos});
+			cg.clMeta.unshift({meta: MetaTag.Native, exprs: vector({expr: EConst(String(name, SDoubleQuotes)), pos: p}), pos: nullPos});
 		}
 		cg.clUsing = c.clUsing;
 		if (g.genericDebug) Sys.println("[GENERIC] " + Printer.sTclass("  ", cg));
@@ -524,9 +525,9 @@ class Generic {
 				var meta = cf.cfMeta.filter(function(m) return !Type.enumEq(m.meta, MetaTag.Generic));
 				var zero = mkZeroRangePos(p);
 				field.cfMeta = ([
-					{meta: MetaTag.NoCompletion, exprs: [], pos: zero},
-					{meta: MetaTag.NoUsing, exprs: [], pos: zero},
-					{meta: MetaTag.GenericInstance, exprs: [], pos: zero}
+					{meta: MetaTag.NoCompletion, exprs: vector(), pos: zero},
+					{meta: MetaTag.NoUsing, exprs: vector(), pos: zero},
+					{meta: MetaTag.GenericInstance, exprs: vector(), pos: zero}
 				] : Array<core.Ast.MetadataEntry>).concat(meta);
 				field.cfParams = params;
 			}
@@ -561,7 +562,7 @@ class Generic {
 				fa = core.ds.Record.withFields(fa, {faField: field});
 			}
 		}
-		return new CallUnification.CallDispatcher(ctx, MCall([]), withType, p).fieldCall(fa, args, []);
+		return new CallUnification.CallDispatcher(ctx, MCall(vector()), withType, p).fieldCall(fa, args, vector());
 	}
 
 	public static function initHooks():Void context.Typecore.typeGenericFunctionRef = typeGenericFunction;

@@ -28,6 +28,9 @@ import core.Meta;
 import core.DisplayTypes;
 import core.TType;
 import core.display.CompletionItem;
+import core.ds.VectorTools.vector;
+
+using core.ds.VectorTools;
 
 class TyperDisplay {
 	public static function convertFunctionSignature(ctx:TyperContext, values:haxe.ds.StringMap<Expr>,
@@ -157,7 +160,7 @@ class TyperDisplay {
 							DisplayException.send_positions_raise ctx.com []
 					| _ -> */
 					var fa = FieldAccessTools.getConstructorAccess(c, tl, e.epos);
-					var fcc = CallUnification.unifyFieldCall(ctx, fa, el, [], e.epos, false);
+					var fcc = CallUnification.unifyFieldCall(ctx, fa, el, vector(), e.epos, false);
 					var cf = fcc.fcField;
 					var t = switch follow(FieldAccessTools.getMapFunction(fa)(cf.cfType)) {
 						case TFun(s): TFun({args: s.args, ret: TInst(c, tl)});
@@ -238,7 +241,7 @@ class TyperDisplay {
 	public static function handleSignatureDisplay(ctx:TyperContext, eAst:Expr, withType:WithTypeValue):TExpr {
 		ctx.f.inDisplay = true;
 		var p = eAst.pos;
-		function handleCall(tl:Array<{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}>, el:Array<Expr>, p0:Pos):TExpr {
+		function handleCall(tl:Array<{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}>, el:haxe.ds.Vector<Expr>, p0:Pos):TExpr {
 			function followWithCallable(x:{t:T, doc:Documentation, values:haxe.ds.StringMap<Expr>}):{
 				args:Array<{name:String, optional:Bool, type:T}>,
 				ret:T,
@@ -272,18 +275,19 @@ class TyperDisplay {
 					}
 				}
 				if (found >= 0) {
-					var out = el.slice(0, found);
+					var out = [for (k in 0...found) el[k]];
 					switch el[found].expr {
 						case EDisplay(e1, _): out.push(e1);
 						case _:
 					}
-					{displayArg: found, el: out.concat(el.slice(found + 1))};
+					for (k in found + 1...el.length) out.push(el[k]);
+					{displayArg: found, el: haxe.ds.Vector.fromArrayCopy(out)};
 				} else {displayArg: 0, el: el.copy()};
 			};
 			var displayArg = r.displayArg, el = r.el;
 			// If our display position exceeds the argument number we add a null expression in order to make
 			// unify_call_args error out.
-			var el = if (el.length > 0 && displayArg >= el.length) el.concat([{expr: EConst(Ident("null")), pos: Globals.nullPos}]) else el;
+			var el = if (el.length > 0 && displayArg >= el.length) el.concat(vector({expr: EConst(Ident("null")), pos: Globals.nullPos})) else el;
 			var acc = [];
 			for (x in tl) {
 				function keep():Bool {
@@ -439,7 +443,7 @@ class TyperDisplay {
 			var fa = FieldAccessTools.getConstructorAccess(c, params, p);
 			return {cf: fa.faField, c: c};
 		}
-		function maybeExpandOverload(elTyped:Array<TExpr>, e:TExpr, eOn:TExpr, host:context.Typecore.FieldHost, cf:TClassField):TExpr {
+		function maybeExpandOverload(elTyped:haxe.ds.Vector<TExpr>, e:TExpr, eOn:TExpr, host:context.Typecore.FieldHost, cf:TClassField):TExpr {
 			return switch mode {
 				case MCall(el) if (cf.cfOverloads.length > 0):
 					var fa = FieldAccessTools.create(eOn, cf, host, false, p);
@@ -453,7 +457,7 @@ class TyperDisplay {
 		}
 		var r = switch [eAst.expr, e.eexpr] {
 			case [_, TMeta({meta: m, exprs: [eSelf]}, e1)] if (Meta.metaEq(MetaTag.StaticExtension, m)):
-				{e: e1, elTyped: [TyperBase.typeStoredExpr(ctx, eSelf)]};
+				{e: e1, elTyped: vector(TyperBase.typeStoredExpr(ctx, eSelf))};
 			case [EField(_, _, EFSafe), _]:
 				// For ?. we want to extract the then-expression of the TIf.
 				function loop(e1:TExpr):TExpr {
@@ -466,9 +470,9 @@ class TyperDisplay {
 							e;
 					};
 				}
-				{e: loop(e), elTyped: []};
+				{e: loop(e), elTyped: vector()};
 			case _:
-				{e: e, elTyped: []};
+				{e: e, elTyped: vector()};
 		};
 		var e = r.e, elTyped = r.elTyped;
 		// If we display on a TField node that points to an overloaded field, let's try to unify the field call

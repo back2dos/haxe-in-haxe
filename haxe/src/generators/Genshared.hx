@@ -12,6 +12,8 @@ import core.ds.OcamlHash.OcamlValue;
 import core.ds.OcamlHashtbl;
 import typing.TanonIdentification;
 import typing.OverloadResolution;
+import core.ds.VectorTools.vector;
+import haxe.ds.Vector;
 
 private typedef MetaTag = core.MetaList.StrictMeta;
 
@@ -58,7 +60,7 @@ class InfoContext<A> {
 		};
 		classInfos.push(infos);
 		c.clMeta = [
-			({meta: MetaTag.Custom(":jvm.classInfo"), exprs: [{expr: EConst(Int(Std.string(index), null)), pos: nullPos}], pos: nullPos} : MetadataEntry)
+			({meta: MetaTag.Custom(":jvm.classInfo"), exprs: vector({expr: EConst(Int(Std.string(index), null)), pos: nullPos}), pos: nullPos} : MetadataEntry)
 		].concat(c.clMeta);
 		return infos;
 	}
@@ -142,11 +144,11 @@ class Preprocessor<A> {
 	}
 
 	static function makeNative(cf:TClassField):Void {
-		cf.cfMeta = [({meta: MetaTag.NativeGen, exprs: [], pos: nullPos} : MetadataEntry)].concat(cf.cfMeta);
+		cf.cfMeta = [({meta: MetaTag.NativeGen, exprs: vector(), pos: nullPos} : MetadataEntry)].concat(cf.cfMeta);
 	}
 
 	static function makeHaxe(cf:TClassField):Void {
-		cf.cfMeta = [({meta: MetaTag.HxGen, exprs: [], pos: nullPos} : MetadataEntry)].concat(cf.cfMeta);
+		cf.cfMeta = [({meta: MetaTag.HxGen, exprs: vector(), pos: nullPos} : MetadataEntry)].concat(cf.cfMeta);
 	}
 
 	static function getConstructor(c:TClass):TClassField {
@@ -205,7 +207,7 @@ class Preprocessor<A> {
 		var thisBeforeSuper = false;
 		var superCallFields:Array<{c:TClass, cf:TClassField}> = [];
 		function isOnCurrentClass(cf:TClassField):Bool return c.clFields.exists(cf.cfName);
-		function findSuperCtor0(el:Array<TExpr>):{c:TClass, cf:TClassField} {
+		function findSuperCtor0(el:Vector<TExpr>):{c:TClass, cf:TClassField} {
 			var csup:TClass = null, mapType:T->T = null;
 			switch c.clSuper {
 				case null:
@@ -234,7 +236,7 @@ class Preprocessor<A> {
 					{c: c, cf: cf};
 			}
 		}
-		function findSuperCtor(el:Array<TExpr>):{c:TClass, cf:TClassField} {
+		function findSuperCtor(el:Vector<TExpr>):{c:TClass, cf:TClassField} {
 			var cf = findSuperCtor0(el).cf;
 			/* This is a bit hacky: We always want the direct super class, not the one that actually holds
 				 the ctor. It will be implicitly copied to it anyway. */
@@ -328,7 +330,7 @@ class Preprocessor<A> {
 							cf.cfMeta = [
 								({
 									meta: MetaTag.Custom(":jvm.fieldInfo"),
-									exprs: [{expr: EConst(Int(Std.string(index), null)), pos: nullPos}],
+									exprs: vector({expr: EConst(Int(Std.string(index), null)), pos: nullPos}),
 									pos: nullPos
 								} : MetadataEntry)
 							].concat(cf.cfMeta);

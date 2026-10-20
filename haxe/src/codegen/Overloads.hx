@@ -12,6 +12,9 @@ import core.Globals;
 import typing.FieldCallCandidate;
 import core.TFunctions.*;
 import core.TUnification.*;
+import haxe.ds.Vector;
+
+using core.ds.VectorTools;
 
 class Overloads {
 	// port: inline: see core.ds.List
@@ -241,7 +244,7 @@ class Resolution {
 			case _: rateConv(0, t, e.etype);
 		}
 		// convert compatible into ( rate * compatible_type ) list
-		function mkRate(acc:Array<ConversionRate>, el:Array<TExpr>,
+		function mkRate(acc:Array<ConversionRate>, el:Vector<TExpr>,
 				args:Array<{name:String, optional:Bool, type:T}>):{rates:Array<ConversionRate>, rest:Bool} {
 			if (el.length == 0 && args.length == 0) return {rates: acc, rest: false};
 			if (el.length > 0 && args.length > 0 && args[0].optional) return mkRate(acc, el.slice(1), args.slice(1));
@@ -250,7 +253,7 @@ class Resolution {
 					case TAbstract(a, [t]) if (a.aPath.pack.join(".") == "haxe" && a.aPath.name == "Rest"): t;
 					case _: Globals.die("", "overloads.ml");
 				};
-				return {rates: acc.concat(el.map(function(e) return rateArg(t, e))), rest: true};
+				return {rates: acc.concat(el.mapToArray(function(e) return rateArg(t, e))), rest: true};
 			}
 			if (el.length > 0 && args.length > 0) {
 				acc.unshift(rateArg(args[0].type, el[0]));
