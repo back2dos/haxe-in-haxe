@@ -637,6 +637,8 @@ class Dyn {
 		if (ta == T_BOXBOOL && tb == T_BOXBOOL) return Mem.getI32(Mem.addr(a), 0) == Mem.getI32(Mem.addr(b), 0);
 		if (ta == T_STRING && tb == T_STRING) return Str.len(a) == Str.len(b) && Str.eqSlow(a, b);
 		if (ta == T_TYPEOBJ && tb == T_TYPEOBJ) return described(a) == described(b);
+		// (two closures of one method and object: equal, as on Eval and hl)
+		if (ta == tb && ta >= T_FIRST && (tk(ty(ta)) == TK_BOUND || isMethodClosure(ta))) return compareMethods(a, b);
 		return false;
 	}
 
@@ -874,7 +876,15 @@ class Dyn {
 				}
 				return Str.ofAscii(name(ty));
 			case TK_ANON:
-				return depth > PRINT_DEPTH ? "<...>" : anonToString(v, depth);
+				if (depth > PRINT_DEPTH) return "<...>";
+				// (a toString field: called, as Eval and hl do; upstream's TestMisc)
+				if (fidToString == 0) fidToString = fidFind("toString") + 1;
+				var f = fidToString - 1;
+				if (f >= 0 && (!findField(ty, f).isNull() || overflowFind(v, f) >= 0)) {
+					var m = anonGetSlow(v, f);
+					if (closureSig(m) >= 0) return stdString(dynCall(m, []));
+				}
+				return anonToString(v, depth);
 			case TK_CLOSURE | TK_BOUND:
 				return "<function>";
 			case _:
@@ -1229,12 +1239,23 @@ class Dyn {
 	public static function callMethod(f:Dynamic, args:Array<Dynamic>):Dynamic
 		return dynCall(f, args);
 
+	@:hxmc.noGc static function isMethodClosure(t:Int):Bool {
+		if (tk(ty(t)) != TK_CLOSURE) return false;
+		var nm = name(ty(t));
+		return Mem.getU8(nm, 0) == "<".code && Mem.getU8(nm, 1) == "m".code;
+	}
+
 	@:hxmc.noGc public static function compareMethods(a:Dynamic, b:Dynamic):Bool {
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b) || tindex(a) != tindex(b)) return false;
 		if (tk(ty(tindex(a))) == TK_BOUND) {
 			var pa = Mem.addr(a), pb = Mem.addr(b);
 			return Mem.getPtr(pa, 8) == Mem.getPtr(pb, 8) && Mem.getPtr(pa, 16) == Mem.getPtr(pb, 16);
+		}
+		// a method as a value (Facts: a closure type named <method>): its code and object
+		if (isMethodClosure(tindex(a))) {
+			var pa = Mem.addr(a), pb = Mem.addr(b);
+			return Mem.getI32(pa, 0) == Mem.getI32(pb, 0) && Mem.getPtr(pa, 8) == Mem.getPtr(pb, 8);
 		}
 		return false;
 	}

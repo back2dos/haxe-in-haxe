@@ -1885,6 +1885,10 @@ class FnLower {
 		switch [ta, tb] {
 			case [TRef(RStr), TRef(RStr)]:
 				return ECallHost("hx_str_eq", vector(xa, xb), TBool);
+			// (a method closure: equal to another of the same method and object, made
+			// apart, as on Eval and hl: hx_dyn_eq; upstream's Issue6705)
+			case [TRef(RClos(_)), TRef(_)] | [TRef(_), TRef(RClos(_))]:
+				return ECallHost("hx_dyn_eq", vector(coerce(xa, ta, TRef(RAny)), coerce(xb, tb, TRef(RAny))), TBool);
 			// (a NativeArray: its identity, as hx_dyn_eq has it)
 			case [TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RNativeArr(_) | RAnon | RType | RNative(_)), TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RNativeArr(_) | RAnon | RType | RNative(_))]:
 				return EBin(RefEq, xa, xb);

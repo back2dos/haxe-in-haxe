@@ -280,7 +280,11 @@ class Facts {
 			var slots:Array<Null<Ty>> = [TI32];
 			for (c in l.captures)
 				slots.push(c.ty);
-			var key = "clos." + l.sig.key + "." + [for (c in l.captures) switch c.ty {
+			// (a method as a value, `o.f` or `a.push`: a type of its own, named
+			// <method>, whose closures equal those of the same code and object:
+			// Dyn.dynEq, compareMethods; upstream's Issue6705)
+			var method = l.captures.length == 1 && (StringTools.endsWith(l.fn.name, "__bound") || StringTools.endsWith(l.fn.name, "__hclos"));
+			var key = (method ? "meth." : "clos.") + l.sig.key + "." + [for (c in l.captures) switch c.ty {
 				case TStruct(_, size): "s" + size;
 				case t: Ir.repr(t);
 			}].join("");
@@ -289,7 +293,7 @@ class Facts {
 				l.tindex = known;
 				continue;
 			}
-			var t = entry("<closure>", "TK_CLOSURE", slots, key);
+			var t = entry(method ? "<method>" : "<closure>", "TK_CLOSURE", slots, key);
 			t.sup = l.sig.id;
 			l.tindex = addType(t);
 			closures.set(key, l.tindex);
