@@ -10,7 +10,8 @@
 // Linux and macOS the reads are blocking C calls (rooted already); on
 // Windows (and under Wine) this read failed some rounds of a hundred. The
 // golden file is hand-written: the reference's --interp has no executable
-// to run as the child.
+// to run as the child. Under qemu-user without binfmt (the child cannot
+// start) it checks nothing.
 import sys.thread.Lock;
 import sys.thread.Thread;
 
@@ -43,6 +44,9 @@ class SafeRegionRoots {
 			var code = p.exitCode();
 			p.close();
 			var lines = out.split("\n").length - 1;
+			// (a machine that cannot start the program itself, qemu-user without
+			// binfmt: nothing to check)
+			if (r == 0 && code == 127 && out == "" && err == "") break;
 			if (lines != n || err != "err\n" || code != 0) {
 				bad++;
 				Sys.println('round $r: $lines lines of $n, stderr ${err.length} characters, exit $code');
