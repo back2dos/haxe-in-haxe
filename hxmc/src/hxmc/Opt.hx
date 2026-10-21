@@ -857,16 +857,28 @@ class Opt {
 			kill[k] = m;
 		}
 		var outs = new Vector<Vector<Int>>(n);
+		// (a loop's blocks: those that reach a back edge without passing its
+		// header, walked back from the back edges; not the blocks between the
+		// header and its last back edge in reverse postorder, which can leave
+		// out an inner loop's latch and the calls in it. walked: k + 1 for
+		// the blocks reached for header k)
+		var walked = new Vector<Int>(n);
+		var stack:Array<MBlock> = [];
 		for (k in 0...n) {
 			var b = order[k];
 			var v:Vector<Int> = null;
-			var latch = -1;
-			var mixed = 0; // classes the forward predecessors disagree on
+			var loop = false;
+			var mixed = 0; // classes the forward predecessors disagree on, or the loop writes
+			walked[k] = k + 1;
 			for (p in b.preds) {
 				if (p.mark != inOrder) continue;
 				var pk = p.tmp;
 				if (pk >= k) {
-					if (pk > latch) latch = pk;
+					loop = true;
+					if (walked[pk] != k + 1) {
+						walked[pk] = k + 1;
+						stack.push(p);
+					}
 					continue;
 				}
 				var o = outs[pk];
@@ -874,14 +886,27 @@ class Opt {
 					for (c in 0...NCLS)
 						if (v[c] != o[c]) mixed |= 1 << c;
 			}
+			if (loop) mixed |= kill[k];
+			while (stack.length > 0) {
+				var q = stack.pop();
+				mixed |= kill[q.tmp];
+				for (p in q.preds) {
+					if (p.mark != inOrder || walked[p.tmp] == k + 1) continue;
+					if (p.tmp < k) {
+						// (a way into the loop other than its header: every class)
+						mixed = -1;
+						stack.resize(0);
+						break;
+					}
+					walked[p.tmp] = k + 1;
+					stack.push(p);
+				}
+			}
 			if (v == null || b.handler) {
 				v = new Vector<Int>(NCLS);
 				for (c in 0...NCLS)
 					v[c] = next++;
 			} else {
-				if (latch >= 0)
-					for (q in k...latch + 1)
-						mixed |= kill[q];
 				for (c in 0...NCLS)
 					if (mixed & (1 << c) != 0) v[c] = next++;
 			}
