@@ -338,5 +338,5 @@ class NativeZip {
 	}
 
 	static function outside()
-		throw haxe.io.Error.OutsideBounds;
+		Rt.rt_throw("OutsideBounds");
 }
