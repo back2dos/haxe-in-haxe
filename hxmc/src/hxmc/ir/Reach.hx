@@ -146,6 +146,7 @@ class Reach {
 			if (gs.length == 0) mark(f);
 		}
 		mark(p.main);
+		if (p.entryRun != null) mark(p.entryRun);
 		for (f in p.roots)
 			mark(f);
 		for (f in p.funcs)

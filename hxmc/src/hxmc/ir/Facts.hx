@@ -280,7 +280,11 @@ class Facts {
 			var slots:Array<Null<Ty>> = [TI32];
 			for (c in l.captures)
 				slots.push(c.ty);
-			var key = "clos." + l.sig.key + "." + [for (c in l.captures) switch c.ty {
+			// (a method as a value, `o.f` or `a.push`: a type of its own, named
+			// <method>, whose closures equal those of the same code and object:
+			// Dyn.dynEq, compareMethods; upstream's Issue6705)
+			var method = l.captures.length == 1 && (StringTools.endsWith(l.fn.name, "__bound") || StringTools.endsWith(l.fn.name, "__hclos"));
+			var key = (method ? "meth." : "clos.") + l.sig.key + "." + [for (c in l.captures) switch c.ty {
 				case TStruct(_, size): "s" + size;
 				case t: Ir.repr(t);
 			}].join("");
@@ -289,7 +293,7 @@ class Facts {
 				l.tindex = known;
 				continue;
 			}
-			var t = entry("<closure>", "TK_CLOSURE", slots, key);
+			var t = entry(method ? "<method>" : "<closure>", "TK_CLOSURE", slots, key);
 			t.sup = l.sig.id;
 			l.tindex = addType(t);
 			closures.set(key, l.tindex);
@@ -325,8 +329,12 @@ class Facts {
 		];
 		// Iterable.iterator() on an Array (Lambda and the other Iterable
 		// consumers): a method, so structural calls hit the inline cache
-		// instead of the boxed slow path
-		types[5].methods = [{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id}];
+		// instead of the boxed slow path; KeyValueIterable.keyValueIterator()
+		// likewise (it was not found: "Cannot call null", upstream's TestArray)
+		types[5].methods = [
+			{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id},
+			{name: "keyValueIterator", fn: "hx_array_kv_iterator", sig: p.sig([], TRef(RAny)).id}
+		];
 		// one bound-method closure type per signature of a method in the
 		// tables (code, this, method; after Reach: else every signature's)
 		var bound = new Map<Int, Bool>();

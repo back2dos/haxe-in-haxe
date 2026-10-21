@@ -716,7 +716,9 @@ class MirBuild {
 	public function build():MFunc {
 		f = new MFunc(p.funcSym(fn));
 		f.blocksHere = fn.blocksHere;
-		f.params = fn.args.mapToVector(a -> mty(a.ty));
+		// (a parameter of type Void, a T->Void callback of a C<Void>: an i32, as a Void
+		// local is; WebAssembly has no value type for Void: corpus case VoidParam)
+		f.params = fn.args.mapToVector(a -> mty(a.ty) == Void ? I32 : mty(a.ty));
 		f.ret = mty(fn.ret);
 		var maxId = 0;
 		for (l in fn.args.concat(fn.locals)) {
@@ -1087,7 +1089,11 @@ class MirBuild {
 				if (join.preds.length == 0) add(mk(Unreachable, Void));
 			case SReturn(null):
 				unwindTo(0);
-				retFrom(-1);
+				// (a Void body under a signature with a result, an override of
+				// Base<Void>.f():T: zero, as when it falls off its end; it returned
+				// nothing defined, and the inliner's phi read value -1: corpus
+				// case VoidOverride, upstream's Issue13046)
+				retFrom(f.ret == Void ? -1 : f.ret == F64 ? fconst(0) : f.ret == I64 ? lconst(0, 0) : iconst(0));
 			case SReturn(e) if (cSret >= 0):
 				// (a callback's struct result, through the memory its caller gave)
 				var v = ex(e);

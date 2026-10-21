@@ -394,6 +394,10 @@ class Program {
 	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String, ?tls:String, ?bss:Int, ?sym:String, ?exp:String}> = [];
 	public var inits:Array<FuncInfo> = []; // static initializers, run before main
 	public var main:FuncInfo;
+	// haxe.EntryPoint.run, run after main when the program keeps it (the event
+	// loop: Finalization.maybeAddEntrypoint puts it in com.main.mainExpr, which
+	// hxmc does not lower)
+	public var entryRun:Null<FuncInfo> = null;
 	public var roots:Array<FuncInfo> = []; // live whatever reaches them (Reach)
 	// (Reach) the live functions and the selectors live code dispatches on; null: all
 	public var live:Null<Map<FuncInfo, Bool>> = null;
