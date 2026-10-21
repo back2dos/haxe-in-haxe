@@ -39,5 +39,4 @@ sys native io.TestProcess.testCommand EXTERNAL runs `haxe compile-each.hxml --ru
 
 # --- unit on wasm32-wasi ---
 
-unit wasm unit.issues.Issue9678 BUG a closure with a parameter of type Void (a C<Void>'s T->Void callback) does not link: WebAssembly has no value type for the parameter ("wasm: type ?"; natively it passes)
 unit wasm unit.teststd.sys.net.TestSocket TARGET wasm32-wasi has no sockets (docs/hxmc.md, "Targets"): binding one fails with "Function not implemented"

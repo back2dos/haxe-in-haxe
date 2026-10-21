@@ -716,7 +716,9 @@ class MirBuild {
 	public function build():MFunc {
 		f = new MFunc(p.funcSym(fn));
 		f.blocksHere = fn.blocksHere;
-		f.params = fn.args.mapToVector(a -> mty(a.ty));
+		// (a parameter of type Void, a T->Void callback of a C<Void>: an i32, as a Void
+		// local is; WebAssembly has no value type for Void: corpus case VoidParam)
+		f.params = fn.args.mapToVector(a -> mty(a.ty) == Void ? I32 : mty(a.ty));
 		f.ret = mty(fn.ret);
 		var maxId = 0;
 		for (l in fn.args.concat(fn.locals)) {
