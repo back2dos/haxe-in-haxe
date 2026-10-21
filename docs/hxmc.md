@@ -344,7 +344,7 @@ the arguments' signature, through the dynamic call of `Reflect.callMethod`);
 the native macros' `Loader` writes a bundle's. A class without any
 constructor fails, as Eval's does (`Instance constructor not found`), as does
 one whose entry was dropped, or an extern class the runtime implements (its
-class value is `T_NONE`'s); `String`'s and `Array`'s are Eval's. WasmGC:
+class value is `T_NONE`'s, but `Math`'s, a runtime type of its own named Math, `T_MATH`, which `Type.resolveClass` finds); `String`'s and `Array`'s are Eval's. WasmGC:
 `Meta.createInstance`, a dispatch on the class making the instance and calling
 the entry. With `Type.resolveClass` live too, every class's constructor and
 its signature's trampolines stay: the port would grow by 66 KB (0.34%).

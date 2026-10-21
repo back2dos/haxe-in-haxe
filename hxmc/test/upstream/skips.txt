@@ -10,7 +10,6 @@
 
 # --- unit ---
 
-unit * unit.TestReflect.testTypes BUG Math, an extern class the runtime implements, has no class value of its own (Type.getClassName(Math) is "None"; resolveClass("Math") is null)
 unit * unit.TestExceptions.testExceptionStack BUG no call stacks: haxe.CallStack.callStack() and exception stacks are empty (hxmc/std/haxe/NativeStackTrace.hx)
 unit * unit.teststd.haxe.TestCallStack.test BUG no call stacks: haxe.CallStack.exceptionStack() is empty after a throw (upstream leaves the check out on hl, lua and flash)
 unit * unit.issues.Issue13043.testOverrideAsBase TARGET a dynamic method set to null is restored to its own method when read or called (FnLower.isDynMethod: the field starts null and takes the method on first use), so `b.onItem == null` is false after `b.onItem = null`
@@ -18,8 +17,8 @@ unit * unit.teststd.haxe.TestLog.test TARGET haxe.Log.trace set to null is the o
 unit * unit.issues.Issue5016 TARGET Reflect.deleteField cannot remove a field of a structure's own layout, only one added at run time (as on cpp, which upstream leaves out)
 unit * unit.teststd.TestUnicode.test TARGET Reflect.deleteField of a structure's own field (as Issue5016: the layout is fixed; cpp likewise)
 unit * unit.issues.Issue9046 TARGET Type.resolveClass finds a class the program constructs or uses as a value (docs/hxmc.md, "Reachability"), not one whose statics it only calls
-unit * unit.TestDCE.testInterface TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface is not a class value for Type.resolveClass
-unit * unit.TestDCE.testProperty TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface is not a class value for Type.resolveClass
+unit * unit.TestDCE.testInterface TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface has no instance fields to reflection (Type.getInstanceFields of an interface is empty: its methods are in no table)
+unit * unit.TestDCE.testProperty TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface has no instance fields to reflection (Type.getInstanceFields of an interface is empty: its methods are in no table)
 unit * unit.TestDCE.testClasses TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): classes only referenced or implemented are not found by Type.resolveClass
 unit * unit.TestDCE.testDceField TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): methods no live code reaches are not in the class's tables, @:keep or not
 unit * unit.TestDCE.testIssue6500 TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): a kept class never constructed is not found by Type.resolveClass

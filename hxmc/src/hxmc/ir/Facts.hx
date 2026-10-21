@@ -236,6 +236,9 @@ class Facts {
 		// (T_DATE: the milliseconds since the epoch, hxmc.rt.MemRepr.dateOf)
 		rtNames.push("Date");
 		rtSlots.push([TF64]);
+		// (T_MATH: Math's class value, an extern class the runtime implements; no instances)
+		rtNames.push("Math");
+		rtSlots.push([]);
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : [], "rt" + i));
 		for (c in p.classes) {

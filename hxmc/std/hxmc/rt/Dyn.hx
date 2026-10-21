@@ -1063,7 +1063,7 @@ class Dyn {
 		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);
 		for (t in T_FIRST...nt) {
 			var k = tk(ty(t));
-			if ((k == TK_CLASS || k == TK_ENUM) && LibC.strcmp(name(ty(t)), c) == 0) {
+			if ((k == TK_CLASS || k == TK_INTERFACE || k == TK_ENUM) && LibC.strcmp(name(ty(t)), c) == 0) {
 				r = typeObj(t);
 				break;
 			}
@@ -1071,6 +1071,7 @@ class Dyn {
 		LibC.free(c);
 		if (Str.isNull(r) && n == "String") r = typeObj(T_STRING);
 		if (Str.isNull(r) && n == "Date") r = typeObj(T_DATE);
+		if (Str.isNull(r) && n == "Math") r = typeObj(T_MATH);
 		if (Str.isNull(r) && n == "Array") r = typeObj(T_ARRAY);
 		if (Str.isNull(r) && n == "haxe.io.Bytes") r = typeObj(T_BYTES);
 		return r;
