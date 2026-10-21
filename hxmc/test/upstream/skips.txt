@@ -10,7 +10,6 @@
 
 # --- unit ---
 
-unit * unit.issues.Issue6446 BUG a class extending StringBuf does not compile: StringBuf is an extern class of the runtime (Lower: "extern class StringBuf used as a class")
 unit * unit.issues.Issue3159 BUG a dynamic method assigned through an interface is not called through it: the interface's dispatch calls the method, not the field
 unit * unit.issues.Issue12028.testMakeVarArgsInDynamic BUG a Reflect.makeVarArgs function typed by inference as String->? and passed on as Dynamic is the adapter of that type, which takes one argument (Dynamic -> function -> Dynamic does not give the value back)
 unit * unit.teststd.TestReflect.test BUG Reflect.compareMethods(a.push, a.push): a closure of an Array method is an adapter (its host function takes Dynamic) made apart at each use, so closures of one method and array compare unequal

@@ -519,6 +519,12 @@ class Str {
 	@:hxmc.host("StringBuf_new") static function sbNew():Dynamic
 		return Repr.sbNew();
 
+	#if !hxmc.wasm_gc
+	// super() of a class extending StringBuf (Lower.stringBufCtor)
+	@:hxmc.host("StringBuf_init") static function sbInit(b:Dynamic):Void
+		Repr.sbInit(b);
+	#end
+
 	// room for `extra` more units
 	static function reserve(b:Dynamic, extra:Int) {
 		var n = sbLen(b);

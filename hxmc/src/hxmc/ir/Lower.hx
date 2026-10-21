@@ -780,6 +780,13 @@ class Lower {
 			case _: t;
 		}
 
+	// the prefix of a class's fields that no name reaches (no identifier starts with it)
+	public static inline var HIDDEN_FIELD = "#";
+
+	// StringBuf, the runtime's extern class
+	public static function isRuntimeStringBuf(c:TClass):Bool
+		return isCore(c, "StringBuf") && c.hasClassFlag(CExtern);
+
 	public function classInfo(c:TClass):ClassInfo {
 		var ci = classes.get(c);
 		if (ci != null) return ci;
@@ -793,7 +800,16 @@ class Lower {
 			prog.interfaces.push(ci);
 			return ci;
 		}
-		var sup = c.clSuper != null ? classInfo(c.clSuper.cls) : root;
+		// a class extending StringBuf (upstream's Issue6446): StringBuf is the
+		// runtime's (T_STRINGBUF), so the subclass starts with its layout, slot
+		// 0 the length and slot 1 the units (MemRepr.sbNew; fields that no name
+		// reaches, Facts.assignTypes), which the runtime's StringBuf functions
+		// and the inline addChar read; its constructor fills them
+		// (stringBufCtor). Its class is not a subclass of StringBuf to
+		// reflection (Std.isOfType, Type.getSuperClass).
+		var sbuf = c.clSuper != null && isRuntimeStringBuf(c.clSuper.cls);
+		if (sbuf && wasmGc) fail(c.clPath.name + " extends StringBuf, the runtime's class, which a class of WasmGC cannot extend");
+		var sup = c.clSuper != null && !sbuf ? classInfo(c.clSuper.cls) : root;
 		// (the superclass's field types may name this class, which has its
 		// ClassInfo then: `class Node extends Base<Node>`, upstream's unit test TestGeneric)
 		ci = classes.get(c);
@@ -814,6 +830,10 @@ class Lower {
 		prog.classes.push(ci);
 		for (f in sup.fields)
 			ci.fields.push(f);
+		if (sbuf) {
+			ci.fields.push({name: HIDDEN_FIELD + "length", ty: TI32});
+			ci.fields.push({name: HIDDEN_FIELD + "units", ty: TRef(RAny)});
+		}
 		var own = [];
 		for (f in c.clOrderedFields)
 			switch f.cfKind {
@@ -1164,6 +1184,10 @@ class Lower {
 			return;
 		}
 		var f = ctor(k);
+		if (isRuntimeStringBuf(k)) {
+			ci.maker = {fn: f};
+			return;
+		}
 		if (hasStruct(f)) return;
 		var e = ctorEntries.get(f);
 		if (e == null) {
@@ -1177,6 +1201,7 @@ class Lower {
 	public function ctor(c:TClass):FuncInfo {
 		var fi = ctors.get(c);
 		if (fi != null) return fi;
+		if (isRuntimeStringBuf(c)) return stringBufCtor(c);
 		var ci = classInfo(c);
 		fi = new FuncInfo(nativeName(c) + "_new", moduleOf(c));
 		ci.ctor = fi;
@@ -1196,6 +1221,21 @@ class Lower {
 			fl.run(tf, true);
 			fl.finish();
 		})));
+		return fi;
+	}
+
+	// StringBuf's constructor as a subclass's super(): the runtime fills the
+	// length and the units of the new instance (Str.sbInit)
+	function stringBufCtor(c:TClass):FuncInfo {
+		var fi = new FuncInfo("StringBuf_new__super", moduleOf(c));
+		fi.display = "StringBuf.new";
+		ctors.set(c, fi);
+		prog.funcs.push(fi);
+		var self = new Local(0, "this0", TRef(RAny));
+		fi.args.push(self);
+		fi.ret = TVoid;
+		fi.body = vector(SExpr(ECallHost(native("StringBuf_init"), vector(ELocal(self)), TVoid)), SReturn(null));
+		pending.push(() -> bindHosts(fi));
 		return fi;
 	}
 

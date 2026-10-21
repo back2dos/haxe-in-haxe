@@ -239,8 +239,8 @@ class Facts {
 			c.locs = layout(slots, [for (f in c.fields) f.ty]);
 			c.nslots = slots.length;
 			var t = entry(c.name, "TK_CLASS", slots, c.name);
-			// (a struct field is not reachable by name: Dynamic access and reflection skip it)
-			t.fields = [for (i in 0...c.fields.length) if (!c.fields[i].ty.match(TStruct(_))) {name: c.fields[i].name, slot: c.locs[i], ty: c.fields[i].ty}];
+			// (a struct field, or a hidden one, is not reachable by name: Dynamic access and reflection skip it)
+			t.fields = [for (i in 0...c.fields.length) if (!c.fields[i].ty.match(TStruct(_)) && !StringTools.startsWith(c.fields[i].name, Lower.HIDDEN_FIELD)) {name: c.fields[i].name, slot: c.locs[i], ty: c.fields[i].ty}];
 			c.tindex = addType(t);
 		}
 		for (c in p.classes)
