@@ -1905,6 +1905,19 @@ class FnLower {
 			case _: null;
 		};
 		var sa = scalar(ta), sb = scalar(tb);
+		// (a nullable number: null is not ordered with a number, two nulls are
+		// equal, as on Eval and the static targets; null was read as 0: upstream's
+		// TestOps)
+		if (sa != null && sb != null && (ta.match(TRef(RNull(_))) || tb.match(TRef(RNull(_))))) {
+			var a = asLocal(xa, ta), b = asLocal(xb, tb);
+			inline function isNull(l:Local, t:Ty):Ex
+				return t.match(TRef(RNull(_))) ? EBin(RefEq, ELocal(l), ENull(t)) : EInt(0);
+			var r = newLocal("ord", TBool);
+			var both = op == OpLte || op == OpGte ? 1 : 0;
+			out.push(SIf(isNull(a, ta), vector(SIf(isNull(b, tb), vector(SSet(r, EInt(both))), vector(SSet(r, EInt(0))))),
+				vector(SIf(isNull(b, tb), vector(SSet(r, EInt(0))), block(() -> out.push(SSet(r, compare(op, coerce(ELocal(a), ta, sa), sa, coerce(ELocal(b), tb, sb), sb))))))));
+			return ELocal(r);
+		}
 		if (sa != null && sb != null) {
 			if ((sa == TI64 || sb == TI64) && sa != TF64 && sb != TF64) {
 				var la = coerce(xa, ta, TI64), lb = coerce(xb, tb, TI64);
