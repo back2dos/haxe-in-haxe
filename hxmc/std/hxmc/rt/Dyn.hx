@@ -987,7 +987,7 @@ class Dyn {
 				return 8;
 			case T_ARRAY:
 				return 9;
-			case T_DATE:
+			case T_DATE | T_BYTES:
 				return 6;
 			case T_TYPEOBJ:
 				return 10;
@@ -1006,7 +1006,8 @@ class Dyn {
 	@:hxmc.noGc public static function getClass(v:Dynamic):Dynamic {
 		if (Str.isNull(v)) return null;
 		var t = tindex(v);
-		if (t == T_STRING || t == T_ARRAY || t == T_DATE) return typeObj(t);
+		// (and Bytes, the runtime's too: upstream's TestSerialize)
+		if (t == T_STRING || t == T_ARRAY || t == T_DATE || t == T_BYTES) return typeObj(t);
 		if (t >= T_FIRST && tk(ty(t)) == TK_CLASS) return typeObj(t);
 		return null;
 	}
@@ -1021,7 +1022,9 @@ class Dyn {
 	@:hxmc.noGc public static function superClass(c:Dynamic):Dynamic {
 		var t = ty(described(c));
 		var s = sup(t);
-		return s >= 0 && tk(t) == TK_CLASS ? typeObj(s) : null;
+		// (not the root every class extends, which has no superclass: Type.getSuperClass
+		// of a class without one is null; upstream's TestType)
+		return s >= 0 && tk(t) == TK_CLASS && sup(ty(s)) >= 0 ? typeObj(s) : null;
 	}
 
 	public static function typeName(t:Dynamic):String
@@ -1042,6 +1045,7 @@ class Dyn {
 		if (Str.isNull(r) && n == "String") r = typeObj(T_STRING);
 		if (Str.isNull(r) && n == "Date") r = typeObj(T_DATE);
 		if (Str.isNull(r) && n == "Array") r = typeObj(T_ARRAY);
+		if (Str.isNull(r) && n == "haxe.io.Bytes") r = typeObj(T_BYTES);
 		return r;
 	}
 
