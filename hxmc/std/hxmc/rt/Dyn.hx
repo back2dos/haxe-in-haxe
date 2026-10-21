@@ -439,8 +439,25 @@ class Dyn {
 			if (t == T_ARRAY) return ((o : Array<Dynamic>).length : Dynamic);
 			if (t == T_NATIVE_ARRAY) return (Mem.getI32(Mem.addr(o), 0) : Dynamic);
 		}
+		if ((t == T_STRING || t == T_ARRAY) && isBuiltin(t, name)) return builtinMethod(o, name);
 		return anonGetSlow(o, fid(name));
 	}
+
+	// a String's or an Array's method as a value read dynamically (Reflect.field(s,
+	// "charAt"): it was null; upstream's Issue6276): a function of any arguments
+	// calling it on o (VarArgs, callBuiltin)
+	static function isBuiltin(t:Int, name:String):Bool
+		return if (t == T_STRING) switch name {
+			case "charAt" | "charCodeAt" | "indexOf" | "lastIndexOf" | "substr" | "substring" | "toLowerCase" | "toUpperCase" | "toString" | "split": true;
+			case _: false;
+		} else switch name {
+			case "join" | "push" | "pop" | "shift" | "copy" | "concat" | "indexOf" | "lastIndexOf" | "contains" | "remove" | "insert" | "unshift" | "reverse" |
+				"slice" | "splice" | "toString" | "sort" | "filter" | "map" | "iterator" | "keyValueIterator" | "resize": true;
+			case _: false;
+		}
+
+	static function builtinMethod(o:Dynamic, name:String):Dynamic
+		return new VarArgs(args -> callBuiltin(o, name, args, args.length));
 
 	@:hxmc.export("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
 		anonSetSlow(o, fid(name), v);
