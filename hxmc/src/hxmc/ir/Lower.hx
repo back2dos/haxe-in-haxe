@@ -92,7 +92,8 @@ class Lower {
 	// ---- survey mode (HXMC_SURVEY=file): record unsupported constructs, keep going
 
 	public static var survey = Sys.getEnv("HXMC_SURVEY") != null;
-	// -debug: statements carry their source lines (Stmt.SPos)
+	// statements carry their source lines (Stmt.SPos): native builds but with
+	// -D hxmc.no-stacks (the call stacks' table, -debug's DWARF: Main)
 	public static var lines = false;
 	public var errors = new Map<String, {count:Int, example:String}>();
 	public var natives = new Map<String, Int>(); // runtime functions called, with counts
@@ -485,8 +486,17 @@ class Lower {
 		return core.Globals.sTypePath(c.clModule.mPath);
 
 	// the name of the next closure created in `owner`: stable while other functions change
-	public static function lambdaName(owner:FuncInfo):String
-		return owner.name + "__lambda" + owner.nlambdas++;
+	public static function lambdaName(owner:FuncInfo):String {
+		var n = owner.nlambdas++;
+		var name = owner.name + "__lambda" + n;
+		// (its Haxe name: the owner's, `$` and its number, a local function in
+		// stacks: StackTable, NativeStackTrace; kept by name, which a body
+		// the server replays asks again, newLambda)
+		if (owner.display != null) lambdaDisplays.set(name, owner.display + "$" + n);
+		return name;
+	}
+
+	static var lambdaDisplays = new Map<String, String>();
 
 	// hxmc's own metadata (@:hxmc.c, @:hxmc.noGc, @:hxmc.export, @:hxmc.host)
 	public static function hasMeta(name:String, ml:core.Ast.Metadata):Bool
@@ -1047,6 +1057,7 @@ class Lower {
 		if (cf.cfMeta.length == 0) return;
 		if (hasMeta(":hxmc.noGc", cf.cfMeta)) fi.declNoGc = true;
 		fi.collects = hasMeta(":hxmc.collects", cf.cfMeta);
+		fi.withStacks = hasMeta(":hxmc.withStacks", cf.cfMeta);
 		fi.cSymbol = metaString(":hxmc.export", cf.cfMeta);
 	}
 
@@ -1206,6 +1217,7 @@ class Lower {
 		if (isRuntimeStringBuf(c)) return stringBufCtor(c);
 		var ci = classInfo(c);
 		fi = new FuncInfo(nativeName(c) + "_new", moduleOf(c));
+		fi.display = core.Globals.sTypePath(c.clPath) + ".new";
 		ci.ctor = fi;
 		ctors.set(c, fi);
 		prog.funcs.push(fi);
@@ -1250,6 +1262,7 @@ class Lower {
 		var fi = structCtors.get(c);
 		if (fi != null) return fi;
 		fi = new FuncInfo(nativeName(c) + "_new", moduleOf(c));
+		fi.display = core.Globals.sTypePath(c.clPath) + ".new";
 		structCtors.set(c, fi);
 		prog.funcs.push(fi);
 		var tf = funcOf(c.clConstructor);
@@ -1268,6 +1281,7 @@ class Lower {
 	// the closure forwards to) and the module whose C file holds it
 	public function newLambda(sig:SigInfo, captures:Vector<Local>, body:FnLower->Void, name:String, module:String):LambdaInfo {
 		var fi = new FuncInfo(name, module);
+		fi.display = lambdaDisplays.get(name);
 		var li = new LambdaInfo(prog.lambdas.length, sig, captures, fi);
 		fi.lambda = li;
 		fi.args.push(new Local(0, "clos", TRef(RClos(sig))));
@@ -1367,6 +1381,8 @@ class Lower {
 				if (!(f.sret && i == f.args.length - 1)) closureArgTy(f.args[i].ty, ds != null && i < ds.length ? ds[i] : null)
 		], f.ret);
 		li = newLambda(sig, vector(), fl -> fl.forward(f, null), f.name + "__sclos", f.module);
+		// (named as the function: its body, inlined here, is that function's in stacks)
+		li.fn.display = f.display;
 		staticClosures.set(f, li);
 		return li;
 	}
@@ -1423,6 +1439,7 @@ class Lower {
 		var sig = prog.sig(args, f.ret);
 		var self = new Local(-1, "self", TRef(RObj(root)));
 		li = newLambda(sig, vector(self), fl -> fl.forward(f, dispatch), dispatch == null ? f.name + "__bound" : lambdaName(owner), dispatch == null ? f.module : owner.module);
+		if (f != null) li.fn.display = f.display;
 		if (dispatch == null) boundClosures.set(f, li);
 		return li;
 	}

@@ -218,6 +218,8 @@ class FuncInfo {
 	public var blocks:Bool = false;
 	public var blocksHere:Bool = false;
 	public var declNoGc:Bool = false; // declared @:hxmc.noGc: Facts.findNoGc fails the build unless noGc
+	// @:hxmc.withStacks: live only where the program reads stacks (Reach: its calls are dropped otherwise)
+	public var withStacks:Bool = false;
 	public var pos:Null<core.Globals.Pos>; // the declaration (errors)
 	public var display:Null<String>; // its Haxe name, pack.Class.field (errors)
 	// declared @:hxmc.collects: it runs the collector (the entries of a
@@ -369,7 +371,7 @@ enum Stmt {
 	// allocation or array store: the references live across it are stored in
 	// the shadow stack only on that path (hxmc.Roots)
 	SCold(id:Int, s:Stmt);
-	// (-debug: Lower.lines) the code of the statements that follow comes from
+	// (Lower.lines) the code of the statements that follow comes from
 	// this line of the source (the typed AST's position); nothing else: every
 	// pass steps over it, so the code is the same as without it
 	SPos(file:String, line:Int);
@@ -404,6 +406,8 @@ class Program {
 	public var roots:Array<FuncInfo> = []; // live whatever reaches them (Reach)
 	// (Reach) the live functions and the selectors live code dispatches on; null: all
 	public var live:Null<Map<FuncInfo, Bool>> = null;
+	// (Reach) whether the program reads stacks (haxe.NativeStackTrace.toHaxe live, or -D hxmc.stacks): the table of its functions and lines (hxmc.StackTable)
+	public var stacks = false;
 	public var liveSelectors:Null<Vector<Bool>> = null;
 
 	public function new() {}

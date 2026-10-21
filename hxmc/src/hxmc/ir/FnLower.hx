@@ -2184,6 +2184,11 @@ class FnLower {
 				var cl = asLocal(EGlobal(g, t), t);
 				var xs = args(cargs, s.args, null);
 				return callClos(s, ELocal(cl), xs, rt);
+			// (@:hxmc.withStacks: a call left out of a program without the
+			// table of its functions and lines, Lower.lines: hxmc.rt.Stacks'
+			// recording of a throw and report of an uncaught exception)
+			case TField(_, FStatic(c, cf)) if (!Lower.lines && rt == TVoid && Lower.hasMeta(":hxmc.withStacks", cf.cfMeta)):
+				return EInt(0);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
 				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 0, fn);
