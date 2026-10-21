@@ -174,7 +174,6 @@ class Driver {
 			}
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) new Opt(mf).run();
-			if (o.opt && !abi.wasm && o.shrinkWrap) new ShrinkWrap(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {
 				// WebAssembly: structured code from the Mir, no instruction selection or registers
@@ -274,7 +273,7 @@ class Driver {
 		var st = try sys.FileSystem.stat(p) catch (_:Dynamic) null;
 		return "hxmc|" + abi.rtName + (abi.ios() ? "+" + abi.platform : "") + (o.wasmLegacyEh ? "+legacy-eh" : "") + (abi.framePointers ? "+fp" : "") + (hxmc.ir.Lower.lines ? "+lines" : "")
 			+ (hxmc.ir.Lower.nullChecks != abi.wasm ? "+null-checks=" + (hxmc.ir.Lower.nullChecks ? 1 : 0) : "")
-			+ (abi.output == SharedLibrary ? "+shared" : "") + (o.jit ? "+jit" : "") + (o.shrinkWrap ? "+sw" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
+			+ (abi.output == SharedLibrary ? "+shared" : "") + (o.jit ? "+jit" : "") + "|" +(st == null ? "?" : st.size + "@" + st.mtime.getTime()) + "|";
 	}
 
 	// the functions that may be inlined (before the keys: they are part of them)

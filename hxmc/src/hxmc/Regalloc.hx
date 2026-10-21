@@ -1027,18 +1027,12 @@ class Regalloc {
 		// per instruction: spilled register -> its temporary (stamped by instruction)
 		var tmp = hxmc.Lir.Arrays.filled(f.nregs, -1);
 		var tmpStamp = hxmc.Lir.Arrays.filled(f.nregs, -1);
-		// the temporary the instruction before left a spilled register in
-		// (loaded for it or defined by it, then stored): the next instruction
-		// reads it there instead of loading the slot again
-		var lastTmp = hxmc.Lir.Arrays.filled(f.nregs, -1);
-		var lastStamp = hxmc.Lir.Arrays.filled(f.nregs, -1);
 		var stamp = 0;
 		var nOld = f.nregs;
 		if (noSpillFrom > nOld) noSpillFrom = nOld;
 		for (b in f.blocks) {
 			var out = [];
 			var any = false;
-			stamp++; // (nothing carries over from the block before)
 			for (i in b.ins) {
 				defs.n = 0;
 				uses.n = 0;
@@ -1048,14 +1042,10 @@ class Regalloc {
 				for (k in 0...uses.n) {
 					var r = uses.a[k];
 					if (r < nOld && slotOf[r] >= 0 && tmpStamp[r] != stamp) {
-						mapped = true;
-						tmpStamp[r] = stamp;
-						if (lastStamp[r] == stamp) {
-							tmp[r] = lastTmp[r];
-							continue;
-						}
 						var nr = f.newReg(f.floatReg(r));
 						tmp[r] = nr;
+						tmpStamp[r] = stamp;
+						mapped = true;
 						out.push(t.spillLoad(nr, slotOf[r], f.floatReg(r)));
 					}
 				}
@@ -1077,21 +1067,6 @@ class Regalloc {
 					var st = stamp;
 					rename(i, r -> r < nOld && tmpStamp[r] == st ? tmp[r] : r);
 					any = true;
-					// (not past a call: the temporary would need a callee-saved register)
-					if (!t.isCall(i)) for (k in 0...uses.n) {
-						var r = uses.a[k];
-						if (r < nOld && tmpStamp[r] == st) {
-							lastTmp[r] = tmp[r];
-							lastStamp[r] = st + 1;
-						}
-					}
-					if (!t.isCall(i)) for (k in 0...defs.n) {
-						var r = defs.a[k];
-						if (r < nOld && tmpStamp[r] == st) {
-							lastTmp[r] = tmp[r];
-							lastStamp[r] = st + 1;
-						}
-					}
 				}
 				out.push(i);
 				if (stores != null)
