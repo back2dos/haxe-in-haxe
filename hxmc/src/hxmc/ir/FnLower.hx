@@ -1317,11 +1317,11 @@ class FnLower {
 					case TRef(RNativeArr(elem)):
 						var xs = operands(vector(a, i));
 						var al = ELocal(asLocal(xs[0], tyOf(a)));
-						coerce(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elem, tyOf(e));
+						elemRead(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elem, tyOf(e));
 					case TRef(RArr(elem)):
 						var xs = operands(vector(a, i));
 						var ix = coerce(xs[1], tyOf(i), TI32);
-						coerce(isVectorData(a.etype) ? EArrGetU(elem, xs[0], ix) : EArrGet(elem, xs[0], ix), elem, tyOf(e));
+						elemRead(isVectorData(a.etype) ? EArrGetU(elem, xs[0], ix) : EArrGet(elem, xs[0], ix), elem, tyOf(e));
 					case _:
 						var xs = operands(vector(a, i));
 						var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_aget"), vector(coerce(xs[0], tyOf(a), TRef(RAny)), coerce(xs[1], tyOf(i), TI32)), TRef(RAny)));
@@ -2037,7 +2037,7 @@ class FnLower {
 				};
 				var xs = operands(VectorTools.cons(obj, cargs));
 				var a = ELocal(asLocal(xs[0], tyOf(obj))), i = coerce(xs[1], tyOf(cargs[0]), TI32);
-				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elem, rt);
+				if (cf.cfName == "unsafeGet") return elemRead(nativeRead(elem, a, i), elem, rt);
 				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elem), elem)));
 				return EInt(0);
 			// NativeArray.literal([a, b, c]) (VectorTools' `vector(a, b, c)`): one
@@ -2700,6 +2700,23 @@ class FnLower {
 	// passed where a type parameter makes it a (T) -> X, its argument boxed):
 	// it is read as Dynamic and kept when its signature is the one wanted,
 	// else wrapped in an adapter (coerce)
+	// x, an element of an Array or a NativeArray of element type elem, as `to`.
+	// An element is stored as it was put there, and the same array is an
+	// Array<(Int) -> Bool> where it is filled and an Array<(T) -> Bool> where
+	// a generic function or rest argument reads it (the element type is the
+	// instantiated one, not erased: Lower.ty), so a closure read may have
+	// another signature than the element type's (its argument boxed): read as
+	// Dynamic, kept when it has this signature, else adapted (coerce), as
+	// anonGet does
+	function elemRead(x:Ex, elem:Ty, to:Ty):Ex {
+		switch [elem, to] {
+			case [TRef(RClos(a)), TRef(RClos(b))] if (!hasStruct(a) && !hasStruct(b)):
+				return coerce(temp(TRef(RAny), x), TRef(RAny), to);
+			case _:
+				return coerce(x, elem, to);
+		}
+	}
+
 	function anonGet(name:String, obj:TExpr, e:TExpr):Ex {
 		var t = l.boxed(tyOf(e));
 		if (t.match(TRef(RClos(_)))) {
