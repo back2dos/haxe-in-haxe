@@ -404,7 +404,8 @@ class Str {
 		var n = len(s), m = len(sub);
 		var from:Int = start == null ? n : start;
 		if (from > n - m) from = n - m;
-		if (m == 0) return from >= 0 ? from : -1;
+		// ("" before the start: 0, as Eval and ECMAScript; upstream's Issue5271)
+		if (m == 0) return from >= 0 ? from : 0;
 		var c = chars(s), d = chars(sub);
 		var i = from;
 		while (i >= 0) {
