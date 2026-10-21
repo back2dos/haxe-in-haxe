@@ -7,6 +7,9 @@
 // Its length is its BytesData's, which Dynamic access and reflection read as
 // the field upstream declares (@:hxmc.lengthOf: the runtime's field table).
 // A small one is allocated with its BytesData (one allocation: shared).
+// What writes tests its range (OutsideBounds, as HashLink's): the bytes
+// before the data are its header, and those after it another object's; a
+// read out of range is unspecified (as upstream leaves it).
 
 package haxe.io;
 
@@ -26,14 +29,22 @@ class Bytes {
 	public inline function get(pos:Int):Int
 		return b.unsafeGet(pos);
 
-	public inline function set(pos:Int, v:Int):Void
+	public inline function set(pos:Int, v:Int):Void {
+		if (!inRange(pos, 1)) throw Error.OutsideBounds;
 		b.unsafeSet(pos, v);
+	}
+
+	// [pos, pos + n) inside (n a constant: for one byte one unsigned comparison)
+	inline function inRange(pos:Int, n:Int):Bool
+		return #if !hxmc.wasm_gc n == 1 ? hxmc.unsafe.Mem.ult(pos, length) : #end pos >= 0 && pos <= length - n;
 
 	public inline function blit(pos:Int, src:Bytes, srcpos:Int, len:Int):Void
 		NativeBytes.blit(b, pos, src.b, srcpos, len);
 
-	public inline function fill(pos:Int, len:Int, value:Int):Void
+	public inline function fill(pos:Int, len:Int, value:Int):Void {
+		if (pos < 0 || len < 0 || pos > length - len) throw Error.OutsideBounds;
 		NativeBytes.fill(b, pos, len, value);
+	}
 
 	public function sub(pos:Int, len:Int):Bytes {
 		#if !hxmc.wasm_gc
@@ -58,23 +69,31 @@ class Bytes {
 	public inline function getFloat(pos:Int):Float
 		return NativeBytes.getFloat(b, pos);
 
-	public inline function setDouble(pos:Int, v:Float):Void
+	public inline function setDouble(pos:Int, v:Float):Void {
+		if (!inRange(pos, 8)) throw Error.OutsideBounds;
 		NativeBytes.setDouble(b, pos, v);
+	}
 
-	public inline function setFloat(pos:Int, v:Float):Void
+	public inline function setFloat(pos:Int, v:Float):Void {
+		if (!inRange(pos, 4)) throw Error.OutsideBounds;
 		NativeBytes.setFloat(b, pos, v);
+	}
 
 	public inline function getUInt16(pos:Int):Int
 		return NativeBytes.getUInt16(b, pos);
 
-	public inline function setUInt16(pos:Int, v:Int):Void
+	public inline function setUInt16(pos:Int, v:Int):Void {
+		if (!inRange(pos, 2)) throw Error.OutsideBounds;
 		NativeBytes.setUInt16(b, pos, v);
+	}
 
 	public inline function getInt32(pos:Int):Int
 		return NativeBytes.getInt32(b, pos);
 
-	public inline function setInt32(pos:Int, v:Int):Void
+	public inline function setInt32(pos:Int, v:Int):Void {
+		if (!inRange(pos, 4)) throw Error.OutsideBounds;
 		NativeBytes.setInt32(b, pos, v);
+	}
 
 	public inline function getInt64(pos:Int):haxe.Int64
 		return haxe.Int64.make(getInt32(pos + 4), getInt32(pos));
