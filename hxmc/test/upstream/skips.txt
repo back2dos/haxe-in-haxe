@@ -10,7 +10,6 @@
 
 # --- unit ---
 
-unit * unit.teststd.TestReflect.test BUG Reflect.compareMethods(a.push, a.push): a closure of an Array method is an adapter (its host function takes Dynamic) made apart at each use, so closures of one method and array compare unequal
 unit * unit.TestMeta.testMeta BUG an enum's metadata: haxe.rtti.Meta.getType and getFields of an enum find no __meta__ (classes have theirs)
 unit * unit.TestReflect.testTypes BUG Math, an extern class the runtime implements, has no class value of its own (Type.getClassName(Math) is "None"; resolveClass("Math") is null)
 unit * unit.TestExceptions.testExceptionStack BUG no call stacks: haxe.CallStack.callStack() and exception stacks are empty (hxmc/std/haxe/NativeStackTrace.hx)
@@ -19,7 +18,6 @@ unit * unit.issues.Issue13043.testOverrideAsBase TARGET a dynamic method set to 
 unit * unit.teststd.haxe.TestLog.test TARGET haxe.Log.trace set to null is the original again (a dynamic method set to null: FnLower.isDynMethod), so trace does not throw
 unit * unit.issues.Issue5016 TARGET Reflect.deleteField cannot remove a field of a structure's own layout, only one added at run time (as on cpp, which upstream leaves out)
 unit * unit.teststd.TestUnicode.test TARGET Reflect.deleteField of a structure's own field (as Issue5016: the layout is fixed; cpp likewise)
-unit * unit.issues.Issue6705.testTypeChange TARGET a function converted to another function type ((Float) -> Void to Int -> Void) is an adapter, not the same closure (as on hl, which upstream leaves out)
 unit * unit.issues.Issue9046 TARGET Type.resolveClass finds a class the program constructs or uses as a value (docs/hxmc.md, "Reachability"), not one whose statics it only calls
 unit * unit.TestDCE.testInterface TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface is not a class value for Type.resolveClass
 unit * unit.TestDCE.testProperty TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface is not a class value for Type.resolveClass

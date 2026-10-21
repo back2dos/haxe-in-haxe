@@ -18,6 +18,8 @@ class Facts {
 	public static inline var T_FIRST = 32;
 	// the tag of a closure type: a Dynamic converted to a function type (Lower.dynAdapter, hxmc.rt.Types)
 	public static inline var TAG_DYN_ADAPTER = 1;
+	// and a closure converted to another function type (Lower.adapter)
+	public static inline var TAG_ADAPTER = 2;
 
 	public var p:Program;
 	public var strNames = new Map<String, String>(); // literal -> S_<hash of its content>
@@ -286,11 +288,15 @@ class Facts {
 			// <method>, whose closures equal those of the same code and object:
 			// Dyn.dynEq, compareMethods; upstream's Issue6705)
 			var method = l.captures.length == 1 && (StringTools.endsWith(l.fn.name, "__bound") || StringTools.endsWith(l.fn.name, "__hclos"));
-			// (a Dynamic converted to a function type, Lower.dynAdapter: a type of
-			// its own, tagged, so that a dynamic call calls the Dynamic itself
-			// with all of its arguments, Dyn.unadapt; upstream's Issue12028)
+			// (a Dynamic converted to a function type, Lower.dynAdapter, and a
+			// closure converted to another function type, Lower.adapter: types
+			// of their own, tagged, so that a dynamic call calls the Dynamic
+			// itself with all of its arguments, Dyn.unadapt, upstream's
+			// Issue12028, and two adapters of one method compare as that
+			// method, Dyn.compareMethods, upstream's TestReflect)
 			var dynAdapter = StringTools.startsWith(l.fn.name, "dynadapt__");
-			var key = (method ? "meth." : dynAdapter ? "dynadapt." : "clos.") + l.sig.key + "." + [for (c in l.captures) switch c.ty {
+			var adapter = StringTools.startsWith(l.fn.name, "adapt__");
+			var key = (method ? "meth." : dynAdapter ? "dynadapt." : adapter ? "adapt." : "clos.") + l.sig.key + "." + [for (c in l.captures) switch c.ty {
 				case TStruct(_, size): "s" + size;
 				case t: Ir.repr(t);
 			}].join("");
@@ -302,6 +308,7 @@ class Facts {
 			var t = entry(method ? "<method>" : "<closure>", "TK_CLOSURE", slots, key);
 			t.sup = l.sig.id;
 			if (dynAdapter) t.tag = TAG_DYN_ADAPTER;
+			if (adapter) t.tag = TAG_ADAPTER;
 			l.tindex = addType(t);
 			closures.set(key, l.tindex);
 		}

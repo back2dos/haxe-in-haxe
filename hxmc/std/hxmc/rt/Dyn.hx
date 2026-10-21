@@ -674,6 +674,7 @@ class Dyn {
 		if (ta == T_TYPEOBJ && tb == T_TYPEOBJ) return described(a) == described(b);
 		// (two closures of one method and object: equal, as on Eval and hl)
 		if (ta == tb && ta >= T_FIRST && (tk(ty(ta)) == TK_BOUND || isMethodClosure(ta))) return compareMethods(a, b);
+		if (isAdapter(a) || isAdapter(b)) return compareMethods(a, b);
 		return false;
 	}
 
@@ -1284,7 +1285,26 @@ class Dyn {
 		return Mem.getU8(nm, 0) == "<".code && Mem.getU8(nm, 1) == "m".code;
 	}
 
+	// what an adapter converts to its function type (Lower.adapter,
+	// dynAdapter: its capture), else f
+	@:hxmc.noGc static function peel(f:Dynamic):Dynamic {
+		while (isAdapter(f))
+			f = Mem.getRef(Mem.addr(f), 8);
+		return f;
+	}
+
+	@:hxmc.noGc static function isAdapter(f:Dynamic):Bool {
+		if (Str.isNull(f) || tindex(f) < T_FIRST) return false;
+		var t = ty(tindex(f));
+		return tk(t) == TK_CLOSURE && (tag(t) == TAG_ADAPTER || tag(t) == TAG_DYN_ADAPTER);
+	}
+
 	@:hxmc.noGc public static function compareMethods(a:Dynamic, b:Dynamic):Bool {
+		if (Mem.addr(a) == Mem.addr(b)) return true;
+		// (two adapters of one method, `a.push` made where it is used: that
+		// method's; upstream's TestReflect)
+		a = peel(a);
+		b = peel(b);
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b) || tindex(a) != tindex(b)) return false;
 		if (tk(ty(tindex(a))) == TK_BOUND) {

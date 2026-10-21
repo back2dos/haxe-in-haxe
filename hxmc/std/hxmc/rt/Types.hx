@@ -28,6 +28,8 @@ class Types {
 	public static inline var T_FIRST = 32;
 	// a closure type's tag: a Dynamic converted to a function type (hxmc.ir.Facts, Dyn.unadapt)
 	public static inline var TAG_DYN_ADAPTER = 1;
+	// and a closure converted to another function type (Lower.adapter)
+	public static inline var TAG_ADAPTER = 2;
 	// object kinds
 	public static inline var K_OBJ = 0;
 	public static inline var K_PARR = 1;
