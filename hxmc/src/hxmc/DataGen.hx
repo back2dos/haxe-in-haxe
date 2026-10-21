@@ -573,6 +573,7 @@ class DataGen {
 			for (f in p.inits)
 				b.call(e.symbol(f), vector(), Void);
 			b.call(e.symbol(p.main), vector(), Void);
+			if (p.entryRun != null) b.call(e.symbol(p.entryRun), vector(), Void);
 			b.ret(-1);
 		}));
 		// WebAssembly (WASI): _start; the runtime reads the arguments itself and exits

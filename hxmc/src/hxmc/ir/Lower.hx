@@ -59,6 +59,15 @@ class Lower {
 		if (l == null) l = new Lower();
 		var mainField = main.clStatics.get("main");
 		l.prog.main = l.staticFunc(main, mainField);
+		// (haxe.EntryPoint.run after main, as Finalization.maybeAddEntrypoint adds
+		// it to the main expression when the program keeps the class: the event
+		// loop, haxe.Timer and haxe.MainLoop's events; upstream's threads suite)
+		for (t in types)
+			switch t {
+				case TClassDecl(c) if (c.clPath.name == "EntryPoint" && c.clPath.pack.length == 1 && c.clPath.pack[0] == "haxe" && c.clStatics.exists("run")):
+					l.prog.entryRun = l.staticFunc(c, c.clStatics.get("run"));
+				case _:
+			}
 		l.findHosts(types);
 		l.drain();
 		l.finish();
