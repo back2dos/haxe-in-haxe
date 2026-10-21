@@ -389,6 +389,10 @@ class Dyn {
 		return it;
 	}
 
+	// KeyValueIterable.keyValueIterator() on an Array (Facts: Array's method table)
+	@:hxmc.export("hx_array_kv_iterator") static function arrayKvIterator(a:Dynamic):Dynamic
+		return new haxe.iterators.ArrayKeyValueIterator<Dynamic>(a);
+
 	// obj.name(args) through a structural type, slow path: the arguments
 	// packed in 8-byte words (MirBuild.callAnon), the result likewise
 	@:hxmc.export("hx_anon_call_slow") static function anonCallSlow(o:Dynamic, fid:Int, sig:Int, args:Ptr):I64 {
@@ -501,6 +505,8 @@ class Dyn {
 			case "filter": r = a.filter(a0);
 			case "map": r = a.map(a0);
 			case "iterator": r = arrayIterator(a);
+			case "keyValueIterator": r = arrayKvIterator(a);
+			case "resize": a.resize(a0);
 			case _: return NOT_BUILTIN;
 		}
 		return r;

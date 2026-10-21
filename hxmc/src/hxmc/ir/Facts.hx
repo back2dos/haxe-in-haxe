@@ -325,8 +325,12 @@ class Facts {
 		];
 		// Iterable.iterator() on an Array (Lambda and the other Iterable
 		// consumers): a method, so structural calls hit the inline cache
-		// instead of the boxed slow path
-		types[5].methods = [{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id}];
+		// instead of the boxed slow path; KeyValueIterable.keyValueIterator()
+		// likewise (it was not found: "Cannot call null", upstream's TestArray)
+		types[5].methods = [
+			{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id},
+			{name: "keyValueIterator", fn: "hx_array_kv_iterator", sig: p.sig([], TRef(RAny)).id}
+		];
 		// one bound-method closure type per signature of a method in the
 		// tables (code, this, method; after Reach: else every signature's)
 		var bound = new Map<Int, Bool>();
