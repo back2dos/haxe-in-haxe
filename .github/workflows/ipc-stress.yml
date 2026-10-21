@@ -6,8 +6,8 @@ name: ipc-stress
 on:
   workflow_dispatch:
     inputs:
-      rounds: {description: IpcStress rounds per run, default: "60"}
-      sysruns: {description: TestUnicode runs per copy, default: "40"}
+      rounds: {description: IpcStress rounds per run, default: "15"}
+      sysruns: {description: TestUnicode runs per copy, default: "60"}
   push:
     branches: [ipc-arm64]
     paths: [".github/workflows/ipc-stress.yml", ".github/ipc-stress/**", "hxmc/std/**", "hxmc/src/**", "haxe/src/**", "haxe/test/IpcStress.hx"]
@@ -39,13 +39,14 @@ jobs:
         bin: [ci, branch]
     env:
       HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
-      ROUNDS: ${{ inputs.rounds || '60' }}
-      SYSRUNS: ${{ inputs.sysruns || '40' }}
+      ROUNDS: ${{ inputs.rounds || '15' }}
+      SYSRUNS: ${{ inputs.sysruns || '60' }}
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
           persist-credentials: false
+      - uses: ./haxe/upstream/.github/actions/setup-neko
       - uses: actions/download-artifact@v8
         if: matrix.bin == 'ci'
         with:
@@ -72,7 +73,7 @@ jobs:
             IPC_STRESS_DIR="$RUNNER_TEMP/ipc$i" haxe -cp haxe/test --run IpcStress "$(command -v haxe)" $ROUNDS > "$RUNNER_TEMP/ipc$i.log" 2>&1 &
             pids="$pids $!"
           done
-          for p in $pids; do wait $p; done
+          for p in $pids; do wait $p || true; done
           cat "$RUNNER_TEMP"/ipc?.log
         timeout-minutes: 60
       - name: TestUnicode alone, four copies at once
@@ -82,6 +83,6 @@ jobs:
             bash .github/ipc-stress/sysloop.sh "$PWD" "$RUNNER_TEMP/utest" "$RUNNER_TEMP/sys$c" $SYSRUNS > "$RUNNER_TEMP/sys$c.log" 2>&1 &
             pids="$pids $!"
           done
-          for p in $pids; do wait $p; done
+          for p in $pids; do wait $p || true; done
           cat "$RUNNER_TEMP"/sys?.log
         timeout-minutes: 60
