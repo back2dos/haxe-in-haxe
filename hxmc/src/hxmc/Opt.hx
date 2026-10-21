@@ -120,7 +120,8 @@ class Opt {
 	// A load that cannot fault wherever it moves: of a global variable (the
 	// globals table, or a scalar global's own symbol), of immutable memory
 	// at a symbol, of runtime state at a symbol, or of a thread-local variable.
-	// Runtime state can move only when the loop's calls invalidate it.
+	// Runtime state can move only when the loop's calls invalidate it. (Loads
+	// through an object dereferenced before the loop move too: licm.)
 	static inline function safeLoad(i:MIns, vals:Array<MIns>):Bool
 		return i.op == TlsLoad || i.op == Load && (i.mem == MGlobal || (i.mem == MConst || i.mem == MCallOnly) && i.b < 0 && vals[i.a].op == SymAddr);
 
@@ -138,6 +139,43 @@ class Opt {
 		var inOrder = order[0].mark; // (set by dominators: tmp is the reverse postorder index)
 		var vals = f.vals;
 		var body = new Vector<Bool>(n); // (the blocks of the loop, by rpo index)
+		// the blocks each object is dereferenced in (a load or store through
+		// it, at any displacement): not null there, nor where they dominate
+		var derefs = new Map<Int, Array<MBlock>>();
+		for (b in order)
+			for (i in b.ins)
+				if (!i.dead && (i.op == Load || i.op == Store) && i.a >= 0) {
+					var o = baseOf(i.a);
+					var l = derefs.get(o);
+					if (l == null) derefs.set(o, l = []);
+					if (l.length == 0 || l[l.length - 1] != b) l.push(b);
+				}
+		// whether the object o is dereferenced on every way to the block at,
+		// outside the loop
+		function derefBefore(o:Int, at:MBlock):Bool {
+			var l = derefs.get(o);
+			if (l != null)
+				for (d in l)
+					if (d.mark == inOrder && !body[d.tmp]) {
+						var x = at.tmp;
+						while (x > d.tmp)
+							x = idom[x];
+						if (x == d.tmp) return true;
+					}
+			return false;
+		}
+		// whether the object o is not null at the end of the block at: just
+		// allocated, dereferenced on every way there, or a merge of objects
+		// that are on their edges
+		function nonNull(o:Int, at:MBlock, depth:Int):Bool {
+			if (fresh(o) || derefBefore(o, at)) return true;
+			var x = vals[o];
+			if (depth > 4 || x.op != Phi || x.block == null || x.block.mark != inOrder || x.args.length == 0) return false;
+			var ps = x.block.preds;
+			for (k in 0...x.args.length)
+				if (ps[k].mark != inOrder || !nonNull(baseOf(x.args[k]), ps[k], depth + 1)) return false;
+			return true;
+		}
 		var inv:Array<Bool> = [];
 		var moved = false;
 		var nextBlock = 0;
@@ -219,7 +257,13 @@ class Opt {
 						case Const | ConstF | SymAddr | StackAddr: true;
 						case Cmp: false; // (fused with its branch)
 						case Load | TlsLoad:
-							safeLoad(i, vals) && kills & (1 << (i.op == TlsLoad ? tlsClass(i.sym) : i.mem)) == 0;
+							safeLoad(i, vals) && kills & (1 << (i.op == TlsLoad ? tlsClass(i.sym) : i.mem)) == 0
+							// (a field, an array's header or immutable memory of an object the
+							// loop does not write there, dereferenced before it: not null, so
+							// the load cannot fault before the loop; a loop that may collect
+							// writes them all: no reference leaves it to live across a GC point)
+							|| i.op == Load && i.b < 0 && (i.mem == MField || i.mem == MHdr || i.mem == MConst)
+							&& kills & (1 << memClass(i)) == 0 && nonNull(baseOf(i.a), outside, 0);
 						case op: pure(op);
 					};
 					if (!can || !invariant(i.a) || !invariant(i.b) || !invariant(i.c)) continue;
@@ -272,6 +316,29 @@ class Opt {
 			moved = true;
 		}
 		return moved;
+	}
+
+	// whether v is an object just allocated (MirBuild.alloc's result: the
+	// nursery's bump, ptr + 8, or the slow path's call; a merge of those):
+	// never null
+	function fresh(v:Int, depth = 0):Bool {
+		if (v < 0 || depth > 8) return false;
+		var x = f.vals[v];
+		switch x.op {
+			case Copy:
+				return fresh(x.a, depth + 1);
+			case Add:
+				var p = f.vals[x.a], c = f.vals[x.b];
+				return p.op == TlsLoad && p.sym == "rt_young_ptr" && c.op == Const && c.sym == null && c.imm == 8;
+			case Call:
+				return x.sym != null && (StringTools.startsWith(x.sym, MirBuild.ALLOC_STUB) || x.sym == "hxmc_alloc_slow");
+			case Phi:
+				for (a in x.args)
+					if (!fresh(a, depth + 1)) return false;
+				return x.args.length > 0;
+			case _:
+				return false;
+		}
 	}
 
 	// ---- conditions known from dominating branches

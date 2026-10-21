@@ -117,6 +117,21 @@ structural field write (`hx_anon_set_slow`, 54), not the latest instance (50).
 - The analysis' cost (the screen still lets through many allocations that
   escape: phis with loaded values, stores of reloaded values).
 
+## Loads out of loops
+
+`Opt.licm` moved only loads that cannot fault (globals, immutable memory at
+a symbol, thread-local variables). A load of a field, an array's header or
+immutable memory (a NativeArray's length) moves too when the loop does not
+write that memory and its object is not null before the loop: just
+allocated (`Opt.fresh`: the nursery's bump or the slow path's call, a merge
+of those), dereferenced on every way to the loop, or a merge of objects
+that are on their edges. A loop that may collect writes every class of
+memory but immutable memory (its calls' kill masks): no reference leaves it
+to live across a GC point. Measured: a Bytes' `b` in a loop of
+`get`/`set`: the loop as fast as over the bare NativeArray (2.669 to 2.563 G
+instructions); the self-compile: the same (its loops call, or load what
+they write).
+
 ## Debugging information
 
 Built (docs/hxmc.md, "Debugging"): frame pointers by default on x86-64;
