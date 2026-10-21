@@ -1,6 +1,7 @@
 // A String's and an Array's methods read as fields (Reflect.field, Dynamic
 // access) and called with Reflect.callMethod or directly (upstream's unit
-// tests Issue6276, Issue6376): they were null ("Cannot call null").
+// tests Issue6276, Issue6376): they were null ("Cannot call null"); so were an
+// enum's constructors read by name (TestReflect).
 class BuiltinFields {
 	static function main() {
 		var s = "bar";
@@ -24,5 +25,9 @@ class BuiltinFields {
 		var f:Dynamic = da.copy;
 		Sys.println(f());
 		Sys.println(Reflect.isFunction(join) + " " + (Reflect.field(a, "nothing") == null));
+		// an enum's constructors
+		var some:(Dynamic) -> haxe.ds.Option<Dynamic> = Reflect.field(haxe.ds.Option, "Some");
+		Sys.println(some("Hello") + " " + Reflect.callMethod(null, Reflect.getProperty(haxe.ds.Option, "Some"), ["x"]));
+		Sys.println(Reflect.field(haxe.ds.Option, "None") + " " + (Reflect.field(haxe.ds.Option, "Other") == null));
 	}
 }

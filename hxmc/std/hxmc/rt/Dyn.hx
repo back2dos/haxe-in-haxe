@@ -440,6 +440,12 @@ class Dyn {
 			if (t == T_NATIVE_ARRAY) return (Mem.getI32(Mem.addr(o), 0) : Dynamic);
 		}
 		if ((t == T_STRING || t == T_ARRAY) && isBuiltin(t, name)) return builtinMethod(o, name);
+		// (an enum's constructor by name: its value, or a function making one, as on
+		// Eval; upstream's TestReflect)
+		if (t == T_TYPEOBJ && tk(ty(described(o))) == TK_ENUM) {
+			var i = enumCtorNames(o).indexOf(name);
+			if (i >= 0) return single(ty(ctor(ty(described(o)), i))) >= 0 ? enumCreate(o, i, null) : enumCtorFunction(o, i);
+		}
 		return anonGetSlow(o, fid(name));
 	}
 
@@ -458,6 +464,9 @@ class Dyn {
 
 	static function builtinMethod(o:Dynamic, name:String):Dynamic
 		return new VarArgs(args -> callBuiltin(o, name, args, args.length));
+
+	static function enumCtorFunction(e:Dynamic, i:Int):Dynamic
+		return new VarArgs(args -> enumCreate(e, i, args));
 
 	@:hxmc.export("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
 		anonSetSlow(o, fid(name), v);

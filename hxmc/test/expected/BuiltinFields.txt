@@ -11,3 +11,5 @@ BAR
 3-1-2-4
 [3,1,2,4]
 true true
+Some(Hello) Some(x)
+None true

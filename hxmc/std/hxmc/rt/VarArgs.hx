@@ -8,4 +8,8 @@ class VarArgs {
 
 	public function new(f:Array<Dynamic>->Dynamic)
 		this.f = f;
+
+	// (printed as every function is)
+	public function toString():String
+		return "<function>";
 }
