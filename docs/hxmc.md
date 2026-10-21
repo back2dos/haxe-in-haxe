@@ -748,6 +748,33 @@ use `sys.ssl` or `eval.luv`. Environment for development: `HXMC_OPT=0`,
 `RT_MINOR_KB` (a fixed nursery), `RT_TLAB_KB`, `RT_OLD_MB`, `RT_PREFAULT`, `RT_STATS`, `RT_VERIFY`, `RT_NULL_ACCESS=0` (no fault handler: Null access),
 `RT_STACK_MB` (wasm32: the shadow stack and the stack of frame areas; WebAssembly, Memory); `RT_CENSUS=1|2` in a `-D hxmc.census` build: the live heap by type at exit (2: after every major collection too) and every allocation by type, bytes and objects (`RT_CENSUS_TOP`: rows shown).
 
+### Target flags
+
+The conditional-compilation flags code tests to choose what a target
+supports (upstream's unit suite picks its tests by them). A custom target
+starts from the default platform configuration (`Common.defaultConfig`),
+from which the compiler defines `static` and `target.static`, `sys` and
+`target.sys`, `utf16` and `target.utf16`, `target.unicode`, and
+`custom_target` with `target.name` = `hxmc`; all of them hold for hxmc:
+static types (an Int is never null, as on hl, cpp and jvm), the sys API,
+UTF-16 strings, full Unicode. `hxmc/src/hxmc/TargetFlags.hx` adds, once the
+target is initialized and before the init macros and typing:
+
+| Flag | Where | |
+| --- | --- | --- |
+| `target.threaded` | the native targets | OS threads in parallel (`sys.thread`, `haxe.EventLoop`'s per-thread loops, `Thread.events`), as on hl, cpp and jvm |
+| `target.atomics` | every target | `haxe.atomic` (`hxmc/std/haxe/atomic`) |
+
+wasm32-wasi is not `target.threaded`: its threads run one at a time
+(`hxmc.NativeThread`), so `sys.thread` compiles there but code that tests
+the flag takes its single-threaded path. They are defines only: nothing else
+in the compiler reads those fields of the platform configuration. (The
+custom target's own way, an `hxmc.Init.init()` macro calling
+`Compiler.setPlatformConfiguration`, would also turn off skipping
+non-nullable optional arguments, which that call's decoding always does, and
+an init macro cannot define a `target.*` flag.) `hxmc` itself is not a
+define: code tests `target.name == "hxmc"`.
+
 ## Android
 
 `-D hxmc.target=android-arm64` (phones) or `android-x86_64` (emulators):

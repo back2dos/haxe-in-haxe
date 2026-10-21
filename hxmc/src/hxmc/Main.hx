@@ -58,6 +58,7 @@ class Main {
 			}
 			Driver.resident = true;
 			hxmc.ir.CInterop.install();
+			hxmc.TargetFlags.install();
 			compiler.Compiler.generateHook = function(com) {
 				try {
 					start = haxe.Timer.stamp();
@@ -107,6 +108,7 @@ class Main {
 		}
 		ModuleCache.install();
 		hxmc.ir.CInterop.install();
+		hxmc.TargetFlags.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));
 		ModuleCache.finish(failed == null ? code : 1);
 		if (failed != null) {
