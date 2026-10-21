@@ -768,7 +768,15 @@ class Dyn {
 
 	static var fidToString = 0; // fid of "toString" + 1 (0: not looked up yet; -1 + 1: not a field name)
 
-	@:hxmc.host("hx_std_string") static function stdString(v:Dynamic):String {
+	@:hxmc.host("hx_std_string") static function stdString(v:Dynamic):String
+		return str(v, 0);
+
+	// (depth: of the arrays, enum values and structures v is in; one deeper
+	// than PRINT_DEPTH prints as <...>, as Eval and JavaScript print it:
+	// a structure that contains itself ends; a toString starts again at 0)
+	static inline var PRINT_DEPTH = 5;
+
+	static function str(v:Dynamic, depth:Int):String {
 		if (Str.isNull(v)) return "null";
 		var t = tindex(v);
 		var p = Mem.addr(v);
@@ -789,13 +797,14 @@ class Dyn {
 				// (its toString: set when a date was first made)
 				return Date.printer(v);
 			case T_ARRAY:
+				if (depth > PRINT_DEPTH) return "<...>";
 				var a:Array<Dynamic> = v;
 				var b = new StringBuf();
 				b.addChar("[".code);
 				var i = 0;
 				while (i < a.length) {
 					if (i > 0) b.addChar(",".code);
-					b.add(stdString(a[i]));
+					b.add(str(a[i], depth + 1));
 					i++;
 				}
 				b.addChar("]".code);
@@ -807,6 +816,7 @@ class Dyn {
 		switch tk(ty) {
 			case TK_CTOR:
 				// Name(p1,p2)
+				if (depth > PRINT_DEPTH) return "<...>";
 				var b = new StringBuf();
 				b.add(Str.ofAscii(name(ty)));
 				var np = slotCount(ty);
@@ -825,7 +835,7 @@ class Dyn {
 							case "f".code: (Mem.getF64(Mem.addr(v), 8 * i) : Dynamic);
 							case _: Mem.getRef(Mem.addr(v), 8 * i);
 						}
-						b.add(stdString(x));
+						b.add(str(x, depth + 1));
 					}
 					b.addChar(")".code);
 				}
@@ -839,7 +849,7 @@ class Dyn {
 				}
 				return Str.ofAscii(name(ty));
 			case TK_ANON:
-				return anonToString(v);
+				return depth > PRINT_DEPTH ? "<...>" : anonToString(v, depth);
 			case TK_CLOSURE | TK_BOUND:
 				return "<function>";
 			case _:
@@ -850,7 +860,7 @@ class Dyn {
 	// { a : 1, b : 2 }: the structure's own fields (its layout's, by name),
 	// then those added at run time (slot 0, in the order they were added):
 	// Reflect.fields' order
-	static function anonToString(o:Dynamic):String {
+	static function anonToString(o:Dynamic, depth:Int):String {
 		var ty = ty(tindex(o));
 		var b = new StringBuf();
 		b.addChar("{".code);
@@ -861,7 +871,7 @@ class Dyn {
 			b.add(Names.fidStr(fFid(f)));
 			b.add(" : ");
 			f = field(ty, i);
-			b.add(stdString(boxSlot(o, fSlot(f), fKind(f))));
+			b.add(str(boxSlot(o, fSlot(f), fKind(f)), depth + 1));
 		}
 		// (read again after each value printed: printing allocates, and a
 		// toString may add fields)
@@ -871,7 +881,7 @@ class Dyn {
 			var k:Int = Mem.getRefAt(Mem.addr(Mem.getRef(Mem.addr(o), 0)), 0, i);
 			b.add(Names.fidStr(k));
 			b.add(" : ");
-			b.add(stdString(Mem.getRefAt(Mem.addr(Mem.getRef(Mem.addr(o), 0)), 0, i + 1)));
+			b.add(str(Mem.getRefAt(Mem.addr(Mem.getRef(Mem.addr(o), 0)), 0, i + 1), depth + 1));
 			i += 2;
 		}
 		b.add(n > 0 ? " }" : "}");
