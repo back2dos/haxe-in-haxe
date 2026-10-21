@@ -80,6 +80,7 @@ class Lower {
 				case _:
 			}
 		var pos = (fi:FuncInfo) -> {
+			if (l.metaInits.exists(fi)) return -1;
 			var c = l.initOf.get(fi);
 			c != null && order.exists(c) ? order.get(c) : types.length;
 		};
@@ -1324,6 +1325,32 @@ class Lower {
 			x != y ? (x < y ? -1 : 1) : a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 		});
 	}
+
+	// an enum used as a value: haxe.rtti.Meta reads its metadata as the static
+	// __meta__ (a class has the field from the compiler's filters; an enum's
+	// is Texpr.buildMetadata's, as the other targets' generators write it),
+	// a global its initializer sets, before the classes' (metaInits)
+	public function reflectEnum(e:TEnum) {
+		var ei = enumInfo(e);
+		if (ei.statics != null) return;
+		ei.statics = [];
+		var m = core.Texpr.buildMetadata(basic, TEnumDecl(e));
+		if (m == null) return;
+		var g = prog.globals.length;
+		prog.globals.push({ty: TRef(RAny), init: null, name: ei.ident + "___meta__"});
+		ei.statics.push({name: "__meta__", clos: null, fn: null, global: g});
+		var fi = new FuncInfo(ei.ident + "__meta", core.Globals.sTypePath(e.eModule.mPath));
+		prog.funcs.push(fi);
+		prog.inits.push(fi);
+		metaInits.set(fi, true);
+		pending.push(guarded(fi, () -> {
+			var fl = new FnLower(this, fi, null, null);
+			fl.runGlobalInit(g, m);
+			fl.finish();
+		}));
+	}
+
+	var metaInits = new Map<FuncInfo, Bool>();
 
 	static function hasStruct(f:FuncInfo):Bool {
 		for (a in f.args)

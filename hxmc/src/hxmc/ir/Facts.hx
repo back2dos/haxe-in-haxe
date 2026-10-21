@@ -382,9 +382,13 @@ class Facts {
 			for (m in t.methods)
 				names.set(m.name, true);
 		}
-		for (e in p.enums)
+		for (e in p.enums) {
 			for (c in e.ctors)
 				names.set(c.name, true);
+			if (e.statics != null)
+				for (s in e.statics)
+					names.set(s.name, true);
+		}
 		for (cs in [p.classes, p.interfaces])
 			for (c in cs)
 				if (c.statics != null)

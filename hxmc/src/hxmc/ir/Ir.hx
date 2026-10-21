@@ -98,6 +98,9 @@ class EnumInfo {
 	public var ident:String;
 	public var ctors:Vector<CtorInfo> = vector(); // by tag
 	public var tindex:Int = -1; // the enum's own descriptor (Enum<T> values)
+	// haxe.rtti.Meta's __meta__ through the enum's value, once the enum is used
+	// as a value and has metadata (Lower.reflectEnum), as a class's statics
+	public var statics:Null<Array<StaticEntry>> = null;
 
 	public function new(name, ident) {
 		this.name = name;

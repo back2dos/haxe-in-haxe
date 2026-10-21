@@ -10,7 +10,6 @@
 
 # --- unit ---
 
-unit * unit.TestMeta.testMeta BUG an enum's metadata: haxe.rtti.Meta.getType and getFields of an enum find no __meta__ (classes have theirs)
 unit * unit.TestReflect.testTypes BUG Math, an extern class the runtime implements, has no class value of its own (Type.getClassName(Math) is "None"; resolveClass("Math") is null)
 unit * unit.TestExceptions.testExceptionStack BUG no call stacks: haxe.CallStack.callStack() and exception stacks are empty (hxmc/std/haxe/NativeStackTrace.hx)
 unit * unit.teststd.haxe.TestCallStack.test BUG no call stacks: haxe.CallStack.exceptionStack() is empty after a throw (upstream leaves the check out on hl, lua and flash)

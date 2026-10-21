@@ -77,6 +77,8 @@ class Reach {
 	var resolveType = false; // Type.resolveClass (Dyn.resolveType) is live
 	var typeOfValue = false; // Type.getClass (Dyn.getClass) is live: statics through it
 	var superOfValue = false; // Type.getSuperClass (Dyn.superClass) is live: the superclasses' statics too
+	var valueEnums = new Map<EnumInfo, Bool>(); // enum values (EType) in live code
+	var reflectedEnums = new Map<EnumInfo, Bool>(); // the enums whose __meta__ live code can reach
 	var reflected = new Map<ClassInfo, Bool>(); // the classes whose statics live code can reach through their value
 	var createInstance = false; // Type.createInstance (Dyn.createInstance) is live
 	var made = new Map<ClassInfo, Bool>(); // the classes Type.createInstance can make (their entries kept)
@@ -173,6 +175,13 @@ class Reach {
 				}
 			for (c in p.interfaces)
 				if (valueClasses.exists(c)) statics(c);
+			// (an enum's __meta__, Lower.reflectEnum: its initializer runs)
+			for (e in p.enums)
+				if (e.statics != null && (resolveType || typeOfValue || valueEnums.exists(e)) && !reflectedEnums.exists(e)) {
+					reflectedEnums.set(e, true);
+					for (s in e.statics)
+						setBy(s.global, null);
+				}
 			if (createInstance)
 				for (c in p.classes)
 					if (resolveType || valueClasses.exists(c) || (typeOfValue && inst[c.id])) {
@@ -221,6 +230,8 @@ class Reach {
 			for (c in cs)
 				if (c.statics != null)
 					c.statics = reflected.exists(c) ? [for (s in c.statics) if (s.clos == null || live.exists(s.clos.fn)) s] : null;
+		for (e in p.enums)
+			if (e.statics != null && !reflectedEnums.exists(e)) e.statics = null;
 		// (the entries of the classes Type.createInstance can make)
 		for (c in p.classes)
 			if (c.maker != null && !made.exists(c)) c.maker = null;
@@ -588,6 +599,8 @@ class Reach {
 					mark(l.fn);
 				case EType(TRClass(c)):
 					valueClasses.set(c, true);
+				case EType(TREnum(e)):
+					valueEnums.set(e, true);
 				case EGlobal(g, _):
 					setBy(g, f);
 				case _:

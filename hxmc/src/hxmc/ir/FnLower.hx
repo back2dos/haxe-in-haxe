@@ -166,6 +166,13 @@ class FnLower {
 		}
 	}
 
+	// an initializer setting the global g to e (Lower.reflectEnum)
+	public function runGlobalInit(g:Int, e:TExpr) {
+		boxed = new Map();
+		var t = l.getProgram().globals[g].ty;
+		out.push(SSetGlobal(g, coerce(value(e), tyOf(e), t)));
+	}
+
 	// closure body forwarding to a function (static or bound method)
 	public function forward(f:Null<FuncInfo>, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>) {
 		boxed = new Map();
@@ -1338,6 +1345,7 @@ class FnLower {
 			case TTypeExpr(mt):
 				switch mt {
 					case TClassDecl(c): l.reflectStatics(c);
+					case TEnumDecl(en): l.reflectEnum(en);
 					case _:
 				}
 				EType(typeRef(mt));
