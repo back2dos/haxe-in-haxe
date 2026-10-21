@@ -31,6 +31,10 @@ class TargetFlags {
 	// the flags beyond the default configuration's for a target (null: the host, native)
 	public static function flags(target:Null<String>):Array<String> {
 		var wasm = target != null && StringTools.startsWith(target, "wasm");
-		return wasm ? ["target.atomics"] : ["target.threaded", "target.atomics"];
+		// (not Windows yet: with it, haxe.EventLoop's per-thread loops on the
+		// threads of the port's Eval lost a child process's output now and then:
+		// docs/hxmc.md, "Target flags")
+		var windows = target != null ? StringTools.startsWith(target, "windows") : Sys.systemName() == "Windows";
+		return wasm || windows ? ["target.atomics"] : ["target.threaded", "target.atomics"];
 	}
 }
