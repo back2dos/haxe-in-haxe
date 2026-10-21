@@ -483,7 +483,21 @@ class Dyn {
 	@:hxmc.export("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
 		anonSetSlow(o, fid(name), v);
 
+	// the Dynamic a closure adapts to a function type (Lower.dynAdapter: its
+	// capture), else f: called dynamically, it takes every argument, not
+	// the function type's (a Reflect.makeVarArgs function typed String ->
+	// String and passed on as Dynamic: upstream's Issue12028)
+	@:hxmc.noGc static function unadapt(f:Dynamic):Dynamic {
+		while (!Str.isNull(f) && tindex(f) >= T_FIRST) {
+			var t = ty(tindex(f));
+			if (tk(t) != TK_CLOSURE || tag(t) != TAG_DYN_ADAPTER) break;
+			f = Mem.getRef(Mem.addr(f), 8);
+		}
+		return f;
+	}
+
 	@:hxmc.host("hx_dyn_call") static function dynCall(f:Dynamic, args:Array<Dynamic>):Dynamic {
+		f = unadapt(f);
 		// (Reflect.makeVarArgs's: the arguments as an array of their own)
 		if (closureSig(f) < 0 && Std.isOfType(f, VarArgs)) return (f : VarArgs).f(Str.isNull(args) ? [] : args.copy());
 		if (Str.isNull(args)) return callBoxed(f, [], 0);

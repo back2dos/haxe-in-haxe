@@ -26,6 +26,8 @@ class Types {
 	// a Date: K_RAW, the milliseconds since the epoch (a double: MemRepr.dateOf)
 	public static inline var T_DATE = 20;
 	public static inline var T_FIRST = 32;
+	// a closure type's tag: a Dynamic converted to a function type (hxmc.ir.Facts, Dyn.unadapt)
+	public static inline var TAG_DYN_ADAPTER = 1;
 	// object kinds
 	public static inline var K_OBJ = 0;
 	public static inline var K_PARR = 1;
