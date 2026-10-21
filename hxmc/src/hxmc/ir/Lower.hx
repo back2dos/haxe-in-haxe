@@ -518,11 +518,12 @@ class Lower {
 				pending.shift()();
 			// all methods of every class seen: structural and dynamic access
 			// (Iterator.hasNext, Reflect) reach them through the method tables;
-			// DCE already removed the unused ones
+			// DCE already removed the unused ones. A dynamic method is there
+			// too: what its field holds before first use (Dyn.anonGetSlow)
 			while (methodsDone < tclasses.length) {
 				var tc = tclasses[methodsDone++];
 				for (f in tc.clOrderedFields)
-					if (f.cfKind.match(Method(MethNormal | MethInline)) && funcOf(f) != null && !f.hasClassFieldFlag(CfExtern))
+					if (f.cfKind.match(Method(MethNormal | MethInline | MethDynamic)) && funcOf(f) != null && !f.hasClassFieldFlag(CfExtern))
 						method(tc, f);
 			}
 			if (makers)

@@ -84,6 +84,13 @@ class Dyn {
 		Mem.setPtr(c, 16, Ptr.nil());
 		Mem.setI32(c, 24, -1);
 		var f = findField(ty, fid);
+		// (a dynamic method's field, null before first use: not cached, the
+		// slow paths read it, anonGetSlow)
+		if (!f.isNull() && !findMethod(ty, fid).isNull()) {
+			Mem.setI32(c, 4, -1);
+			Mem.setI8(c, 8, 0);
+			return;
+		}
 		if (!f.isNull()) {
 			Mem.setI32(c, 4, fSlot(f) + 1);
 			Mem.setI8(c, 8, fKind(f));
@@ -266,8 +273,13 @@ class Dyn {
 		if (t == T_NATIVE_ARRAY) return null;
 		var ty = ty(t);
 		var f = findField(ty, fid);
-		if (!f.isNull()) return boxSlot(o, fSlot(f), fKind(f));
 		var m = findMethod(ty, fid);
+		if (!f.isNull()) {
+			var v = boxSlot(o, fSlot(f), fKind(f));
+			// (a field and a method of one name: a dynamic method, whose field
+			// is null until first use or assignment, FnLower.dynMethod: the method)
+			return Str.isNull(v) && !m.isNull() ? boundMethod(o, m) : v;
+		}
 		if (!m.isNull()) return boundMethod(o, m);
 		var i = overflowFind(o, fid);
 		return i >= 0 ? Mem.getRefAt(Mem.addr(Mem.getRef(Mem.addr(o), 0)), 0, i + 1) : null;

@@ -10,7 +10,6 @@
 
 # --- unit ---
 
-unit * unit.issues.Issue3159 BUG a dynamic method assigned through an interface is not called through it: the interface's dispatch calls the method, not the field
 unit * unit.issues.Issue12028.testMakeVarArgsInDynamic BUG a Reflect.makeVarArgs function typed by inference as String->? and passed on as Dynamic is the adapter of that type, which takes one argument (Dynamic -> function -> Dynamic does not give the value back)
 unit * unit.teststd.TestReflect.test BUG Reflect.compareMethods(a.push, a.push): a closure of an Array method is an adapter (its host function takes Dynamic) made apart at each use, so closures of one method and array compare unequal
 unit * unit.TestMeta.testMeta BUG an enum's metadata: haxe.rtti.Meta.getType and getFields of an enum find no __meta__ (classes have theirs)

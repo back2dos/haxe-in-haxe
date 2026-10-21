@@ -1493,6 +1493,8 @@ class FnLower {
 			case FInstance(c, _, cf):
 				switch cf.cfKind {
 					case Method(MethDynamic) if (isDynMethod(c, cf)): coerce(dynMethod(obj, c, cf, e), dynSlotTy(c, cf), tyOf(e));
+					// (an interface's dynamic method: the field, by name)
+					case Method(MethDynamic) if (c.hasClassFlag(CInterface)): anonGet(cf.cfName, obj, e);
 					case Method(_): methodClosure(obj, c, cf, e);
 					case Var(_) if (Lower.isCore(c, "Array") && cf.cfName == "length"):
 						EArrLen(value(obj));
@@ -1559,6 +1561,8 @@ class FnLower {
 					anonGet(cf.cfName, obj, e);
 				} else if (cf.cfKind.match(Method(MethDynamic)) && isDynMethod(cl.cls, cf)) {
 					coerce(dynMethod(obj, cl.cls, cf, e), dynSlotTy(cl.cls, cf), tyOf(e));
+				} else if (cf.cfKind.match(Method(MethDynamic)) && cl.cls.hasClassFlag(CInterface)) {
+					anonGet(cf.cfName, obj, e);
 				} else methodClosure(obj, cl.cls, cf, e);
 			case FEnum(en, ef):
 				var ci = l.ctorInfo(ef, en);
@@ -2201,6 +2205,17 @@ class FnLower {
 				var al = asLocal(xs[0], at);
 				out.push(SArrPush(elem, al, coerce(xs[1], tyOf(cargs[0]), elem)));
 				return coerce(EArrLen(ELocal(al)), TI32, rt);
+			case TField(obj, FInstance(c, _, cf)) if (c.hasClassFlag(CInterface) && cf.cfKind.match(Method(MethDynamic)) && tyOf(f).match(TRef(RClos(_)))):
+				// a dynamic method through an interface: the function its field
+				// holds, by name, as through a structure (upstream's Issue3159)
+				var s = switch tyOf(f) {
+					case TRef(RClos(s)): s;
+					case _: null;
+				};
+				if (hasStruct(s)) structFail('a struct value passed to or returned by a dynamic method of an interface: not supported');
+				var o = asLocal(value(obj), tyOf(obj));
+				var xs = args(cargs, s.args, null);
+				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
 			case TField(obj, FInstance(c, _, cf)) if (c.hasClassFlag(CExtern) || Lower.isCore(c, "String") || Lower.isCore(c, "Array")):
 				var s = switch TFunctions.follow(cf.cfType) {
 					case TFun(s): s;
