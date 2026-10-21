@@ -1,6 +1,7 @@
 package hxmc;
 
 import hxmc.Mir;
+import core.ds.VectorTools.vector;
 
 // Shrink-wrapping of a function's shadow-stack frame (after Opt, native
 // targets): MirBuild pushes the frame in the entry block (rt_sp += size,
@@ -138,9 +139,8 @@ class ShrinkWrap {
 				var uses = false;
 				for (x in [i.a, i.b, i.c])
 					if (x >= 0 && derived[x] != 0) uses = true;
-				if (i.args != null)
-					for (x in i.args)
-						if (derived[x] != 0) uses = true;
+				for (x in i.args)
+					if (derived[x] != 0) uses = true;
 				// (a derived value itself is not a use, its uses are; but one
 				// made from top must come after the push)
 				if (derived[i.id] == 1) uses = false;
@@ -288,7 +288,7 @@ class ShrinkWrap {
 		entry.ins.remove(cmp);
 		br.op = Jmp;
 		br.a = -1;
-		br.targets = [done];
+		br.targets = vector(done);
 		entry.succs = [done];
 		done.preds.remove(up);
 		for (i in done.ins)
@@ -321,7 +321,7 @@ class ShrinkWrap {
 		f.vals.push(nb);
 		nb.block = db;
 		nb.a = cmp.id;
-		nb.targets = [up2, d2];
+		nb.targets = vector(up2, d2);
 		db.ins.push(nb);
 		db.succs = [up2, d2];
 		up2.preds = [db];
@@ -332,7 +332,7 @@ class ShrinkWrap {
 		j.id = f.vals.length;
 		f.vals.push(j);
 		j.block = up2;
-		j.targets = [d2];
+		j.targets = vector(d2);
 		up2.ins = [st, j];
 		up2.succs = [d2];
 		for (s in initStores) {
