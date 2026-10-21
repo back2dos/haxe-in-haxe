@@ -446,6 +446,8 @@ class Dyn {
 		anonSetSlow(o, fid(name), v);
 
 	@:hxmc.host("hx_dyn_call") static function dynCall(f:Dynamic, args:Array<Dynamic>):Dynamic {
+		// (Reflect.makeVarArgs's: the arguments as an array of their own)
+		if (closureSig(f) < 0 && Std.isOfType(f, VarArgs)) return (f : VarArgs).f(Str.isNull(args) ? [] : args.copy());
 		if (Str.isNull(args)) return callBoxed(f, [], 0);
 		// a copy: the callee may change the array
 		var a = args.copy();
