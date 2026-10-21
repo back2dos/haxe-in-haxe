@@ -315,7 +315,8 @@ class GcRepr {
 		return W.f32Bits(v);
 
 	public static inline function i64ToDouble(low:Int, high:Int):Float
-		return W.bitsF64(((high : hxmc.I64) << 32) | ((low : hxmc.I64) & 0xFFFFFFFF));
+		// (low zero-extended: & 0xFFFFFFFF would not do it, the literal being the Int -1, all ones as an I64)
+		return W.bitsF64(((high : hxmc.I64) << 32) | (((low : hxmc.I64) << 32) >>> 32));
 
 	public static inline function doubleLow(v:Float):Int
 		return W.f64Bits(v).toInt();

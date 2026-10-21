@@ -463,7 +463,7 @@ class Uv {
 	}
 
 	static inline function u32(v:Int):I64
-		return (v : I64) & 0xFFFFFFFF;
+		return ((v : I64) << 32) >>> 32; // (& 0xFFFFFFFF would keep the sign: the literal is the Int -1)
 
 	public static function timerStart(id:Int, timeout:Int, repeat:Int):Int
 		return U.uv_timer_start(uvh(id), Callback.addr(watcherCb), u32(timeout), u32(repeat));
