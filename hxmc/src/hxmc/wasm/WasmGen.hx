@@ -132,8 +132,9 @@ class WasmGen {
 	// the signature string of a type ($t:<params>><result>)
 	public static function sigOf(params:haxe.ds.Vector<MTy>, ret:MTy):String {
 		var s = new StringBuf();
+		// (a Void parameter: an i32, MirBuild.build)
 		for (p in params)
-			s.add(tyChar(p));
+			s.add(p == Void ? "i" : tyChar(p));
 		s.add(">");
 		s.add(tyChar(ret));
 		return s.toString();
@@ -1326,7 +1327,9 @@ class WasmGen {
 			special(i, i.sym.substr(MirBuild.SPECIAL.length));
 			return;
 		}
-		var imp = i.sym != null ? hxmc.ir.CInterop.SIGS.get(i.sym) : null;
+		// (a C call, MirBuild.cCall; a program's extern the runtime implements
+		// in Haxe, as __errno_location, is a call of that function: Lower.bindHosts)
+		var imp = i.sym != null && i.cCall ? hxmc.ir.CInterop.SIGS.get(i.sym) : null;
 		if (imp != null && hxmc.ir.CInterop.USER.exists(i.sym)) {
 			imp = hxmc.CAbi.wasmSig(imp);
 			// an import (LinkWasm): pointers as i32, floats as f32
@@ -1353,7 +1356,17 @@ class WasmGen {
 		}
 		var tys = i.argTys;
 		for (k in 0...i.args.length)
-			valueAs(i.args[k], tys[k]);
+			if (tys[k] == Void) {
+				// (a parameter of type Void: an i32 0, whatever the argument; sigOf,
+				// MirBuild.build: corpus case VoidParam)
+				if (ety(i.args[k]) != Void) {
+					value(i.args[k]);
+					op(Op.Drop);
+				}
+				op(Op.I32Const);
+				Enc.sleb(b, 0);
+			} else
+				valueAs(i.args[k], tys[k]);
 		if (i.sym != null) {
 			op(Op.Call);
 			relocs.push({off: b.len, kind: RWasmFunc, sym: i.sym, addend: 0});

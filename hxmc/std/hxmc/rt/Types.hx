@@ -25,7 +25,7 @@ class Types {
 	public static inline var T_TYPEOBJ = 14;
 	public static inline var T_STRING = 16;
 	public static inline var T_ADATA_RAW = 17; // slots
-	public static inline var T_NATIVE = 18; // slots: a C resource, a Date, an AtomicInt cell
+	public static inline var T_NATIVE = 18; // slots: a C resource, an AtomicInt cell
 	// NativeArray storage, by element kind: T_NATIVE_ARRAY - AK_* (naType:
 	// AK_BYTE's 19 to AK_PTR's 24, references). T_BYTES: the storage of bytes
 	// (haxe.io.BytesData: NativeArray<hxmc.Byte>), which a haxe.io.Bytes holds
@@ -34,6 +34,8 @@ class Types {
 	public static inline var T_ADATA_P = 25; // slots of references
 	public static inline var T_OVERFLOW = 26;
 	public static inline var T_NATIVE_REFS = 27; // a C resource (slot 0) and references
+	// a Date: a record of one slot, the milliseconds since the epoch (a double: MemRepr.dateOf)
+	public static inline var T_DATE = 15;
 	public static inline var T_FIRST = 32;
 	// (the header of an object the collector copied)
 	public static inline var T_FWD = 0xFFFF;
@@ -209,6 +211,16 @@ class Types {
 
 	public static inline function ctor(ty:Ptr, i:Int):Int
 		return Mem.getI32At(Mem.getPtr(ty, 88), 0, i);
+
+	// a class's entry for Type.createInstance (hxmc.ir.ClassInfo.maker, where
+	// a constructor's singleton is): 0 none (no live code can have the class
+	// value), 1 no constructor (the call fails), 2 + s: makerFn, called as a
+	// bound method of signature s on the new instance
+	public static inline function maker(ty:Ptr):Int
+		return Mem.getI32(ty, 84);
+
+	public static inline function makerFn(ty:Ptr):Ptr
+		return Mem.getPtr(ty, 88);
 
 	public static inline function nstatics(ty:Ptr):Int
 		return Mem.getI32(ty, 96);

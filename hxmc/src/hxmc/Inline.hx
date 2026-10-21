@@ -243,6 +243,7 @@ class Inline {
 					x.keepsFrame = i.keepsFrame && !f.blocksHere;
 					x.variadic = i.variadic;
 					x.argTys = i.argTys;
+					x.cCall = i.cCall;
 					x.cSizes = i.cSizes;
 					x.cGroups = i.cGroups;
 					x.structRet = i.structRet;

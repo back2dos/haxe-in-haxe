@@ -183,11 +183,16 @@ class Case {
 		bindings:Array<Bind>,
 		pattern:PatternData
 	} {
+		// port: `e :: el` folded from the end (upstream recurses on the tail): `a | (b | c)`
 		function collapseCase(values:haxe.ds.Vector<Expr>):Expr {
 			if (values.length == 0) return raiseTypingError("case without pattern", p);
-			if (values.length == 1) return values[0];
-			var e = values[0], e2 = collapseCase(values.slice(1));
-			return {expr: EBinop(OpOr, e, e2), pos: core.Ast.punion(e.pos, e2.pos)};
+			var e2 = values[values.length - 1];
+			var i = values.length - 1;
+			while (i-- > 0) {
+				var e = values[i];
+				e2 = {expr: EBinop(OpOr, e, e2), pos: core.Ast.punion(e.pos, e2.pos)};
+			}
+			return e2;
 		}
 		var e = collapseCase(el);
 		var substitution = makeSubst(ctx, freeMonos),

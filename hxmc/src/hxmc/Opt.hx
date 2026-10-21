@@ -103,9 +103,13 @@ class Opt {
 		}
 		rewrite();
 		dce();
-		if (condProp()) {
+		var rounds = 0;
+		while (rounds++ < 3 && condProp()) {
 			pruneBlocks();
 			mergeBlocks();
+			// (a branch made a jump can leave a join's phi used by its
+			// branch alone: thread it, which can make branches known again)
+			simplifyCfg();
 			dce();
 		}
 		if (licmOn)
@@ -375,16 +379,26 @@ class Opt {
 							fa.push(c.a);
 							fb.push(c.b);
 							fv.push(b == t.targets[0]);
+						} else if (!c.dead) {
+							// (any other value: whether it is not 0)
+							fc.push(-1);
+							fa.push(t.a);
+							fb.push(-1);
+							fv.push(b == t.targets[0]);
 						}
 					}
 				}
 				var t = b.term();
 				if (t != null && t.op == Br && t.targets[0] != t.targets[1] && fc.length > 0) {
 					var c = vals[t.a];
-					if (c.op == Cmp) {
+					{
 						var known = 0; // 1 true, 2 false
 						var k = fc.length;
 						while (k-- > 0 && known == 0) {
+							if (fc[k] == -1 || c.op != Cmp) {
+								if (fc[k] == -1 && fa[k] == t.a) known = fv[k] ? 1 : 2;
+								continue;
+							}
 							var same = fa[k] == c.a && fb[k] == c.b;
 							var swapped = fa[k] == c.b && fb[k] == c.a;
 							if (same && fc[k] == c.imm) known = fv[k] ? 1 : 2;
@@ -524,6 +538,7 @@ class Opt {
 			t.targets = vector(keep);
 			b.succs = [keep];
 		}
+		knownPhiArgs();
 		var uses = MFunc.ints(f.vals.length, 0);
 		for (b in f.blocks)
 			for (i in b.ins) {
@@ -534,8 +549,13 @@ class Opt {
 					uses[x]++;
 			}
 		var vals = f.vals;
+		// (rounds: an edge threaded past a join can leave the phi of the join
+		// before it used by its branch alone, as in `a && b && c`)
+		var threaded = true, rounds = 0;
+		while (threaded && rounds++ < 64) { // (a chain of n terms takes about n rounds)
+		threaded = false;
 		for (b in f.blocks.copy()) {
-			if (b == f.entry || b.handler) continue;
+			if (b == f.entry || b.handler || b.preds.length == 0) continue;
 			var ins = b.ins;
 			var n = ins.length;
 			if (n < 2 || n > 4) continue;
@@ -601,10 +621,77 @@ class Opt {
 				// drop the edge into b
 				b.preds.splice(k, 1);
 				phi.removeArg(k);
+				uses[v]--;
+				threaded = true;
 			}
+		}
 		}
 		pruneBlocks();
 		mergeBlocks();
+	}
+
+	// A phi's operand that arrives through a block entered only from a branch
+	// on that very value is known there: 0 on the branch's else edge, 1 on its
+	// then edge when the value is a boolean (a comparison, 0 or 1, a phi of
+	// those): `a || b` returned as a value (phi(a, b)) gets phi(1, b), which
+	// leaves a's phi used by its branch alone (threaded below)
+	function knownPhiArgs() {
+		var vals = f.vals;
+		var boolMemo = new Map<Int, Bool>();
+		var assumed:Array<Int> = []; // (the phis the query under way took as booleans)
+		function isBool(v:Int, depth:Int):Bool {
+			var x = vals[v];
+			switch x.op {
+				case Cmp: return true;
+				case Const: return x.sym == null && x.imm2 == 0 && (x.imm == 0 || x.imm == 1);
+				case Phi if (depth < 8):
+					var m = boolMemo.get(v);
+					if (m != null) return m;
+					boolMemo.set(v, true); // (a cycle through phis: assumed, checked by the other operands)
+					assumed.push(v);
+					var r = true;
+					for (a in x.args)
+						if (!isBool(a, depth + 1)) {
+							r = false;
+							break;
+						}
+					boolMemo.set(v, r);
+					return r;
+				case _: return false;
+			}
+		}
+		// (a phi found a boolean while a phi of its cycle was only assumed one
+		// is not one when that one is not: `a = c ? a : 5` in a loop makes the
+		// loop's phi(1, a) no boolean, yet a query of a found it one; a query
+		// that fails forgets the phis it found booleans)
+		function isBoolQuery(v:Int):Bool {
+			var r = isBool(v, 0);
+			if (!r)
+				for (a in assumed)
+					if (boolMemo.get(a) == true) boolMemo.remove(a);
+			assumed.resize(0);
+			return r;
+		}
+		for (b in f.blocks)
+			for (i in b.ins) {
+				if (i.op != Phi) break;
+				if (i.ty != I32) continue;
+				for (k in 0...i.args.length) {
+					var p = b.preds[k];
+					if (p.preds.length != 1 || p.handler) continue;
+					var t = p.preds[0].term();
+					if (t == null || t.op != Br || t.a != i.args[k] || t.targets[0] == t.targets[1]) continue;
+					var known = if (t.targets[1] == p) 0 else if (t.targets[0] == p && isBoolQuery(i.args[k])) 1 else -1;
+					if (known < 0) continue;
+					var c = new MIns(Const, I32);
+					c.id = vals.length;
+					vals.push(c);
+					c.imm = known;
+					c.block = p;
+					p.ins.insert(p.term() == null ? p.ins.length : p.ins.length - 1, c);
+					i.args[k] = c.id;
+				}
+			}
 	}
 
 	// a block that jumps to a block with no other predecessor absorbs it
@@ -736,11 +823,29 @@ class Opt {
 				keyStore.resize(0);
 				keySeen.resize(0);
 			}
+			// An access through a base that nothing here went through yet may
+			// fault (null: the native targets' fault handler throws,
+			// hxmc.rt.Faults), and the stores before it are then seen by
+			// whatever handles the exception: they are read there. (The bases
+			// gone through, the most recent ones.)
+			var through:Array<Int> = [];
+			inline function access(base:Int) {
+				if (keyBase.length > 0) {
+					var op = vals[base].op;
+					if (op != SymAddr && op != StackAddr && op != TlsLoad && keyBase.indexOf(base) < 0 && through.indexOf(base) < 0) {
+						for (k in 0...keySeen.length)
+							keySeen[k] = true;
+						if (through.length == 16) through.shift();
+						through.push(base);
+					}
+				}
+			}
 			for (i in b.ins) {
 				if (i.dead) continue;
 				switch i.op {
 					case Store if ((i.mem == MInit || i.mem == MField) && i.b < 0):
 						var base = baseOf(i.a), d = i.imm + dispOf(i.a), sz = i.size;
+						if (i.mem == MField) access(base);
 						var k = 0;
 						var replaced = false;
 						while (k < keyBase.length) {
@@ -771,10 +876,11 @@ class Opt {
 					case Store:
 						// arrays, globals, frames: other memory (a field store through
 						// an index, or unknown memory, ends everything)
-						if (i.mem == MOther || i.mem == MField || i.mem == MInit) clear();
+						if (i.mem == MOther || i.mem == MField || i.mem == MInit) clear() else access(baseOf(i.a));
 					case Load:
 						var base = baseOf(i.a);
 						var ld = i.imm + dispOf(i.a);
+						access(base);
 						var hit = false;
 						for (k in 0...keyBase.length)
 							if (keyBase[k] == base) {
@@ -905,16 +1011,28 @@ class Opt {
 			kill[k] = m;
 		}
 		var outs = new Vector<Vector<Int>>(n);
+		// (a loop's blocks: those that reach a back edge without passing its
+		// header, walked back from the back edges; not the blocks between the
+		// header and its last back edge in reverse postorder, which can leave
+		// out an inner loop's latch and the calls in it. walked: k + 1 for
+		// the blocks reached for header k)
+		var walked = new Vector<Int>(n);
+		var stack:Array<MBlock> = [];
 		for (k in 0...n) {
 			var b = order[k];
 			var v:Vector<Int> = null;
-			var latch = -1;
-			var mixed = 0; // classes the forward predecessors disagree on
+			var loop = false;
+			var mixed = 0; // classes the forward predecessors disagree on, or the loop writes
+			walked[k] = k + 1;
 			for (p in b.preds) {
 				if (p.mark != inOrder) continue;
 				var pk = p.tmp;
 				if (pk >= k) {
-					if (pk > latch) latch = pk;
+					loop = true;
+					if (walked[pk] != k + 1) {
+						walked[pk] = k + 1;
+						stack.push(p);
+					}
 					continue;
 				}
 				var o = outs[pk];
@@ -922,14 +1040,27 @@ class Opt {
 					for (c in 0...NCLS)
 						if (v[c] != o[c]) mixed |= 1 << c;
 			}
+			if (loop) mixed |= kill[k];
+			while (stack.length > 0) {
+				var q = stack.pop();
+				mixed |= kill[q.tmp];
+				for (p in q.preds) {
+					if (p.mark != inOrder || walked[p.tmp] == k + 1) continue;
+					if (p.tmp < k) {
+						// (a way into the loop other than its header: every class)
+						mixed = -1;
+						stack.resize(0);
+						break;
+					}
+					walked[p.tmp] = k + 1;
+					stack.push(p);
+				}
+			}
 			if (v == null || b.handler) {
 				v = new Vector<Int>(NCLS);
 				for (c in 0...NCLS)
 					v[c] = next++;
 			} else {
-				if (latch >= 0)
-					for (q in k...latch + 1)
-						mixed |= kill[q];
 				for (c in 0...NCLS)
 					if (mixed & (1 << c) != 0) v[c] = next++;
 			}

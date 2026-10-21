@@ -111,6 +111,10 @@ class MIns {
 	public var keepsFrame = false; // Call: nothing collects meanwhile (Opt: the frame's shadow-stack slots keep their values)
 	public var variadic = -1; // Call: the first variadic argument of a C function (-1: none)
 	public var argTys:Vector<MTy> = vector(); // Call: the C types of the arguments (I32 stays 32-bit in the ABI)
+	// Call of a C function (MirBuild.cCall), not of the runtime or a Haxe function
+	// by its symbol: what cSizes being set said before it was a Vector, empty for
+	// a C function without arguments too
+	public var cCall = false;
 	// Call of a C function: the size of each argument in C (1, 2, 4 or 8; float: 4),
 	// for Apple arm64's stack arguments, packed by size (empty: 4 for I32, else 8)
 	public var cSizes:Vector<Int> = vector();

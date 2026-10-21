@@ -25,8 +25,10 @@ class Bytes {
 	static inline function bytes(b:Dynamic):Ptr
 		return Mem.addr(b);
 
+	// (haxe.io.Error.OutsideBounds, as Eval and the other targets throw it, not
+	// its name: upstream's TestIO)
 	static inline function outside()
-		Repr.fail("OutsideBounds");
+		throw haxe.io.Error.OutsideBounds;
 
 	// for callers that write all n bytes before anything reads them
 	static function allocUninit(n:Int):Dynamic

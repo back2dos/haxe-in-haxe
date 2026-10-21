@@ -23,6 +23,9 @@ package hxmc;
 //   -D hxmc.native-array-outofbounds=throws|silent
 //                                   NativeArray/Vector accesses out of bounds throw, or read the
 //                                   default and write nothing (default: not tested)
+//   -D hxmc.null-checks=0|1         explicit tests of references against null before they are
+//                                   dereferenced (default: on WebAssembly; natively a fault handler
+//                                   throws instead, hxmc.rt.Faults)
 //   -D hxmc.gc-prefault             Linux: the collector faults in the old space's pages on a helper
 //                                   thread: less wall time for more CPU time (the compilers' builds)
 //   HXMC_RT_OBJ                    the runtime object (default: <tool dir>/rt/<target>/rt.o)
@@ -55,6 +58,7 @@ class Main {
 			}
 			Driver.resident = true;
 			hxmc.ir.CInterop.install();
+			hxmc.TargetFlags.install();
 			compiler.Compiler.generateHook = function(com) {
 				try {
 					start = haxe.Timer.stamp();
@@ -104,6 +108,7 @@ class Main {
 		}
 		ModuleCache.install();
 		hxmc.ir.CInterop.install();
+		hxmc.TargetFlags.install();
 		var code = haxe.Main.run(args.concat(["--no-output"]));
 		ModuleCache.finish(failed == null ? code : 1);
 		if (failed != null) {
@@ -128,6 +133,7 @@ class Main {
 		// (genjs's order: `Hashtbl.fold (fun name data acc -> (name,data) :: acc) com.resources []`)
 		hxmc.ir.Lower.resources = com.resources.fold((name, data, acc:Array<{name:String, data:String}>) -> [{name: name, data: codegen.Codegen.bytesSerialize(data)}].concat(acc), []);
 		hxmc.ir.Lower.bounds = opts.bounds;
+		hxmc.ir.Lower.nullChecks = opts.nullChecks;
 		// WebAssembly's runtime is typed with the program only for that target
 		if (abi.wasm && !Lambda.exists(com.types, t -> switch t {
 			case TClassDecl(c): c.clPath.pack.join(".") == "hxmc.rt.wasm" && c.clPath.name == "Gc";
@@ -138,6 +144,10 @@ class Main {
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
 		hxmc.ir.Lower.targetPlatform = abi.platformCode();
 		hxmc.ir.Lower.lines = opts.debugLines && !abi.wasm;
+		// the runtime's symbols generated code may call by name, defined by the
+		// modules hxmc.rt.Runtime imports for the target, whatever this program calls
+		hxmc.ir.RuntimeSymbols.check(com, opts.wasmGc ? hxmc.ir.RuntimeSymbols.WASMGC : abi.wasm ? hxmc.ir.RuntimeSymbols.WASM32 : hxmc.ir.RuntimeSymbols.NATIVE,
+			abi.name + (opts.wasmGc ? " with -D hxmc.wasm-gc" : ""));
 		var t0 = haxe.Timer.stamp();
 		// resident: bodies of the fields the server kept are reused (LowerCache)
 		var useCache = Driver.resident && Sys.getEnv("HXMC_LOWER_CACHE") != "0";

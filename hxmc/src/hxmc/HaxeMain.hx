@@ -78,12 +78,15 @@ class HaxeMain {
 		compiler.HighLevel.libraryHook = NodeLibs.resolve;
 		ModuleCache.install();
 		hxmc.ir.CInterop.install();
+		hxmc.TargetFlags.install();
 		#if hxmc.jit
 		// native macros (hxmc/src/hxmc/macro): a child compiling macro code for
 		// its parent (Guest), or the engine of -D hxmc.macros=native|verify
 		var guest = Sys.getEnv("HXMC_MACRO_GUEST");
 		var engine:Null<hxmc.macro.NativeEngine> = null;
 		if (guest != null && guest != "") hxmc.macro.Guest.install(guest) else macros.MacroEngine.engine = engine = new hxmc.macro.NativeEngine();
+		// (the runtime's functions macro code calls: in the executable)
+		hxmc.macro.Jit.runtime();
 		var code = haxe.Main.run(args);
 		if (engine != null) engine.report();
 		#else

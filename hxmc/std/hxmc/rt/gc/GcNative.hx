@@ -22,6 +22,7 @@ class GcNative {
 			case 8: 5;
 			case 10: 4;
 			case 12: 10;
+			case 9: 12;
 			case _: 11;
 		}
 
@@ -82,11 +83,28 @@ class GcNative {
 			if (t == null) break;
 			if (W.typeName(t) == n) return t;
 		}
-		return n == "String" ? String : null;
+		return n == "String" ? String : n == "Date" ? std.Date : null;
 	}
 
+	// (a date: of time 0, made as every date is, as hxmc.rt.Dyn's)
 	public static function createEmpty(c:Dynamic):Dynamic
-		return W.createEmpty(c);
+		return c == std.Date ? hxmc.rt.Date.of(0) : W.createEmpty(c);
+
+	// Type.createInstance, as hxmc.rt.Dyn's: a new instance, its class's
+	// constructor called with the arguments (hxmc.wasmgc.Meta.createInstance)
+	public static function createInstance(c:Dynamic, args:Array<Dynamic>):Dynamic {
+		if (W.isNull(c)) throw "Null Access";
+		if (!W.isType(c)) throw "Type.createInstance: not a class";
+		if (W.typeKind(c) == 2 && W.typeName(c) == "String") return args == null || args.length == 0 ? null : args[0];
+		if (W.typeKind(c) == 2 && W.typeName(c) == "Array") return new Array<Dynamic>();
+		if (W.typeKind(c) == 2) throw "Type.createInstance: " + W.typeName(c) + " is not a class of the program (a basic type, or an extern class, which the runtime implements)";
+		if (W.typeKind(c) != 0) throw "Type.createInstance: " + W.typeName(c) + " is not a class";
+		var o = W.createInstance(c, args == null ? [] : args);
+		if (o != null) return o;
+		// (Eval's message, a failure of the compiler there)
+		if (W.makerKind(c) == 1) throw "Instance constructor not found: " + W.typeName(c);
+		throw "Type.createInstance: the constructor of " + W.typeName(c) + " was left out (no live code has the class's value)";
+	}
 
 	public static function enumCtorNames(e:Dynamic):Array<String> {
 		if (!W.isType(e) || W.typeKind(e) != 1) return null;
@@ -138,6 +156,7 @@ class GcNative {
 	// hxmc.rt.Dyn.callBuiltin: Iterable<T>'s iterator()), else a closure field
 	@:hxmc.export("gc_anon_call") static function anonCall(o:Dynamic, name:String, args:Array<Dynamic>):Dynamic {
 		var k = W.kind(o);
+		if (k == 0) throw "Null Access"; // (as hxmc.rt.Dyn's: docs/hxmc.md, "Null access")
 		if (k != 4 && k != 7) return W.dynCall(getField(o, name), args);
 		var a0:Dynamic = args.length > 0 ? args[0] : null, a1:Dynamic = args.length > 1 ? args[1] : null;
 		if (k == 4) {
@@ -229,6 +248,7 @@ class GcNative {
 	}
 
 	public static function setField(o:Dynamic, name:String, v:Dynamic):Void {
+		if (W.kind(o) == 0) throw "Null Access"; // (as hxmc.rt.Dyn's)
 		var ci = classIndex(o);
 		if (ci >= 0) {
 			var i = staticIndex(ci, name);
@@ -239,7 +259,9 @@ class GcNative {
 		if (names != null) {
 			var i = find(names, name);
 			if (i >= 0) {
-				if (!W.objSet(o, i, v)) throw "a length without storage (@:hxmc.lengthOf) cannot be set";
+				// (a length without storage, @:hxmc.lengthOf: to the length it has
+				// only, as when haxe.runtime.Copy copies every field)
+				if (!W.objSet(o, i, v) && W.objGet(o, i) != v) throw "a length without storage (@:hxmc.lengthOf) cannot be set";
 				return;
 			}
 		}
@@ -320,7 +342,16 @@ class GcNative {
 	public static function objHash(o:Dynamic):Int
 		return W.objHash(o);
 
-	// ---- Dynamic access (o.name on a Dynamic)
+	// ---- Dynamic access (o.name on a Dynamic; null throws "Null Access", as
+	// hxmc.rt.Dyn's: docs/hxmc.md, "Null access")
+
+	static inline function notNull(o:Dynamic)
+		if (W.kind(o) == 0) throw "Null Access";
+
+	// what the generated code's tests of a reference call when it is null
+	// (FuncGen.derefAs, Helpers' array paths), as linear memory's hxmc.rt.NullAccess
+	@:hxmc.export("rt_null_access") static function nullAccess():Void
+		throw "Null Access";
 
 	@:hxmc.host("hx_dyn_get") static function dynGet(o:Dynamic, name:String):Dynamic {
 		// (a String's, an Array's, a NativeArray's length, as hxmc.rt.Dyn's)
@@ -331,22 +362,29 @@ class GcNative {
 				case 11 if (W.naKind(o) >= 0): return W.naLen(o);
 				case _:
 			}
+		notNull(o);
 		return getField(o, name);
 	}
 
-	@:hxmc.host("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
+	@:hxmc.host("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void {
+		notNull(o);
 		setField(o, name, v);
+	}
 
 	@:hxmc.host("hx_dyn_call_field") static function dynCallField(o:Dynamic, name:String, args:Array<Dynamic>):Dynamic
 		return anonCall(o, name, args == null ? [] : args.copy());
 
 	// ---- structural access the generated code does not know the layout of (hxmc.wasmgc.FuncGen)
 
-	@:hxmc.export("gc_anon_get") static function anonGet(o:Dynamic, name:String):Dynamic
+	@:hxmc.export("gc_anon_get") static function anonGet(o:Dynamic, name:String):Dynamic {
+		notNull(o);
 		return getField(o, name);
+	}
 
-	@:hxmc.export("gc_anon_set") static function anonSet(o:Dynamic, name:String, v:Dynamic):Void
+	@:hxmc.export("gc_anon_set") static function anonSet(o:Dynamic, name:String, v:Dynamic):Void {
+		notNull(o);
 		setField(o, name, v);
+	}
 }
 
 // the fields added to an anonymous structure (Reflect.setField of a name its layout lacks)

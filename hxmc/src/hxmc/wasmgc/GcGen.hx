@@ -13,7 +13,15 @@ class GcGen {
 	// written, those functions trapping (to measure the rest)
 	public static function run(prog:Program, out:String, o:Options) {
 		// (twice: then over the bodies as emitted, without what IrOpt inlined everywhere)
-		var calls:hxmc.ir.Reach.RuntimeCalls = {ex: runtimeCalls, stmt: s -> s.match(SAnonSet(_)) ? "gc_anon_set" : null};
+		var calls:hxmc.ir.Reach.RuntimeCalls = {
+			ex: runtimeCalls,
+			stmt: s -> switch s {
+				case SAnonSet(_): "gc_anon_set";
+				// (null tested: FuncGen.derefAs, Helpers' array paths)
+				case SSetField(_) | SArrSet(_) | SArrPush(_) if (hxmc.ir.Lower.nullChecks): "rt_null_access";
+				case _: null;
+			}
+		};
 		hxmc.ir.Reach.run(prog, o.stats, calls);
 		var u = new Uses(prog, o.opt, o.jobs > 0 ? o.jobs : hxmc.Driver.domains());
 		hxmc.ir.Reach.run(prog, o.stats, calls, f -> u.bodies.get(f).body);
@@ -56,6 +64,13 @@ class GcGen {
 					case EType(_): null;
 					case _: "gc_is";
 				}
+			// (a reference tested against null before it is dereferenced: FuncGen.derefAs,
+			// Helpers' array paths)
+			case EField(_) | EEnumTag(_) | EEnumParam(_) | EArrLen(_) | EArrGet(_) | EArrGetU(_) | ECallDispatch(_) | ECallClos(_)
+				| ECallHost("String_length" | "String_charCodeAt_i" | "hxmc_narray_length", _, _) if (hxmc.ir.Lower.nullChecks):
+				"rt_null_access";
+			case ECallHost(n, _, _) if (hxmc.ir.Lower.nullChecks && (StringTools.startsWith(n, "hxmc_narray_get_") || StringTools.startsWith(n, "hxmc_narray_set_"))):
+				"rt_null_access";
 			case _: null;
 		}
 }
@@ -75,9 +90,14 @@ class Uses {
 	public final bodies = new Map<FuncInfo, {body:haxe.ds.Vector<Stmt>, locals:Array<Local>}>();
 	// the program works on linear memory (hxmc.unsafe, C functions: GcModule.memory)
 	public var memory = false;
+	// the class of dates, the runtime's hxmc.rt.gc.GcDate (GcRepr.dateOf): Date's
+	// (TRBuiltin("Date"): its class value, GcModule.typeValue, and type tests,
+	// FuncGen.typeTest); null when nothing lowered names it (no date can exist)
+	public final dateClass:Null<ClassInfo>;
 
 	public function new(prog:Program, optimize:Bool, jobs:Int) {
 		this.prog = prog;
+		dateClass = Lambda.find(prog.classes, c -> c.name == "hxmc.rt.gc.GcDate");
 		// (each function's on its own: on threads, an IrOpt each, as its
 		// memos of the callees are the same for every function)
 		var fs = prog.funcs;
@@ -129,6 +149,9 @@ class Uses {
 			for (s in bodies.get(f).body)
 				stmt(s);
 		}
+		// (the classes Type.createInstance makes: Meta.createInstance)
+		for (c in prog.classes)
+			if (c.maker != null && c.maker.fn != null) cls(c);
 	}
 
 	function cls(c:ClassInfo) {
@@ -161,6 +184,7 @@ class Uses {
 			case ENewObj(c): cls(c);
 			case ENewAnon(s, _): shapes.set(s, true);
 			case EType(TRClass(c)) if (!c.isInterface): cls(c);
+			case EType(TRBuiltin("Date")) if (dateClass != null): cls(dateClass);
 			case ENewClos(l, _): lambdas.set(l, true);
 			case _:
 		}

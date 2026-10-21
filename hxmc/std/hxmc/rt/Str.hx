@@ -97,6 +97,14 @@ class Str {
 		// UTF-16 units first
 		var units = 0, i = from;
 		while (i < end) {
+			#if !hxmc.wasm_gc
+			// (four ASCII bytes at a time)
+			if (i + 4 <= end && Mem.getI32(o.at(i), 0) & 0x80808080 == 0) {
+				units += 4;
+				i += 4;
+				continue;
+			}
+			#end
 			var b = o.get(i);
 			if (b < 0x80) {
 				units++;
@@ -117,6 +125,19 @@ class Str {
 		var j = 0;
 		i = from;
 		while (i < end) {
+			#if !hxmc.wasm_gc
+			// (four ASCII bytes at a time: two units per store)
+			if (i + 4 <= end) {
+				var x = Mem.getI32(o.at(i), 0);
+				if (x & 0x80808080 == 0) {
+					Mem.setI32(d.at(j), 0, (x & 0xFF) | ((x & 0xFF00) << 8));
+					Mem.setI32(d.at(j + 2), 0, ((x >>> 16) & 0xFF) | ((x >>> 8) & 0xFF0000));
+					i += 4;
+					j += 4;
+					continue;
+				}
+			}
+			#end
 			var b = o.get(i);
 			if (b < 0x80) {
 				d.set(j++, b);
@@ -249,9 +270,13 @@ class Str {
 		return x;
 	}
 
-	// StringMap's hash: null is a key like any other
-	@:hxmc.noGc public static function strHash(s:String):Int
-		return isNull(s) ? 0 : hash(s);
+	// StringMap's hash: null is a key like any other (inline: the cached one
+	// read where the map looks it up)
+	public static inline function strHash(s:String):Int {
+		if (isNull(s)) return 0;
+		var h = Repr.storedHash(s);
+		return h != 0 ? h : hashSlow(s);
+	}
 
 	// ---- concatenation and conversions
 
@@ -367,7 +392,8 @@ class Str {
 		var n = len(s), m = len(sub);
 		var from:Int = start == null ? 0 : start;
 		if (from < 0) from = 0;
-		if (m == 0) return from <= n ? from : -1;
+		// ("" past the end: the length, as String.indexOf says; upstream's TestString)
+		if (m == 0) return from <= n ? from : n;
 		var c = chars(s), d = chars(sub);
 		var i = from;
 		while (i + m <= n) {
@@ -381,7 +407,8 @@ class Str {
 		var n = len(s), m = len(sub);
 		var from:Int = start == null ? n : start;
 		if (from > n - m) from = n - m;
-		if (m == 0) return from >= 0 ? from : -1;
+		// ("" before the start: 0, as Eval and ECMAScript; upstream's Issue5271)
+		if (m == 0) return from >= 0 ? from : 0;
 		var c = chars(s), d = chars(sub);
 		var i = from;
 		while (i >= 0) {
@@ -424,13 +451,15 @@ class Str {
 		return range(s, start, end - start);
 	}
 
+	// (beyond ASCII: Eval's simple mappings of the BMP, CaseMap; upstream's TestUnicode)
 	@:hxmc.host("String_toLowerCase") static function toLowerCase(s:String):String {
 		var n = len(s);
 		var r = make(n);
+		var t = CaseMap.table(false);
 		var c = chars(s), d = chars(r);
 		for (i in 0...n) {
 			var u = c.get(i);
-			d.set(i, u >= 65 && u <= 90 ? u + 32 : u);
+			d.set(i, u < 128 ? (u >= 65 && u <= 90 ? u + 32 : u) : CaseMap.map(t, u));
 		}
 		return r;
 	}
@@ -438,10 +467,11 @@ class Str {
 	@:hxmc.host("String_toUpperCase") static function toUpperCase(s:String):String {
 		var n = len(s);
 		var r = make(n);
+		var t = CaseMap.table(true);
 		var c = chars(s), d = chars(r);
 		for (i in 0...n) {
 			var u = c.get(i);
-			d.set(i, u >= 97 && u <= 122 ? u - 32 : u);
+			d.set(i, u < 128 ? (u >= 97 && u <= 122 ? u - 32 : u) : CaseMap.map(t, u));
 		}
 		return r;
 	}
@@ -552,7 +582,8 @@ class Str {
 		var n = len(s), i = 0;
 		inline function at(k:Int):Int
 			return unit(s, k);
-		while (i < n && (at(i) == 32 || at(i) == 9 || at(i) == 10 || at(i) == 13))
+		// (space, \t, \n, \v, \f, \r: upstream's TestStd)
+		while (i < n && (at(i) == 32 || (at(i) >= 9 && at(i) <= 13)))
 			i++;
 		var neg = false;
 		if (i < n && (at(i) == 45 || at(i) == 43)) {

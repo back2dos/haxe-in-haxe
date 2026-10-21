@@ -276,7 +276,7 @@ class FnLower {
 		if (self > 0) {
 			var s = newLocal("self", lambda.captures[0].ty);
 			out.push(SSet(s, ECapture(lambda, 0, ELocal(fi.args[0]))));
-			args[0] = ELocal(s);
+			args[0] = receiverCheck(ELocal(s), s.ty);
 		}
 		if (fi.ret == TVoid) {
 			out.push(SExpr(ECallHost(name, args, TVoid)));
@@ -470,7 +470,7 @@ class FnLower {
 			if (out.length != before) {
 				var spills = [];
 				for (i in 0...n)
-					if (!isConst(r[i]) && !r[i].match(ELocal(_))) {
+					if (!isConst(r[i]) && !stableFrom(r[i], before)) {
 						var lo = newLocal("s", tyOf(es[i]));
 						spills.push(SSet(lo, r[i]));
 						r[i] = ELocal(lo);
@@ -483,10 +483,53 @@ class FnLower {
 		return r;
 	}
 
+	// a local that the statements from `before` on (a later operand's) do not
+	// assign: read after them, it is the value it had (`[i, s.cca(i++)]`, which the
+	// analyzer leaves in that order: upstream's TestStringTools; corpus case
+	// OperandOrder)
+	function stableFrom(x:Ex, before:Int):Bool {
+		var l = switch x {
+			case ELocal(l): l;
+			case _: return false;
+		}
+		for (k in before...out.length)
+			if (assigns(out[k], l)) return false;
+		return true;
+	}
+
+	static function assigns(s:Stmt, l:Local):Bool {
+		inline function any(ss:Vector<Stmt>):Bool {
+			var r = false;
+			for (s in ss)
+				if (assigns(s, l)) {
+					r = true;
+					break;
+				}
+			return r;
+		}
+		return switch s {
+			case SSet(x, _): x == l;
+			case SIf(_, a, b): any(a) || any(b);
+			case SLoop(b): any(b);
+			case SSwitch(_, cs, d):
+				var r = any(d);
+				for (c in cs)
+					if (!r && any(c.body)) r = true;
+				r;
+			case STry(b, cs):
+				var r = any(b);
+				for (c in cs)
+					if (!r && (c.l == l || any(c.body))) r = true;
+				r;
+			case SCold(_, s2): assigns(s2, l);
+			case _: false;
+		}
+	}
+
 	// x, lowered before the statements from `before` on (a later operand's
 	// effects): read into a local ahead of them unless constant
 	function spillBefore(x:Ex, t:Ty, before:Int):Ex {
-		if (out.length == before || isConst(x) || x.match(ELocal(_))) return x;
+		if (out.length == before || isConst(x) || stableFrom(x, before)) return x;
 		var lo = newLocal("s", t);
 		out.insert(before, SSet(lo, x));
 		return ELocal(lo);
@@ -530,7 +573,7 @@ class FnLower {
 			if (out.length != before) {
 				var spills = [];
 				for (k in 0...r.length)
-					if (!isConst(r[k]) && !r[k].match(ELocal(_))) {
+					if (!isConst(r[k]) && !stableFrom(r[k], before)) {
 						var lo = newLocal("s", rTys[k]);
 						spills.push(SSet(lo, r[k]));
 						r[k] = ELocal(lo);
@@ -662,6 +705,25 @@ class FnLower {
 				out.push(SSet(lo, x));
 				lo;
 		}
+	}
+
+	// -D hxmc.null-checks (Lower.nullChecks): the receiver x of a method the
+	// runtime implements (String's, Array's, an extern class's), whose code
+	// reads it without a test, tested against null before the call (the
+	// program's own methods test what they read: MirBuild.nullCheck); null
+	// throws "Null Access", as the native targets' fault handler does where
+	// the runtime reads it (hxmc.rt.Faults); none in a @:hxmc.noGc function,
+	// which promises no GC point (a throw is one: Facts.findNoGc) and reads
+	// memory unchecked, as the runtime's own code does
+	function receiverCheck(x:Ex, t:Ty):Ex {
+		if (!Lower.nullChecks || fi.declNoGc || !Ir.isRef(t)) return x;
+		switch x {
+			case EStr(_) | EType(_): return x;
+			case _:
+		}
+		var r = ELocal(asLocal(x, t));
+		out.push(SIf(EBin(RefEq, r, ENull(t)), vector(SThrow(EStr("Null Access"))), vector()));
+		return r;
 	}
 
 	static function strip(e:TExpr):TExpr
@@ -1307,11 +1369,11 @@ class FnLower {
 					case TRef(RNativeArr(elem)):
 						var xs = operands(vector(a, i));
 						var al = ELocal(asLocal(xs[0], tyOf(a)));
-						coerce(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elemValue(elem), tyOf(e));
+						elemRead(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elem, tyOf(e));
 					case TRef(RArr(elem)):
 						var xs = operands(vector(a, i));
 						var ix = coerce(xs[1], tyOf(i), TI32);
-						coerce(isVectorData(a.etype) ? EArrGetU(elem, xs[0], ix) : EArrGet(elem, xs[0], ix), elem, tyOf(e));
+						elemRead(isVectorData(a.etype) ? EArrGetU(elem, xs[0], ix) : EArrGet(elem, xs[0], ix), elem, tyOf(e));
 					case _:
 						var xs = operands(vector(a, i));
 						var r = temp(TRef(RAny), ECallHost(l.native("hx_dyn_aget"), vector(coerce(xs[0], tyOf(a), TRef(RAny)), coerce(xs[1], tyOf(i), TI32)), TRef(RAny)));
@@ -1450,7 +1512,7 @@ class FnLower {
 					case Var(_) if (CInterop.isStruct(c)): structGet(obj, c, cf, e);
 					case Var(_) if (c.hasClassFlag(CExtern)):
 						var t = ty(cf.cfType);
-						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), vector(value(obj)), t));
+						var x = temp(t, ECallHost(l.native(Lower.nativeName(c) + "_get_" + cf.cfName), vector(receiverCheck(value(obj), tyOf(obj))), t));
 						coerce(x, t, tyOf(e));
 					case Var(_) if (c.hasClassFlag(CInterface)):
 						anonGet(cf.cfName, obj, e);
@@ -1727,7 +1789,7 @@ class FnLower {
 	function arith(op:Binop, xa:Ex, ta:Ty, getB:() -> {x:Ex, t:Ty}, rt:Ty, e:TExpr):Ex {
 		var before = out.length;
 		var rb = getB();
-		if (out.length != before && !isConst(xa) && !xa.match(ELocal(_))) {
+		if (out.length != before && !isConst(xa) && !stableFrom(xa, before)) {
 			var lo = newLocal("s", ta);
 			out.insert(before, SSet(lo, xa));
 			xa = ELocal(lo);
@@ -1832,6 +1894,10 @@ class FnLower {
 		switch [ta, tb] {
 			case [TRef(RStr), TRef(RStr)]:
 				return ECallHost("hx_str_eq", vector(xa, xb), TBool);
+			// (a method closure: equal to another of the same method and object, made
+			// apart, as on Eval and hl: hx_dyn_eq; upstream's Issue6705)
+			case [TRef(RClos(_)), TRef(_)] | [TRef(_), TRef(RClos(_))]:
+				return ECallHost("hx_dyn_eq", vector(coerce(xa, ta, TRef(RAny)), coerce(xb, tb, TRef(RAny))), TBool);
 			// (a NativeArray: its identity, as hx_dyn_eq has it)
 			case [TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RNativeArr(_) | RAnon | RType | RNative(_)), TRef(RObj(_) | REnum(_) | RCtor(_) | RClos(_) | RArr(_) | RNativeArr(_) | RAnon | RType | RNative(_))]:
 				return EBin(RefEq, xa, xb);
@@ -1848,6 +1914,19 @@ class FnLower {
 			case _: null;
 		};
 		var sa = scalar(ta), sb = scalar(tb);
+		// (a nullable number: null is not ordered with a number, two nulls are
+		// equal, as on Eval and the static targets; null was read as 0: upstream's
+		// TestOps)
+		if (sa != null && sb != null && (ta.match(TRef(RNull(_))) || tb.match(TRef(RNull(_))))) {
+			var a = asLocal(xa, ta), b = asLocal(xb, tb);
+			inline function isNull(l:Local, t:Ty):Ex
+				return t.match(TRef(RNull(_))) ? EBin(RefEq, ELocal(l), ENull(t)) : EInt(0);
+			var r = newLocal("ord", TBool);
+			var both = op == OpLte || op == OpGte ? 1 : 0;
+			out.push(SIf(isNull(a, ta), vector(SIf(isNull(b, tb), vector(SSet(r, EInt(both))), vector(SSet(r, EInt(0))))),
+				vector(SIf(isNull(b, tb), vector(SSet(r, EInt(0))), block(() -> out.push(SSet(r, compare(op, coerce(ELocal(a), ta, sa), sa, coerce(ELocal(b), tb, sb), sb))))))));
+			return ELocal(r);
+		}
 		if (sa != null && sb != null) {
 			if ((sa == TI64 || sb == TI64) && sa != TF64 && sb != TF64) {
 				var la = coerce(xa, ta, TI64), lb = coerce(xb, tb, TI64);
@@ -2028,7 +2107,7 @@ class FnLower {
 				};
 				var xs = operands(VectorTools.cons(obj, cargs));
 				var a = ELocal(asLocal(xs[0], tyOf(obj))), i = coerce(xs[1], tyOf(cargs[0]), TI32);
-				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elemValue(elem), rt);
+				if (cf.cfName == "unsafeGet") return elemRead(nativeRead(elem, a, i), elem, rt);
 				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elemValue(elem)), elemValue(elem))));
 				return EInt(0);
 			// NativeArray.literal([a, b, c]) (VectorTools' `vector(a, b, c)`): one
@@ -2144,6 +2223,7 @@ class FnLower {
 				for (k in 0...s.args.length)
 					to[k + 1] = ty(s.args[k].type);
 				var xs = args(VectorTools.cons(obj, cargs), to, null);
+				xs[0] = receiverCheck(xs[0], tyOf(obj));
 				var intrinsic = intrinsicMethod(name, xs, tyOf(obj));
 				if (intrinsic != null) return coerce(intrinsic, t, rt);
 				return coerceRhs(ECallHost(l.native(name), xs, t), t, rt);
@@ -2690,6 +2770,23 @@ class FnLower {
 	// passed where a type parameter makes it a (T) -> X, its argument boxed):
 	// it is read as Dynamic and kept when its signature is the one wanted,
 	// else wrapped in an adapter (coerce)
+	// x, an element of an Array or a NativeArray of element type elem, as `to`.
+	// An element is stored as it was put there, and the same array is an
+	// Array<(Int) -> Bool> where it is filled and an Array<(T) -> Bool> where
+	// a generic function or rest argument reads it (the element type is the
+	// instantiated one, not erased: Lower.ty), so a closure read may have
+	// another signature than the element type's (its argument boxed): read as
+	// Dynamic, kept when it has this signature, else adapted (coerce), as
+	// anonGet does
+	function elemRead(x:Ex, elem:Ty, to:Ty):Ex {
+		switch [elem, to] {
+			case [TRef(RClos(a)), TRef(RClos(b))] if (!hasStruct(a) && !hasStruct(b)):
+				return coerce(temp(TRef(RAny), x), TRef(RAny), to);
+			case _:
+				return coerce(x, elemValue(elem), to);
+		}
+	}
+
 	function anonGet(name:String, obj:TExpr, e:TExpr):Ex {
 		var t = l.boxed(tyOf(e));
 		if (t.match(TRef(RClos(_)))) {

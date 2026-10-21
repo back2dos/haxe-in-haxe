@@ -64,6 +64,14 @@ class ClassInfo {
 	// (Lower.reflectStatics); Reach keeps those live code can reach (null: no
 	// live code has the class value)
 	public var statics:Null<Array<StaticEntry>> = null;
+	// what Type.createInstance calls on a new instance of the class, with the
+	// arguments: its constructor (a superclass's when it has none), or that
+	// constructor's entry for dynamic calls (numbers and Bools with default
+	// values nullable: Lower.defaultsEntry); fn null: no constructor at all
+	// (the call throws, as Eval's fails). Set for every class once the program
+	// can call Type.createInstance (Lower.makers); Reach keeps it where live
+	// code can have the class value (null: none)
+	public var maker:Null<{fn:Null<FuncInfo>}> = null;
 
 	public function new(name, ident, sup) {
 		this.name = name;
@@ -220,6 +228,9 @@ class FuncInfo {
 	// collector written in Haxe, whose code is otherwise no-GC): never noGc
 	public var collects:Bool = false;
 	public var cSymbol:Null<String>; // @:hxmc.export: the symbol (the runtime's C code calls it)
+	// (Facts) of the runtime's exports: the families hxmc.ir.RuntimeSymbols
+	// lists it for, which MirBuild.call checks; -1: not the runtime's
+	public var rtFamilies:Int = -1;
 	// the Haxe module the function comes from (dot path): hxmc compiles the
 	// functions of a module into one object
 	public var module:String;
@@ -390,6 +401,10 @@ class Program {
 	public var globals:Array<{ty:Ty, init:Null<CtorInfo>, name:String, ?tls:String, ?bss:Int, ?sym:String, ?exp:String}> = [];
 	public var inits:Array<FuncInfo> = []; // static initializers, run before main
 	public var main:FuncInfo;
+	// haxe.EntryPoint.run, run after main when the program keeps it (the event
+	// loop: Finalization.maybeAddEntrypoint puts it in com.main.mainExpr, which
+	// hxmc does not lower)
+	public var entryRun:Null<FuncInfo> = null;
 	public var roots:Array<FuncInfo> = []; // live whatever reaches them (Reach)
 	// (Reach) the live functions and the selectors live code dispatches on; null: all
 	public var live:Null<Map<FuncInfo, Bool>> = null;

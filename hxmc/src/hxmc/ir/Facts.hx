@@ -50,8 +50,10 @@ class Facts {
 
 	public function new(p:Program) {
 		this.p = p;
-		for (f in p.funcs)
+		for (f in p.funcs) {
 			bySymbol.set(symbol(f), f);
+			if (f.cSymbol != null && StringTools.startsWith(f.module, "hxmc.rt.")) f.rtFamilies = RuntimeSymbols.familiesOf(f.cSymbol);
+		}
 		findNoGc();
 		markCold();
 		checkRawAddresses();
@@ -229,15 +231,15 @@ class Facts {
 		// whose slots their headers describe, of bytes to 23, of references
 		// from 24; 19 to 24 NativeArray storage by element kind (19 that of
 		// bytes, haxe.io.BytesData); 7 and 8 the wrapper made for an erased
-		// type parameter)
+		// type parameter; 15 a Date, its time: hxmc.rt.MemRepr.dateOf)
 		var rtNames = [
 			"None", "ArrayIterator", "Int", "Float", "Bool", "Array", "haxe.Int64", "hxmc.NativeArray", "hxmc.NativeArray", "haxe.io.BytesBuffer", "StringBuf",
-			"Ref", "Ref", "Ref", "Class", "Reserved", "String", "ArrayData", "Native", "hxmc.NativeArray", "hxmc.NativeArray", "hxmc.NativeArray", "hxmc.NativeArray",
+			"Ref", "Ref", "Ref", "Class", "Date", "String", "ArrayData", "Native", "hxmc.NativeArray", "hxmc.NativeArray", "hxmc.NativeArray", "hxmc.NativeArray",
 			"hxmc.NativeArray", "hxmc.NativeArray", "ArrayData", "Overflow", "Native"
 		];
 		var rtSlots:Array<Array<Null<Ty>>> = [
 			[], [TRef(RAny), TI32], [TI32], [TF64], [TBool], [TI32, TRef(RAny)], [TI64], [TRef(RAny)], [TRef(RAny)], [TI32, TRef(RAny)], [TI32, TRef(RAny)],
-			[TRef(RAny)], [TI32], [TF64], [TI32], []
+			[TRef(RAny)], [TI32], [TF64], [TI32], [TF64]
 		];
 		for (i in 0...T_FIRST)
 			addType(entry(i < rtNames.length ? rtNames[i] : "Reserved", "TK_RUNTIME", i < rtSlots.length ? rtSlots[i] : [], "rt" + i));
@@ -296,7 +298,11 @@ class Facts {
 			var slots:Array<Null<Ty>> = [TI32];
 			for (c in l.captures)
 				slots.push(c.ty);
-			var key = "clos." + l.sig.key + "." + [for (c in l.captures) switch c.ty {
+			// (a method as a value, `o.f` or `a.push`: a type of its own, named
+			// <method>, whose closures equal those of the same code and object:
+			// Dyn.dynEq, compareMethods; upstream's Issue6705)
+			var method = l.captures.length == 1 && (StringTools.endsWith(l.fn.name, "__bound") || StringTools.endsWith(l.fn.name, "__hclos"));
+			var key = (method ? "meth." : "clos.") + l.sig.key + "." + [for (c in l.captures) switch c.ty {
 				case TStruct(_, size): "s" + size;
 				case t: Ir.repr(t);
 			}].join("");
@@ -305,7 +311,7 @@ class Facts {
 				l.tindex = known;
 				continue;
 			}
-			var t = entry("<closure>", "TK_CLOSURE", slots, key);
+			var t = entry(method ? "<method>" : "<closure>", "TK_CLOSURE", slots, key);
 			t.sup = l.sig.id;
 			l.tindex = addType(t);
 			closures.set(key, l.tindex);
@@ -328,6 +334,11 @@ class Facts {
 				k = k.sup;
 			}
 			types[c.tindex].methods = ms;
+			// (Type.createInstance's entry: called as a bound method of the new instance)
+			if (c.maker != null) {
+				var f = c.maker.fn;
+				types[c.tindex].maker = f == null ? {fn: null, sig: -1} : {fn: symbol(f), sig: p.sig([for (i in 1...f.args.length) f.args[i].ty], f.ret).id};
+			}
 		}
 		// the runtime's array iterator (Iterable.iterator() on an Array): methods in rt_dyn.c
 		types[1].methods = [
@@ -336,16 +347,22 @@ class Facts {
 		];
 		// Iterable.iterator() on an Array (Lambda and the other Iterable
 		// consumers): a method, so structural calls hit the inline cache
-		// instead of the boxed slow path
-		types[5].methods = [{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id}];
+		// instead of the boxed slow path; KeyValueIterable.keyValueIterator()
+		// likewise (it was not found: "Cannot call null", upstream's TestArray)
+		types[5].methods = [
+			{name: "iterator", fn: "hx_array_iterator", sig: p.sig([], TRef(RAny)).id},
+			{name: "keyValueIterator", fn: "hx_array_kv_iterator", sig: p.sig([], TRef(RAny)).id}
+		];
 		// one bound-method closure type per signature of a method in the
 		// tables (code, this, method; after Reach: else every signature's)
 		var bound = new Map<Int, Bool>();
-		for (t in types)
+		for (t in types) {
 			for (m in t.methods) {
 				bound.set(m.sig, true);
 				if (m.dsig != null) bound.set(m.dsig, true);
 			}
+			if (t.maker != null && t.maker.fn != null) bound.set(t.maker.sig, true);
+		}
 		for (s in p.sigs)
 			if (p.live == null || bound.exists(s.id)) {
 				var t = entry("<bound>", "TK_BOUND", [TI32, TRef(RAny), TI32], "bound." + s.key);
@@ -728,7 +745,11 @@ typedef TypeEntry = {
 	ifaces:Array<Int>,
 	tag:Int,
 	ctors:Array<Int>,
-	?single:Int // TK_CTOR without arguments: its singleton's rt_globals index
+	?single:Int, // TK_CTOR without arguments: its singleton's rt_globals index
+	// TK_CLASS: what Type.createInstance calls (ClassInfo.maker): the function
+	// taking the new instance and the arguments, of the signature of the
+	// arguments (a bound-method one); fn null: no constructor
+	?maker:{fn:Null<String>, sig:Int}
 };
 
 // GC points (hxmc.Roots's analysis of root slots builds on them)

@@ -448,30 +448,35 @@ class Inline {
 				case TBlock(el):
 					var restore = saveLocals();
 					var t = e.etype;
-					function block(el:Vector<TExpr>):Vector<TExpr> return switch el {
-						case []: if (term) {
-								t = mkMono();
-								vector(mk(TConst(TNull), t, p));
-							} else vector();
-						case [a]:
+					// port: the list walked by index (upstream: loop on its tail), the
+					// statements mapped in order into a Vector of the block's length
+					function block(el:Vector<TExpr>):Vector<TExpr> {
+						if (el.length == 0) return if (term) {
+							t = mkMono();
+							vector(mk(TConst(TNull), t, p));
+						} else vector();
+						var r = new Vector<TExpr>(el.length), n = 0;
+						inline function last(a:TExpr):Vector<TExpr> {
 							var a = map(term, false, a);
 							if (term) t = a.etype;
-							vector(a);
-						case _:
-							var first = el[0];
-							var rest = el.slice(1);
+							r[n++] = a;
+							return n == el.length ? r : r.slice(0, n);
+						}
+						while (true) {
+							var first = el[n];
+							if (n == el.length - 1) return last(first);
 							switch first.eexpr {
-								case TIf(cond, a, null) if (term && hasTermReturn(a)): block(vector(
-										({
-											eexpr: TIf(cond, a, mk(TBlock(rest), first.etype, first.epos)),
-											etype: first.etype,
-											epos: core.Ast.punion(first.epos, rest[rest.length - 1].epos)
-										} : TExpr)
-									));
+								case TIf(cond, a, null) if (term && hasTermReturn(a)):
+									var rest = el.slice(n + 1);
+									return last({
+										eexpr: TIf(cond, a, mk(TBlock(rest), first.etype, first.epos)),
+										etype: first.etype,
+										epos: core.Ast.punion(first.epos, rest[rest.length - 1].epos)
+									});
 								case _:
-									var a = map(false, false, first);
-									VectorTools.cons(a, block(rest));
+									r[n++] = map(false, false, first);
 							}
+						}
 					};
 					var result = block(el);
 					restore();
