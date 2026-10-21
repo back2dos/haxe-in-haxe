@@ -19,11 +19,12 @@ package hxmc;
 class TargetFlags {
 	public static function install() {
 		var prev = compiler.Compiler.beforeTypingHook;
+		// (the flags first: the hooks before, the module cache's, read the defines)
 		compiler.Compiler.beforeTypingHook = function(com, actx) {
+			if (com.platform.match(CustomTarget("hxmc")))
+				for (f in flags(core.Define.rawDefined(com.defines, "hxmc.target") ? core.Define.rawDefinedValue(com.defines, "hxmc.target") : null))
+					context.Common.rawDefine(com, f);
 			if (prev != null) prev(com, actx);
-			if (!com.platform.match(CustomTarget("hxmc"))) return;
-			for (f in flags(core.Define.rawDefined(com.defines, "hxmc.target") ? core.Define.rawDefinedValue(com.defines, "hxmc.target") : null))
-				context.Common.rawDefine(com, f);
 		}
 	}
 
