@@ -1087,7 +1087,11 @@ class MirBuild {
 				if (join.preds.length == 0) add(mk(Unreachable, Void));
 			case SReturn(null):
 				unwindTo(0);
-				retFrom(-1);
+				// (a Void body under a signature with a result, an override of
+				// Base<Void>.f():T: zero, as when it falls off its end; it returned
+				// nothing defined, and the inliner's phi read value -1: corpus
+				// case VoidOverride, upstream's Issue13046)
+				retFrom(f.ret == Void ? -1 : f.ret == F64 ? fconst(0) : f.ret == I64 ? lconst(0, 0) : iconst(0));
 			case SReturn(e) if (cSret >= 0):
 				// (a callback's struct result, through the memory its caller gave)
 				var v = ex(e);
