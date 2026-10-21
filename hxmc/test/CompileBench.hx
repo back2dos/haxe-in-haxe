@@ -196,10 +196,12 @@ class CompileBench {
 		var walls = [], cpus = [];
 		var cache = FileSystem.fullPath(DIR) + "/build-cache";
 		var log = FileSystem.fullPath(DIR) + "/build.log";
+		// (out need not exist yet: fullPath fails on a missing file, so only its directory)
+		var target = FileSystem.fullPath(haxe.io.Path.directory(out)) + "/" + haxe.io.Path.withoutDirectory(out);
 		for (_ in 0...n) {
 			rmrf(cache);
 			rmrf(out + ".hxmc");
-			var s = runOnce([FileSystem.fullPath("bin/hxmc/hxmc"), FileSystem.fullPath(out), "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism",
+			var s = runOnce([FileSystem.fullPath("bin/hxmc/hxmc"), target, "-cp", "haxe/src", "-main", "haxe.Main", "-D", "disable-parallelism",
 				"-D", "hxmc.gc-prefault", "-cp", "bin/hxmc/std", "--custom-target", "hxmc"].concat(extra), root, log);
 			rmrf(cache);
 			if (s.error != null) fail('hxmc failed to build $out: ${s.error}');
