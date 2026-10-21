@@ -241,13 +241,23 @@ class Tables {
 			.then((r) -> r.ok ? r.json() : null)
 			.catchError((_) -> null)) : js.lib.Promise<Dynamic>);
 		get("bench/compile-latest.json", "bench.json").then((d:Null<BenchData>) -> if (d != null) renderCompilerLatest(latest, d));
-		if (hist != null) get("bench/compile-history.json", "compile-history.json").then((h:Null<CompileHistory>) -> if (h != null && h.runs.length > 0) renderCompilerHistory(hist, h) else hist.textContent = "");
+		if (hist != null) get("bench/compile-history.json", "compile-history.json").then((h:Null<CompileHistory>) -> renderCompilerHistory(hist, h));
 	}
 
-	static function renderCompilerHistory(root:Element, h:CompileHistory) {
+	/** the charts of the workloads whose hxmc series has HistoryChart.MIN_POINTS runs; none: the whole block hidden **/
+	static function renderCompilerHistory(root:Element, h:Null<CompileHistory>) {
 		root.textContent = "";
-		final f = (n:String) -> h.fields.indexOf(n);
+		final f = (n:String) -> h == null ? -1 : h.fields.indexOf(n);
 		final iMed = f("wall_median"), iMin = f("wall_min"), iMax = f("wall_max");
+		final shown = h == null ? [] : [
+			for (w in WORKLOADS)
+				if (Lambda.count(h.runs, (r) -> r.results[w[0]] != null && r.results[w[0]]["hxmc"] != null && r.results[w[0]]["hxmc"][iMed] != null) >= HistoryChart.MIN_POINTS) w
+		];
+		if (shown.length == 0) {
+			root.hidden = true;
+			return;
+		}
+		root.hidden = false;
 		final bar = el("div", "tabs");
 		bar.setAttribute("role", "tablist");
 		final grid = el("div", "charts");
@@ -256,7 +266,7 @@ class Tables {
 		final draw = (mode:String) -> {
 			for (i => m in modes) bar.children[i].setAttribute("aria-selected", m[0] == mode ? "true" : "false");
 			grid.textContent = "";
-			for (w in WORKLOADS) {
+			for (w in shown) {
 				final pts:Array<HistoryChart.ChartPoint> = [];
 				for (r in h.runs) {
 					final row = r.results[w[0]];

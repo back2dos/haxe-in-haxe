@@ -347,7 +347,9 @@ different CPU types move by more than the code does.
 
 The website shows hxmc's history only (one chart per compiler workload and
 per HaxeBenchmarks case: the median of each run, the band its min-max, the
-points off CI hollow on a shaded background, each linked to its commit); the
+points off CI hollow on a shaded background, each linked to its commit;
+a series is charted from 10 runs on, `HistoryChart.MIN_POINTS`, and a
+section without such a series shows its latest run's table only); the
 other targets and compilers, which change only with their pinned toolchains,
 appear once, as tables of the latest run. Their method in short: Programs'
 time is the wall time of the whole process (start-up, JIT and module

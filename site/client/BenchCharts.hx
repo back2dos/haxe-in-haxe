@@ -92,7 +92,7 @@ class BenchCharts {
 		final hist = document.getElementById("programs-history");
 		if (root == null) return;
 		get("bench/history.json").then((h:Null<History>) -> {
-			if (hist != null && h != null && h.runs.length > 0) renderHistory(hist, h) else if (hist != null) hist.textContent = "";
+			if (hist != null && h != null) renderHistory(hist, h);
 		});
 		get("bench/latest.json").then((latest:Null<Latest>) -> {
 			if (latest != null) renderLatest(root, latest)
@@ -152,7 +152,7 @@ class BenchCharts {
 					machine: r.machine
 				});
 			}
-			if (pts.length == 0) continue;
+			if (pts.length < HistoryChart.MIN_POINTS) continue;
 			final box = HistoryChart.figure(grid, c[1]);
 			HistoryChart.draw(box, c[1], pts, secs);
 			final b = el("button", "", c[1]);
@@ -165,6 +165,8 @@ class BenchCharts {
 			pick.append(b);
 			figs.push(box.parentElement);
 		}
+		// (no series long enough yet: no charts, the latest run's table only)
+		root.hidden = figs.length == 0;
 		if (figs.length > 0) pick.children[0].click();
 	}
 

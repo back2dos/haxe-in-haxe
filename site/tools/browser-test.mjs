@@ -12,10 +12,10 @@
 //   fault of the engine (fault-worker.js); the playground page (Monaco
 //   blocked: its plain editor) picks its module (?eh=legacy, and a Chromium
 //   without exnref) and runs its first example;
-// - the benchmarks page: the compiler's charts with a tooltip (hover, or a
-//   tap on a phone) and its table; with a benchmark history in the site
-//   (bench/) the Programs charts and table; light and dark, and at a phone's
-//   width.
+// - the benchmarks page: the compiler's and the Programs' charts (each
+//   series charted from 10 runs on, the section's charts hidden before) with
+//   a tooltip (hover, or a tap on a phone), and the latest runs' tables;
+//   light and dark, and at a phone's width.
 // Screenshots into $SCREENSHOTS when set.
 //   node site/tools/browser-test.mjs bin/site [chromium firefox webkit]
 import { createServer } from 'node:http';
@@ -272,15 +272,29 @@ async function pageTest(browser, query, expect) {
 }
 
 // the benchmarks page: the compiler's charts (hxmc over its runs, from
-// bench/compile-history.json or the committed compile-history.json) with a
-// tooltip on hover or tap, its latest run's table; with a benchmark history in
-// the site (bench/): the Programs charts (hxmc per case) and the latest run's
-// table with its tabs; light and dark, and at a phone's width (one Programs
-// chart at a time), no horizontal scrolling of the page
+// bench/compile-history.json or the committed compile-history.json) and the
+// Programs' (bench/history.json), one per series with 10 runs or more, none
+// (the section's table only, no empty heading) before; the first chart's
+// tooltip on hover or tap; the latest runs' tables; light and dark, and at a
+// phone's width (one Programs chart at a time), no horizontal scrolling
 async function benchTest(browser, name) {
 	let ok = true;
 	const latest = existsSync(path.join(dir, 'bench/latest.json'));
-	const history = existsSync(path.join(dir, 'bench/history.json'));
+	// the charts expected: the series (hxmc per workload or case) with MIN_POINTS runs
+	// (HistoryChart.hx); a section without any shows its table only
+	const MIN_POINTS = 10;
+	const readJson = (...fs) => {
+		for (const f of fs) if (existsSync(path.join(dir, f))) return JSON.parse(readFileSync(path.join(dir, f), 'utf8'));
+		return null;
+	};
+	const series = (h, field) => {
+		if (!h) return 0;
+		const i = h.fields ? h.fields.indexOf(field) : 0;
+		const names = new Set(h.runs.flatMap((r) => Object.keys(r.results)));
+		return [...names].filter((n) => h.runs.filter((r) => r.results[n]?.hxmc?.[i] != null).length >= MIN_POINTS).length;
+	};
+	const wantCompiler = series(readJson('bench/compile-history.json', 'compile-history.json'), 'wall_median');
+	const wantPrograms = series(readJson('bench/history.json'), 'median');
 	const views = [
 		{ colorScheme: 'light', width: 1100 },
 		{ colorScheme: 'dark', width: 1100 },
@@ -297,25 +311,32 @@ async function benchTest(browser, name) {
 		await page.goto(`http://localhost:${port}/benchmarks.html`);
 		let facts = '';
 		try {
-			await page.waitForSelector('#compiler-history .plot svg', { timeout: 30000 });
 			await page.waitForSelector('#compiler-results table', { timeout: 30000 });
 			if (latest) await page.waitForSelector('#programs-results table', { timeout: 30000 });
-			if (history) await page.waitForSelector('#programs-history .plot svg', { timeout: 30000 });
-			// the tooltip: a hover, or a tap on a phone
-			const svg = page.locator('#compiler-history .plot svg').first();
-			await svg.evaluate((e) => e.scrollIntoView({ block: 'center' }));
-			const box = await svg.boundingBox();
-			if (phone && name !== 'firefox') await page.touchscreen.tap(box.x + box.width * 0.95, box.y + box.height / 2);
-			else await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2);
-			await page.waitForSelector('#compiler-history .tip:not([hidden])', { timeout: 5000 });
+			if (wantCompiler) await page.waitForSelector('#compiler-history .plot svg', { timeout: 30000 });
+			if (wantPrograms) await page.waitForSelector('#programs-history .plot svg', { timeout: 30000 });
+			// (the histories would have been fetched and drawn by now)
+			await page.waitForTimeout(500);
+			// the tooltip of the first chart: a hover, or a tap on a phone
+			const first = page.locator(wantCompiler ? '#compiler-history .plot svg' : '#programs-history .plot svg').first();
+			if (wantCompiler || wantPrograms) {
+				await first.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+				const box = await first.boundingBox();
+				if (phone && name !== 'firefox') await page.touchscreen.tap(box.x + box.width * 0.95, box.y + box.height / 2);
+				else await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2);
+				await page.waitForSelector('.plot .tip:not([hidden])', { timeout: 5000 });
+			}
 			facts = await page.evaluate(() => {
 				const q = (s) => document.querySelectorAll(s).length;
 				const visible = (s) => [...document.querySelectorAll(s)].filter((e) => e.getClientRects().length > 0).length;
 				return {
+					compilerShown: visible('#compiler-history'),
+					programsShown: visible('#programs-history'),
 					compilerCharts: q('#compiler-history .plot svg'),
 					compilerRows: q('#compiler-results tbody tr'),
-					tip: document.querySelector('#compiler-history .tip:not([hidden])')?.textContent.slice(0, 60) ?? '',
-					tipLink: document.querySelector('#compiler-history .tip:not([hidden]) a')?.href ?? '',
+					tip: document.querySelector('.plot .tip:not([hidden])')?.textContent.slice(0, 60) ?? '',
+					tipLink: document.querySelector('.plot .tip:not([hidden]) a')?.href ?? '',
+					emptyHeadings: [...document.querySelectorAll('#main h2, #main h3')].filter((h) => h.getClientRects().length > 0 && !h.nextElementSibling?.getClientRects().length).length,
 					programCharts: q('#programs-history .plot svg'),
 					programChartsVisible: visible('#programs-history .plot svg'),
 					rows: q('#programs-results tbody tr'),
@@ -324,9 +345,12 @@ async function benchTest(browser, name) {
 					pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
 				};
 			});
-			if (facts.compilerCharts < 1 || facts.compilerRows < 1 || !/\/commit\/[0-9a-f]+$/.test(facts.tipLink)) pass = false;
+			Object.assign(facts, { wantCompiler, wantPrograms });
+			if (facts.compilerRows < 1 || facts.compilerCharts !== wantCompiler || facts.compilerShown !== (wantCompiler ? 1 : 0)) pass = false;
+			if (facts.programCharts !== wantPrograms || facts.programsShown !== (wantPrograms ? 1 : 0) || facts.programChartsVisible !== (phone ? Math.min(1, wantPrograms) : wantPrograms)) pass = false;
+			if ((wantCompiler || wantPrograms) && !/\/commit\/[0-9a-f]+$/.test(facts.tipLink)) pass = false;
 			if (latest && (facts.rows < 1 || !/Compile/.test(facts.tabs))) pass = false;
-			if (history && (facts.programCharts < 1 || facts.programChartsVisible !== (phone ? 1 : facts.programCharts))) pass = false;
+			if (facts.emptyHeadings > 0) pass = false;
 			if (facts.pageScroll > 0) pass = false;
 			if (process.env.SCREENSHOTS) {
 				await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}-${width}.png`), fullPage: true });

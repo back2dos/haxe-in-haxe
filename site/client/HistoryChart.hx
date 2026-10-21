@@ -22,6 +22,8 @@ typedef ChartPoint = {
 // Pointer or tap: a tooltip with the date, the commit (a link) and the values.
 class HistoryChart {
 	public static final REPO = "https://github.com/benmerckx/hxmc";
+	/** a series is charted from this many runs on; before that its section shows the latest run's table only **/
+	public static final MIN_POINTS = 10;
 
 	static final W = 340.0;
 	static final H = 170.0;
