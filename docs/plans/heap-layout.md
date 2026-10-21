@@ -100,8 +100,10 @@ units from +4: 4 bytes more payload than its units, 8 bytes less than the
 uniform header's (which had the length and hash in the payload). The hash is
 FNV-1a over the units, all 32 bits (StringMap's index; 0 until computed, a
 computed 0 stored as 1); `DataGen` writes the literals' at compile time
-(`FnLower.strHash`, which string switches use too). Literals are static
-strings in `.data`: never copied or scanned.
+(`FnLower.strHash`, which string switches use too: the compiler's, not
+the host runtime's, which may hash otherwise while bootstrapping). Literals
+are static strings in `.rodata`, as the static empty NativeArrays: nothing
+writes them (their hash is never 0), the collector leaves them alone.
 
 On the way here strings had the length in the header and a 16-bit hash
 (`[16][hash:16][length:32]`, units from +0): 4 bytes less on average, but a

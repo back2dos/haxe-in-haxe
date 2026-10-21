@@ -170,21 +170,25 @@ class DataGen {
 
 	var typeObjs = 0;
 
+	// the string literals, read-only: nothing writes them (their hash is
+	// here, never 0, so Str.hash does not store it; the collector leaves what
+	// is outside the heap alone; a string's identity hash is its content's)
 	function strings() {
+		var buf = rodata.buf;
 		for (s in e.strOrder) {
 			var n = e.strNames.get(s);
 			var units = [for (i in 0...s.length) s.charCodeAt(i)];
-			data.buf.align(8);
-			obj.define(n, data, data.buf.len, 8 + 4 + 2 * (units.length + 1), true);
+			buf.align(8);
+			obj.define(n, rodata, buf.len, 8 + 4 + 2 * (units.length + 1), true);
 			// the header (hxmc.rt.Types): T_STRING, its words, its hash (as
 			// Str.hash computes it); the length, the units, then a 0 unit
 			var words = (units.length + 5) >> 2;
-			data.buf.u32(Abi.T_STRING | ((words < 0xFFFF ? words : 0xFFFF) << 16));
-			data.buf.u32(hxmc.ir.FnLower.strHash(s));
-			data.buf.u32(s.length);
+			buf.u32(Abi.T_STRING | ((words < 0xFFFF ? words : 0xFFFF) << 16));
+			buf.u32(hxmc.ir.FnLower.strHash(s));
+			buf.u32(s.length);
 			for (u in units)
-				data.buf.u16(u);
-			data.buf.u16(0);
+				buf.u16(u);
+			buf.u16(0);
 		}
 	}
 
@@ -523,7 +527,7 @@ class DataGen {
 	}
 
 	// the empty NativeArrays the program refers to (MirBuild.EMPTY_ARRAY), in
-	// .data as string literals are: the header (Types: length 0, the type of
+	// .rodata as string literals are: the header (Types: length 0, the type of
 	// the kind), a zero slot
 	public function emptyArrays(objs:Array<Obj>) {
 		var names = new Map<String, Bool>();
@@ -532,11 +536,12 @@ class DataGen {
 				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MirBuild.EMPTY_ARRAY)) names.set(s.name, true);
 		var list = [for (n in names.keys()) n];
 		list.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+		// (read-only: nothing writes them, an array having no identity hash)
 		for (n in list) {
-			data.buf.align(8);
-			obj.define(n, data, data.buf.len, 16, true);
-			data.buf.u64(MirBuild.naType(Std.parseInt(n.substr(MirBuild.EMPTY_ARRAY.length))), 0);
-			data.buf.u64(0, 0);
+			rodata.buf.align(8);
+			obj.define(n, rodata, rodata.buf.len, 16, true);
+			rodata.buf.u64(MirBuild.naType(Std.parseInt(n.substr(MirBuild.EMPTY_ARRAY.length))), 0);
+			rodata.buf.u64(0, 0);
 		}
 	}
 
