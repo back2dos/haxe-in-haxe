@@ -446,13 +446,15 @@ class Str {
 		return range(s, start, end - start);
 	}
 
+	// (beyond ASCII: Eval's simple mappings of the BMP, CaseMap; upstream's TestUnicode)
 	@:hxmc.host("String_toLowerCase") static function toLowerCase(s:String):String {
 		var n = len(s);
 		var r = make(n);
+		var t = CaseMap.table(false);
 		var c = chars(s), d = chars(r);
 		for (i in 0...n) {
 			var u = c.get(i);
-			d.set(i, u >= 65 && u <= 90 ? u + 32 : u);
+			d.set(i, u < 128 ? (u >= 65 && u <= 90 ? u + 32 : u) : CaseMap.map(t, u));
 		}
 		return r;
 	}
@@ -460,10 +462,11 @@ class Str {
 	@:hxmc.host("String_toUpperCase") static function toUpperCase(s:String):String {
 		var n = len(s);
 		var r = make(n);
+		var t = CaseMap.table(true);
 		var c = chars(s), d = chars(r);
 		for (i in 0...n) {
 			var u = c.get(i);
-			d.set(i, u >= 97 && u <= 122 ? u - 32 : u);
+			d.set(i, u < 128 ? (u >= 97 && u <= 122 ? u - 32 : u) : CaseMap.map(t, u));
 		}
 		return r;
 	}
