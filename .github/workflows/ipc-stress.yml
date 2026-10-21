@@ -1,0 +1,87 @@
+# TEMPORARY (branch ipc-arm64): TestUnicode.testIPC's process round trips on
+# arm64, many times, with the binary of the failing CI run (39679590324) and
+# with this branch's build. Removed before the branch is merged.
+name: ipc-stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds: {description: IpcStress rounds per run, default: "60"}
+      sysruns: {description: TestUnicode runs per copy, default: "40"}
+  push:
+    branches: [ipc-arm64]
+    paths: [".github/workflows/ipc-stress.yml", ".github/ipc-stress/**", "hxmc/std/**", "hxmc/src/**", "haxe/src/**", "haxe/test/IpcStress.hx"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: make release TARGET=linux-arm64
+      - uses: actions/upload-artifact@v7
+        with: {name: haxe-branch-arm64, path: bin/release/linux-arm64/haxe, retention-days: 3}
+
+  stress:
+    needs: build
+    runs-on: ubuntu-22.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        bin: [ci, branch]
+    env:
+      HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
+      ROUNDS: ${{ inputs.rounds || '60' }}
+      SYSRUNS: ${{ inputs.sysruns || '40' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        if: matrix.bin == 'ci'
+        with:
+          name: hxmc-haxe-linux-aarch64
+          path: dl
+          run-id: 39679590324
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8
+        if: matrix.bin == 'branch'
+        with: {name: haxe-branch-arm64, path: dl}
+      - name: haxe on PATH
+        run: |
+          set -ex
+          mkdir -p hbin
+          if [ -f dl/haxe ]; then cp dl/haxe hbin/haxe; else tar -xf dl/*.tar.gz -C dl --strip-components=1; cp dl/haxe hbin/haxe; fi
+          chmod +x hbin/haxe
+          sudo ln -sf "$PWD/hbin/haxe" /usr/local/bin/haxe
+          haxe -version
+          git clone -q --depth 1 https://github.com/haxe-utest/utest.git "$RUNNER_TEMP/utest"
+      - name: IpcStress, four at once
+        run: |
+          pids=
+          for i in 1 2 3 4; do
+            IPC_STRESS_DIR="$RUNNER_TEMP/ipc$i" haxe -cp haxe/test --run IpcStress "$(command -v haxe)" $ROUNDS > "$RUNNER_TEMP/ipc$i.log" 2>&1 &
+            pids="$pids $!"
+          done
+          for p in $pids; do wait $p; done
+          cat "$RUNNER_TEMP"/ipc?.log
+        timeout-minutes: 60
+      - name: TestUnicode alone, four copies at once
+        run: |
+          pids=
+          for c in 1 2 3 4; do
+            bash .github/ipc-stress/sysloop.sh "$PWD" "$RUNNER_TEMP/utest" "$RUNNER_TEMP/sys$c" $SYSRUNS > "$RUNNER_TEMP/sys$c.log" 2>&1 &
+            pids="$pids $!"
+          done
+          for p in $pids; do wait $p; done
+          cat "$RUNNER_TEMP"/sys?.log
+        timeout-minutes: 60
