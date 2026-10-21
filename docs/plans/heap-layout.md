@@ -201,7 +201,10 @@ cycles; 7 interleaved runs):
 | BytesInput, BytesOutput | −0.9%, ±0 | −0.9%, ±0 |
 
 The objects' cost: a second object (header) per Bytes, and `b` loaded in
-each iteration of a loop (`Opt.licm` hoists no load that may fault).
+each iteration of a loop with calls (`Opt.licm` moves it out of the others
+since the object is not null: get and set loops ±0 then; docs/plans/codegen.md).
+Allocation folding takes the self-compile to +0.9% instructions, −0.3% cycles
+(the same machine, loaded by other work).
 Map<Bytes, Int> (16-byte keys): 18, 20, 24 ns per operation for 1000, 10000,
 40000 keys (the uniform header's: 20, 20, 29).
 
@@ -220,12 +223,12 @@ header, not the length, so a copy may carry a word after its elements).
 
 ## Not built yet
 
-- **Allocation folding**: two nursery allocations without a GC point between
-  them as one (the sizes summed, one limit test), which would make
-  `Bytes.shared` (and an Array's with its storage) the compiler's instead of
-  the std's.
-- **Loads of fields hoisted out of loops** once the object is known not null
-  (Bytes' `b` in byte loops).
+- **Bytes' shared allocation by the compiler**: allocation folding
+  (docs/plans/codegen.md) after the length test's branches, so that
+  `new Bytes(new BytesData(n))` folds and `Bytes.shared` goes.
+- **Bytes' multi-byte accessors inline** (`getInt32`, `getDouble`: loads of
+  the storage, not runtime calls): their loops then lose `b`'s reload too
+  (`Opt.licm` leaves a loop with calls).
 - **StringBuf's storage** as a NativeArray of units (it keeps its capacity in
   slots of type 17); `toString` could hand out its storage as the string (a
   string's size is its header's, not its length's) and copy only when the

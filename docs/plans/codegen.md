@@ -117,6 +117,41 @@ structural field write (`hx_anon_set_slow`, 54), not the latest instance (50).
 - The analysis' cost (the screen still lets through many allocations that
   escape: phis with loaded values, stores of reloaded values).
 
+## Allocation folding
+
+Built (`hxmc/src/hxmc/Fold.hx`, on Mir after `Escape` and `Sroa`, before
+`Opt`; `HXMC_FOLD=0` turns it off): an allocation of a constant size that
+follows another on a straight line, with nothing between them that could
+collect or allocate (no call, no use of `rt_young_ptr`), becomes part of
+it. One test of the room left and one bump for both; the second's header is
+written where the first's object ends, its address the first's plus its
+bytes; the first's slow path allocates both (the stub of the summed size)
+and writes its own header again (the runtime makes a record of the size it
+is given). The second's slow path, its spills and reloads, go: its join's
+phis keep the fast path's values. A chain folds into its first allocation
+(`Node(Leaf(v), Leaf(v + 1))`: one allocation of 56 bytes), up to 4096
+bytes. The objects are separate from the start (each its header); the
+collector copies them apart.
+
+Measured (2026-10-21, Xeon E-2356G, against `HXMC_FOLD=0` with the same
+tool; the machine loaded by other work): the port folds 8052 allocations
+(the tool 6517); its binary is 2.6% smaller (19.89 to 19.38 MB; the tool
+17.10 to 16.71 MB); its self-compile runs 0.7% fewer instructions (32.693 to
+32.472 G), about 1% fewer cycles.
+
+What stops the others (`HXMC_FOLD_WHY=1`, the port's build, counted where
+the code is): a call that may collect (11,028), a merge or a branch with no
+allocation after it (8,000), an allocation in one branch (3,168), one after
+a merge every way reaches (2,017), a call that cannot collect (3,900, most of
+them constructors that do not allocate: `core.Expr`, `haxe.Exception`,
+`TExpr`), a size known only at run time first, an allocation after its
+length test's merge (1,108: `new Bytes(new BytesData(n))`'s shape).
+Measured and not kept: folding across the calls that cannot collect (the
+second's header written right after the first's allocation): 952 more
+folds (the next stop is mostly a call that collects), the self-compile ±0,
+the port 21 KB larger. Left: those after a merge, and those of a size known
+at run time (`Bytes.shared` does Bytes' by hand), likely as small.
+
 ## Loads out of loops
 
 `Opt.licm` moved only loads that cannot fault (globals, immutable memory at

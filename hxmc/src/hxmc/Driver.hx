@@ -96,6 +96,8 @@ class Driver {
 	var raRounds = 0;
 	var escRemoved = 0;
 	var escFolds = 0;
+	var allocsFolded = 0; // (Fold)
+	var foldWhy = new Map<String, Int>(); // (Fold.whyOn)
 	var escTime = 0.0;
 	var lambdaSyms:Null<Map<String, FuncInfo>>; // the closures' functions that may be inlined, by symbol
 	var escSlow:Array<{name:String, t:Float}> = [];
@@ -173,6 +175,17 @@ class Driver {
 				lock.release();
 			}
 			if (o.opt && sroa) new Sroa(mf).run();
+			if (o.opt && Fold.on && mf.allocs > 1) {
+				var fo = new Fold(mf);
+				fo.run();
+				if (fo.folded > 0 || Fold.whyOn) {
+					lock.acquire();
+					allocsFolded += fo.folded;
+					for (k => v in fo.why)
+						foldWhy.set(k, (foldWhy.exists(k) ? foldWhy.get(k) : 0) + v);
+					lock.release();
+				}
+			}
 			if (o.opt) new Opt(mf).run();
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {
@@ -248,6 +261,11 @@ class Driver {
 		Sys.println('hxmc: prepare ${ms(t1 - t0)}, codegen ${ms(t2 - t1)} (cpu: mir ${ms(tm[0])}, isel ${ms(tm[1])}, regalloc ${ms(tm[2])}, emit ${ms(tm[3])})');
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded (cpu ${ms(escTime)})');
+		Sys.println('hxmc: $allocsFolded allocations folded into the one before them (Fold)');
+		var ks = [for (k in foldWhy.keys()) k];
+		ks.sort((a, b) -> foldWhy.get(b) - foldWhy.get(a));
+		for (k in ks)
+			Sys.println('hxmc: fold: ${foldWhy.get(k)} stopped by $k');
 		escSlow.sort((a, b) -> a.t < b.t ? 1 : -1);
 		for (x in escSlow.slice(0, 8))
 			Sys.println('  escape ${ms(x.t)}\t${x.name}');
