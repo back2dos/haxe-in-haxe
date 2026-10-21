@@ -470,7 +470,7 @@ class FnLower {
 			if (out.length != before) {
 				var spills = [];
 				for (i in 0...n)
-					if (!isConst(r[i]) && !r[i].match(ELocal(_))) {
+					if (!isConst(r[i]) && !stableFrom(r[i], before)) {
 						var lo = newLocal("s", tyOf(es[i]));
 						spills.push(SSet(lo, r[i]));
 						r[i] = ELocal(lo);
@@ -483,10 +483,53 @@ class FnLower {
 		return r;
 	}
 
+	// a local that the statements from `before` on (a later operand's) do not
+	// assign: read after them, it is the value it had (`[i, s.cca(i++)]`, which the
+	// analyzer leaves in that order: upstream's TestStringTools; corpus case
+	// OperandOrder)
+	function stableFrom(x:Ex, before:Int):Bool {
+		var l = switch x {
+			case ELocal(l): l;
+			case _: return false;
+		}
+		for (k in before...out.length)
+			if (assigns(out[k], l)) return false;
+		return true;
+	}
+
+	static function assigns(s:Stmt, l:Local):Bool {
+		inline function any(ss:Vector<Stmt>):Bool {
+			var r = false;
+			for (s in ss)
+				if (assigns(s, l)) {
+					r = true;
+					break;
+				}
+			return r;
+		}
+		return switch s {
+			case SSet(x, _): x == l;
+			case SIf(_, a, b): any(a) || any(b);
+			case SLoop(b): any(b);
+			case SSwitch(_, cs, d):
+				var r = any(d);
+				for (c in cs)
+					if (!r && any(c.body)) r = true;
+				r;
+			case STry(b, cs):
+				var r = any(b);
+				for (c in cs)
+					if (!r && (c.l == l || any(c.body))) r = true;
+				r;
+			case SCold(_, s2): assigns(s2, l);
+			case _: false;
+		}
+	}
+
 	// x, lowered before the statements from `before` on (a later operand's
 	// effects): read into a local ahead of them unless constant
 	function spillBefore(x:Ex, t:Ty, before:Int):Ex {
-		if (out.length == before || isConst(x) || x.match(ELocal(_))) return x;
+		if (out.length == before || isConst(x) || stableFrom(x, before)) return x;
 		var lo = newLocal("s", t);
 		out.insert(before, SSet(lo, x));
 		return ELocal(lo);
@@ -530,7 +573,7 @@ class FnLower {
 			if (out.length != before) {
 				var spills = [];
 				for (k in 0...r.length)
-					if (!isConst(r[k]) && !r[k].match(ELocal(_))) {
+					if (!isConst(r[k]) && !stableFrom(r[k], before)) {
 						var lo = newLocal("s", rTys[k]);
 						spills.push(SSet(lo, r[k]));
 						r[k] = ELocal(lo);
@@ -1737,7 +1780,7 @@ class FnLower {
 	function arith(op:Binop, xa:Ex, ta:Ty, getB:() -> {x:Ex, t:Ty}, rt:Ty, e:TExpr):Ex {
 		var before = out.length;
 		var rb = getB();
-		if (out.length != before && !isConst(xa) && !xa.match(ELocal(_))) {
+		if (out.length != before && !isConst(xa) && !stableFrom(xa, before)) {
 			var lo = newLocal("s", ta);
 			out.insert(before, SSet(lo, xa));
 			xa = ELocal(lo);
