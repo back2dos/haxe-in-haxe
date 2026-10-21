@@ -6,7 +6,7 @@ name: ipc-stress
 on:
   workflow_dispatch:
     inputs:
-      sysruns: {description: TestUnicode runs per copy (six copies), default: "150"}
+      sysruns: {description: TestUnicode runs per copy (six copies), default: "170"}
   push:
     branches: [ipc-arm64]
     paths: [".github/workflows/ipc-stress.yml", ".github/ipc-stress/**", "hxmc/std/**", "hxmc/src/**", "haxe/src/**"]
@@ -36,10 +36,11 @@ jobs:
       fail-fast: false
       matrix:
         bin: [ci, branch]
+        shard: [1, 2, 3]
     env:
       PLATFORM: linux-arm64
       HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
-      SYSRUNS: ${{ inputs.sysruns || '150' }}
+      SYSRUNS: ${{ inputs.sysruns || '170' }}
     steps:
       - uses: actions/checkout@v7
         with:
