@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: make release TARGET=linux-arm64
+      - run: make release TARGET=linux-arm64 HXFLAGS="-D hxmc.lines -D hxmc.symbols"
       - uses: actions/upload-artifact@v7
         with: {name: haxe-branch-arm64, path: bin/release/linux-arm64/haxe, retention-days: 3}
 
@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bin: [ci, branch]
+        bin: [branch]
     env:
       PLATFORM: linux-arm64
       HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
@@ -77,8 +77,13 @@ jobs:
           for p in $pids; do wait $p || true; done
           cat "$RUNNER_TEMP"/ipc?.log
         timeout-minutes: 60
-      - name: TestUnicode alone, four copies at once
+      - name: TestUnicode alone, six copies at once (null accesses dump core)
         run: |
+          sudo apt-get install -y -q gdb > /dev/null 2>&1 || true
+          mkdir -p "$RUNNER_TEMP/cores"
+          sudo sysctl -w kernel.core_pattern="$RUNNER_TEMP/cores/core.%p"
+          ulimit -c unlimited
+          export RT_NULL_ACCESS=0
           pids=
           for c in 1 2 3 4 5 6; do
             bash .github/ipc-stress/sysloop.sh "$PWD" "$RUNNER_TEMP/utest" "$RUNNER_TEMP/sys$c" $SYSRUNS > "$RUNNER_TEMP/sys$c.log" 2>&1 &
@@ -86,4 +91,13 @@ jobs:
           done
           for p in $pids; do wait $p || true; done
           cat "$RUNNER_TEMP"/sys?.log | grep -av "^\s*$"
+          ls -la "$RUNNER_TEMP/cores"
+          for c in "$RUNNER_TEMP"/cores/core.*; do
+            [ -f "$c" ] || continue
+            echo "=== $c"
+            gdb -q -batch -ex "info registers" -ex "x/24i \$pc-48" -ex "bt 40" -ex "thread apply all bt 12" hbin/haxe "$c" 2>&1 | head -400
+          done
         timeout-minutes: 60
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: cores, path: "${{ runner.temp }}/cores", retention-days: 3, if-no-files-found: ignore}
