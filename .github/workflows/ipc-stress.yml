@@ -38,6 +38,7 @@ jobs:
       matrix:
         bin: [ci, branch]
     env:
+      PLATFORM: linux-arm64
       HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
       ROUNDS: ${{ inputs.rounds || '15' }}
       SYSRUNS: ${{ inputs.sysruns || '60' }}
