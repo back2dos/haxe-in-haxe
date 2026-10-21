@@ -1328,7 +1328,7 @@ class WasmGen {
 		}
 		// (a C call, MirBuild.cCall; a program's extern the runtime implements
 		// in Haxe, as __errno_location, is a call of that function: Lower.bindHosts)
-		var imp = i.sym != null && i.cSizes != null ? hxmc.ir.CInterop.SIGS.get(i.sym) : null;
+		var imp = i.sym != null && i.cCall ? hxmc.ir.CInterop.SIGS.get(i.sym) : null;
 		if (imp != null && hxmc.ir.CInterop.USER.exists(i.sym)) {
 			imp = hxmc.CAbi.wasmSig(imp);
 			// an import (LinkWasm): pointers as i32, floats as f32

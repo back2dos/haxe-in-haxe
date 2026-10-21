@@ -2389,6 +2389,7 @@ class MirBuild {
 		if (blocking) call("rt_blocking_enter", vector(), Void);
 		var r = indirect ? callInd(xs[0], Vector.fromArrayCopy(args), rt) : call(name, Vector.fromArrayCopy(args), rt);
 		var ci = f.vals[r];
+		ci.cCall = true;
 		ci.cSizes = Vector.fromArrayCopy(sizes);
 		if (structs) ci.cGroups = Vector.fromArrayCopy(groups);
 		if (va != null) ci.variadic = va;

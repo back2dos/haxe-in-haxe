@@ -1757,6 +1757,7 @@ class Escape {
 			i.sym = null;
 			i.args = vector();
 			i.argTys = vector();
+			i.cCall = false;
 			i.cSizes = vector();
 			i.cGroups = vector();
 			i.structRet = false;
