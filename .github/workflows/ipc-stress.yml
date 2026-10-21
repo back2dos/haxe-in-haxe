@@ -6,7 +6,7 @@ name: ipc-stress
 on:
   workflow_dispatch:
     inputs:
-      rounds: {description: IpcStress rounds per run, default: "15"}
+      rounds: {description: IpcStress rounds per run, default: "2"}
       sysruns: {description: TestUnicode runs per copy, default: "60"}
   push:
     branches: [ipc-arm64]
@@ -40,7 +40,7 @@ jobs:
     env:
       PLATFORM: linux-arm64
       HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
-      ROUNDS: ${{ inputs.rounds || '15' }}
+      ROUNDS: ${{ inputs.rounds || '2' }}
       SYSRUNS: ${{ inputs.sysruns || '60' }}
     steps:
       - uses: actions/checkout@v7
@@ -80,10 +80,10 @@ jobs:
       - name: TestUnicode alone, four copies at once
         run: |
           pids=
-          for c in 1 2 3 4; do
+          for c in 1 2 3 4 5 6; do
             bash .github/ipc-stress/sysloop.sh "$PWD" "$RUNNER_TEMP/utest" "$RUNNER_TEMP/sys$c" $SYSRUNS > "$RUNNER_TEMP/sys$c.log" 2>&1 &
             pids="$pids $!"
           done
           for p in $pids; do wait $p || true; done
-          cat "$RUNNER_TEMP"/sys?.log
+          cat "$RUNNER_TEMP"/sys?.log | grep -av "^\s*$"
         timeout-minutes: 60

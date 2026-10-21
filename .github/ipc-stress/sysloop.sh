@@ -20,10 +20,15 @@ class Main {
 }
 EOF
 sed -i "s#^-lib utest#-cp $utest/src#" *.hxml
+# diagnostics (this copy only): what a child that printed nothing reported
+sed -i '112s#^\t\tproc.close();#\t\tproc.close();\n\t\tif (stdout == "" \&\& args[0] != "stderr.writeString") Sys.stderr().writeString("EMPTY STDOUT pid " + proc.getPid() + " exit " + exitCode + " stderr " + haxe.Json.stringify(stderr) + " args " + haxe.Json.stringify(args) + " stdin " + haxe.Json.stringify(stdin) + "\\n");#' src/UtilityProcess.hx
+grep -n "EMPTY STDOUT" src/UtilityProcess.hx || exit 3
 haxe -D github -D Linux compile-eval-hxb.hxml || { echo "sysloop: the build failed"; exit 2; }
 fails=0
 for i in $(seq 1 "$n"); do
-	if ! haxe --hxb-lib bin/eval/sys.hxb --run Main > out.txt 2>&1; then
+	ok=1; haxe --hxb-lib bin/eval/sys.hxb --run Main > out.txt 2>&1 || ok=0
+	grep -a "EMPTY STDOUT" out.txt | sed "s/^/[$i] /"
+	if [ $ok = 0 ]; then
 		fails=$((fails + 1))
 		echo "--- iteration $i failed"
 		grep -v "^\s*$" out.txt | grep -iv "OK \.*$" | tail -20
