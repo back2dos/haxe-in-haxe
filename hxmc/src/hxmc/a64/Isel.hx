@@ -51,7 +51,7 @@ enum abstract AOp(Int) to Int from Int {
 	var STLR; // [s1] <- s2, release (size)
 	var ATOMIC; // d <- old [s1]; cond 0: [s1] += s2, 1: [s1] = s2, 2: [s1] = s2 if old == s3 (ldaxr/stlxr loop over x16/x17)
 	var KEEP; // no code: s1, s2, s3 live to here (ATOMIC's operands outlive its result)
-	var DMB;
+	var DMB; // cond 0: dmb ish, 1: dmb ishst
 	var FMOVSW; // d (fpr, single) <- s1 (32 bits)
 	var FMOVWS; // d (32 bits) <- s1 (fpr, single)
 	var FCVTSD; // d (double) <- s1 (single)
@@ -818,6 +818,10 @@ class Isel implements hxmc.Target.Selector {
 				x.flag = i.signed;
 				memOf(x, i.a, i.b, i.imm2, i.imm, i.size);
 			case Store:
+				// a store that publishes a reference: the stores before it first
+				// (dmb ishst; the reader's loads through it are ordered by their
+				// address dependency)
+				if (i.release) emit(DMB).cond = 1;
 				var x = emit(STORE);
 				x.size = i.size;
 				x.s1 = useZ(i.c);

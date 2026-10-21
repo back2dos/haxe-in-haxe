@@ -301,13 +301,13 @@ class MirBuild {
 		return r;
 	}
 
-	function storeM(cls:Int, size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1) {
+	function storeM(cls:Int, size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1, release = false) {
 		memCls = cls;
-		store(size, base, disp, v, index, scale);
+		store(size, base, disp, v, index, scale, release);
 		memCls = 0;
 	}
 
-	function store(size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1) {
+	function store(size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1, release = false) {
 		if (constIndex(index)) {
 			disp += f.vals[index].imm * scale;
 			index = -1;
@@ -320,6 +320,7 @@ class MirBuild {
 		i.imm = disp;
 		i.imm2 = scale;
 		i.size = size;
+		i.release = release;
 		add(i);
 	}
 
@@ -1006,7 +1007,8 @@ class MirBuild {
 				var x = ex(v);
 				var t = p.p.globals[g].ty;
 				if (Ir.isRef(t)) {
-					storeM(Opt.MGlobal, 8, globalAddr(g), 0, x);
+					// (publishes a reference, as setPtr's store)
+					storeM(Opt.MGlobal, 8, globalAddr(g), 0, x, -1, 1, !isNullConst(v));
 				} else storeM(Opt.MGlobal, t == TI32 || t == TBool ? 4 : 8, symAddr(p.scalarGlobalSym(g)), 0, x);
 			case SAnonSet(name, t, obj, v):
 				anonSet(name, t, obj, v);
@@ -1212,10 +1214,15 @@ class MirBuild {
 	// rt_set_ptr(obj, slot, val): the runtime's part (GcPaths.barrierSlow)
 	// only for a young value stored into an object that is not young (a
 	// value that is null or old, the common store into an old object, needs
-	// nothing)
+	// nothing). The store publishes val (MIns.release): a thread that reads
+	// the reference sees the object's initialising stores, as the reference
+	// compiler's code may assume (OCaml's caml_modify is a release store,
+	// "publication safety for newly-allocated objects"): upstream's parallel
+	// phases read fields that other domains set meanwhile, such as Dce's
+	// `Meta.has Meta.Used a.a_meta` before it takes the lock to add the entry.
 	function setPtr(obj:Int, slot:Int, val:Int, cls = 0) {
 		var prev = loadM(cls, I64, 8, slot, 0);
-		storeM(cls, 8, slot, 0, val);
+		storeM(cls, 8, slot, 0, val, -1, 1, true);
 		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
 		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
 		var size = op2(Sub, I64, ye, ys);
@@ -1237,7 +1244,7 @@ class MirBuild {
 	// barrier call altogether when the new value is null or outside the nursery.
 	function nativeSetPtr(obj:Int, slot:Int, val:Int) {
 		var prev = loadM(Opt.MElem, I64, 8, slot, 0);
-		storeM(Opt.MElem, 8, slot, 0, val);
+		storeM(Opt.MElem, 8, slot, 0, val, -1, 1, true);
 		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
 		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
 		var size = op2(Sub, I64, ye, ys);

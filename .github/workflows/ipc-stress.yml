@@ -6,11 +6,10 @@ name: ipc-stress
 on:
   workflow_dispatch:
     inputs:
-      rounds: {description: IpcStress rounds per run, default: "2"}
-      sysruns: {description: TestUnicode runs per copy, default: "60"}
+      sysruns: {description: TestUnicode runs per copy (six copies), default: "150"}
   push:
     branches: [ipc-arm64]
-    paths: [".github/workflows/ipc-stress.yml", ".github/ipc-stress/**", "hxmc/std/**", "hxmc/src/**", "haxe/src/**", "haxe/test/IpcStress.hx"]
+    paths: [".github/workflows/ipc-stress.yml", ".github/ipc-stress/**", "hxmc/std/**", "hxmc/src/**", "haxe/src/**"]
 
 permissions:
   contents: read
@@ -26,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: make release TARGET=linux-arm64 HXFLAGS="-D hxmc.lines -D hxmc.symbols"
+      - run: make release TARGET=linux-arm64
       - uses: actions/upload-artifact@v7
         with: {name: haxe-branch-arm64, path: bin/release/linux-arm64/haxe, retention-days: 3}
 
@@ -36,12 +35,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bin: [branch]
+        bin: [ci, branch]
     env:
       PLATFORM: linux-arm64
       HAXE_STD_PATH: ${{ github.workspace }}/haxe/upstream/std
-      ROUNDS: ${{ inputs.rounds || '2' }}
-      SYSRUNS: ${{ inputs.sysruns || '60' }}
+      SYSRUNS: ${{ inputs.sysruns || '150' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,37 +65,20 @@ jobs:
           sudo ln -sf "$PWD/hbin/haxe" /usr/local/bin/haxe
           haxe -version
           git clone -q --depth 1 https://github.com/haxe-utest/utest.git "$RUNNER_TEMP/utest"
-      - name: IpcStress, four at once
+      - name: The port's self-compile to HXB, five times (wall seconds)
         run: |
-          pids=
-          for i in 1 2 3 4; do
-            IPC_STRESS_DIR="$RUNNER_TEMP/ipc$i" haxe -cp haxe/test --run IpcStress "$(command -v haxe)" $ROUNDS > "$RUNNER_TEMP/ipc$i.log" 2>&1 &
-            pids="$pids $!"
+          for k in 1 2 3 4 5; do
+            s=$(date +%s.%N); haxe haxe-in-haxe.hxml > /dev/null || exit 1; e=$(date +%s.%N)
+            echo "self-compile $k: $(awk "BEGIN {print $e - $s}") s"
           done
-          for p in $pids; do wait $p || true; done
-          cat "$RUNNER_TEMP"/ipc?.log
-        timeout-minutes: 60
-      - name: TestUnicode alone, six copies at once (null accesses dump core)
+      - name: TestUnicode alone, six copies at once
         run: |
-          sudo apt-get install -y -q gdb > /dev/null 2>&1 || true
-          mkdir -p "$RUNNER_TEMP/cores"
-          sudo sysctl -w kernel.core_pattern="$RUNNER_TEMP/cores/core.%p"
-          ulimit -c unlimited
-          export RT_NULL_ACCESS=0
           pids=
           for c in 1 2 3 4 5 6; do
             bash .github/ipc-stress/sysloop.sh "$PWD" "$RUNNER_TEMP/utest" "$RUNNER_TEMP/sys$c" $SYSRUNS > "$RUNNER_TEMP/sys$c.log" 2>&1 &
             pids="$pids $!"
           done
           for p in $pids; do wait $p || true; done
-          cat "$RUNNER_TEMP"/sys?.log | grep -av "^\s*$"
-          ls -la "$RUNNER_TEMP/cores"
-          for c in "$RUNNER_TEMP"/cores/core.*; do
-            [ -f "$c" ] || continue
-            echo "=== $c"
-            gdb -q -batch -ex "info registers" -ex "x/24i \$pc-48" -ex "bt 40" -ex "thread apply all bt 12" hbin/haxe "$c" 2>&1 | head -400
-          done
-        timeout-minutes: 60
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with: {name: cores, path: "${{ runner.temp }}/cores", retention-days: 3, if-no-files-found: ignore}
+          cat "$RUNNER_TEMP"/sys?.log | grep -av "^\s*$" | grep -v "^113:"
+          cat "$RUNNER_TEMP"/sys?.log | grep -a "^sysloop" | awk '{r += $3; f += $5} END {print "TOTAL: " r " runs, " f " failures"}'
+        timeout-minutes: 90
