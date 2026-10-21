@@ -1949,6 +1949,7 @@ class MirBuild {
 					case "Array": 5;
 					case "hxmc_NativeArray": Abi.T_NATIVE_ARRAY;
 					case "Date": Abi.T_DATE;
+					case "Math": Abi.T_MATH;
 					case _: 0;
 				}
 		};

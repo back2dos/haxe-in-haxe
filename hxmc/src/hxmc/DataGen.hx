@@ -280,6 +280,9 @@ class DataGen {
 		for (cs in [p.classes, p.interfaces])
 			for (c in cs)
 				if (c.statics != null && c.statics.length > 0) staticsOf.set(c.tindex, c.statics);
+		// (an enum's __meta__: Lower.reflectEnum)
+		for (en in p.enums)
+			if (en.statics != null && en.statics.length > 0) staticsOf.set(en.tindex, en.statics);
 		// the arrays each entry points to, then the table
 		var entries = [];
 		for (i in 0...types.length) {

@@ -20,6 +20,11 @@ package hxmc;
 //   -D hxmc.no-frame-pointers       x86-64: no frame record in functions (the default keeps one, for
 //                                   perf -g and debuggers; HXMC_FRAME_POINTERS=0 off; arm64 always)
 //   -debug                          source lines for debuggers (DWARF on ELF and Mach-O), symbols
+//   -D hxmc.no-stacks               no call stacks (haxe.CallStack, exception stacks: empty); by
+//                                   default a program that reads them gets its table of functions and
+//                                   lines (StackTable)
+//   -D hxmc.stacks                  the table and stacks in every program: an uncaught exception's
+//                                   report names the frames of its throw
 //   -D hxmc.native-array-outofbounds=throws|silent
 //                                   NativeArray/Vector accesses out of bounds throw, or read the
 //                                   default and write nothing (default: not tested)
@@ -143,7 +148,12 @@ class Main {
 		hxmc.ir.Lower.targetArm = abi.arm ? 1 : 0;
 		hxmc.ir.Lower.targetCode = MirBuild.targetCode(abi);
 		hxmc.ir.Lower.targetPlatform = abi.platformCode();
-		hxmc.ir.Lower.lines = opts.debugLines && !abi.wasm;
+		// (the positions of every statement, natively: a program that reads
+		// stacks gets the table of its functions and lines, which Reach finds
+		// out after the lowering, StackTable; -debug writes DWARF lines from
+		// them; they change no code)
+		hxmc.ir.Lower.lines = (opts.debugLines || opts.stacks) && !abi.wasm;
+		hxmc.ir.Reach.stacksAlways = opts.stacksAlways;
 		// the runtime's symbols generated code may call by name, defined by the
 		// modules hxmc.rt.Runtime imports for the target, whatever this program calls
 		hxmc.ir.RuntimeSymbols.check(com, opts.wasmGc ? hxmc.ir.RuntimeSymbols.WASMGC : abi.wasm ? hxmc.ir.RuntimeSymbols.WASM32 : hxmc.ir.RuntimeSymbols.NATIVE,

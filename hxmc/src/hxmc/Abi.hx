@@ -22,6 +22,7 @@ class Abi {
 	public static inline var T_STRING = 16;
 	public static inline var T_NATIVE_ARRAY = 24; // - the element kind (AK_*): MirBuild.naType
 	public static inline var T_DATE = 15; // a Date: a record (hxmc.rt.Types)
+	public static inline var T_MATH = 28; // Math's class value (hxmc.rt.Types)
 	public static inline var T_REFBOX_P = 11;
 	public static inline var T_REFBOX_I = 12;
 	public static inline var T_REFBOX_F = 13;

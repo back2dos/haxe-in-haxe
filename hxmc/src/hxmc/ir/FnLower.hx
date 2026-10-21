@@ -166,6 +166,13 @@ class FnLower {
 		}
 	}
 
+	// an initializer setting the global g to e (Lower.reflectEnum)
+	public function runGlobalInit(g:Int, e:TExpr) {
+		boxed = new Map();
+		var t = l.getProgram().globals[g].ty;
+		out.push(SSetGlobal(g, coerce(value(e), tyOf(e), t)));
+	}
+
 	// closure body forwarding to a function (static or bound method)
 	public function forward(f:Null<FuncInfo>, dispatch:Null<{sel:Int, sig:SigInfo, args:Array<Ty>, ?cls:TClass}>) {
 		boxed = new Map();
@@ -1347,6 +1354,7 @@ class FnLower {
 			case TTypeExpr(mt):
 				switch mt {
 					case TClassDecl(c): l.reflectStatics(c);
+					case TEnumDecl(en): l.reflectEnum(en);
 					case _:
 				}
 				EType(typeRef(mt));
@@ -1502,6 +1510,8 @@ class FnLower {
 			case FInstance(c, _, cf):
 				switch cf.cfKind {
 					case Method(MethDynamic) if (isDynMethod(c, cf)): coerce(dynMethod(obj, c, cf, e), dynSlotTy(c, cf), tyOf(e));
+					// (an interface's dynamic method: the field, by name)
+					case Method(MethDynamic) if (c.hasClassFlag(CInterface)): anonGet(cf.cfName, obj, e);
 					case Method(_): methodClosure(obj, c, cf, e);
 					case Var(_) if (Lower.isCore(c, "Array") && cf.cfName == "length"):
 						EArrLen(value(obj));
@@ -1568,6 +1578,8 @@ class FnLower {
 					anonGet(cf.cfName, obj, e);
 				} else if (cf.cfKind.match(Method(MethDynamic)) && isDynMethod(cl.cls, cf)) {
 					coerce(dynMethod(obj, cl.cls, cf, e), dynSlotTy(cl.cls, cf), tyOf(e));
+				} else if (cf.cfKind.match(Method(MethDynamic)) && cl.cls.hasClassFlag(CInterface)) {
+					anonGet(cf.cfName, obj, e);
 				} else methodClosure(obj, cl.cls, cf, e);
 			case FEnum(en, ef):
 				var ci = l.ctorInfo(ef, en);
@@ -2182,6 +2194,11 @@ class FnLower {
 				var cl = asLocal(EGlobal(g, t), t);
 				var xs = args(cargs, s.args, null);
 				return callClos(s, ELocal(cl), xs, rt);
+			// (@:hxmc.withStacks: a call left out of a program without the
+			// table of its functions and lines, Lower.lines: hxmc.rt.Stacks'
+			// recording of a throw and report of an uncaught exception)
+			case TField(_, FStatic(c, cf)) if (!Lower.lines && rt == TVoid && Lower.hasMeta(":hxmc.withStacks", cf.cfMeta)):
+				return EInt(0);
 			case TField(_, FStatic(c, cf)):
 				var fn = l.staticFunc(c, cf);
 				var xs = args(cargs, callTys(fn), l.defaults.get(fn), 0, fn);
@@ -2211,6 +2228,17 @@ class FnLower {
 				var al = asLocal(xs[0], at);
 				out.push(SArrPush(elem, al, coerce(xs[1], tyOf(cargs[0]), elem)));
 				return coerce(EArrLen(ELocal(al)), TI32, rt);
+			case TField(obj, FInstance(c, _, cf)) if (c.hasClassFlag(CInterface) && cf.cfKind.match(Method(MethDynamic)) && tyOf(f).match(TRef(RClos(_)))):
+				// a dynamic method through an interface: the function its field
+				// holds, by name, as through a structure (upstream's Issue3159)
+				var s = switch tyOf(f) {
+					case TRef(RClos(s)): s;
+					case _: null;
+				};
+				if (hasStruct(s)) structFail('a struct value passed to or returned by a dynamic method of an interface: not supported');
+				var o = asLocal(value(obj), tyOf(obj));
+				var xs = args(cargs, s.args, null);
+				return coerceRhs(ECallAnon(cf.cfName, s, ELocal(o), xs), s.ret, rt);
 			case TField(obj, FInstance(c, _, cf)) if (c.hasClassFlag(CExtern) || Lower.isCore(c, "String") || Lower.isCore(c, "Array")):
 				var s = switch TFunctions.follow(cf.cfType) {
 					case TFun(s): s;

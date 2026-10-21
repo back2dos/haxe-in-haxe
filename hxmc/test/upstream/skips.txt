@@ -10,22 +10,13 @@
 
 # --- unit ---
 
-unit * unit.issues.Issue6446 BUG a class extending StringBuf does not compile: StringBuf is an extern class of the runtime (Lower: "extern class StringBuf used as a class")
-unit * unit.issues.Issue3159 BUG a dynamic method assigned through an interface is not called through it: the interface's dispatch calls the method, not the field
-unit * unit.issues.Issue12028.testMakeVarArgsInDynamic BUG a Reflect.makeVarArgs function typed by inference as String->? and passed on as Dynamic is the adapter of that type, which takes one argument (Dynamic -> function -> Dynamic does not give the value back)
-unit * unit.teststd.TestReflect.test BUG Reflect.compareMethods(a.push, a.push): a closure of an Array method is an adapter (its host function takes Dynamic) made apart at each use, so closures of one method and array compare unequal
-unit * unit.TestMeta.testMeta BUG an enum's metadata: haxe.rtti.Meta.getType and getFields of an enum find no __meta__ (classes have theirs)
-unit * unit.TestReflect.testTypes BUG Math, an extern class the runtime implements, has no class value of its own (Type.getClassName(Math) is "None"; resolveClass("Math") is null)
-unit * unit.TestExceptions.testExceptionStack BUG no call stacks: haxe.CallStack.callStack() and exception stacks are empty (hxmc/std/haxe/NativeStackTrace.hx)
-unit * unit.teststd.haxe.TestCallStack.test BUG no call stacks: haxe.CallStack.exceptionStack() is empty after a throw (upstream leaves the check out on hl, lua and flash)
 unit * unit.issues.Issue13043.testOverrideAsBase TARGET a dynamic method set to null is restored to its own method when read or called (FnLower.isDynMethod: the field starts null and takes the method on first use), so `b.onItem == null` is false after `b.onItem = null`
 unit * unit.teststd.haxe.TestLog.test TARGET haxe.Log.trace set to null is the original again (a dynamic method set to null: FnLower.isDynMethod), so trace does not throw
 unit * unit.issues.Issue5016 TARGET Reflect.deleteField cannot remove a field of a structure's own layout, only one added at run time (as on cpp, which upstream leaves out)
 unit * unit.teststd.TestUnicode.test TARGET Reflect.deleteField of a structure's own field (as Issue5016: the layout is fixed; cpp likewise)
-unit * unit.issues.Issue6705.testTypeChange TARGET a function converted to another function type ((Float) -> Void to Int -> Void) is an adapter, not the same closure (as on hl, which upstream leaves out)
 unit * unit.issues.Issue9046 TARGET Type.resolveClass finds a class the program constructs or uses as a value (docs/hxmc.md, "Reachability"), not one whose statics it only calls
-unit * unit.TestDCE.testInterface TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface is not a class value for Type.resolveClass
-unit * unit.TestDCE.testProperty TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface is not a class value for Type.resolveClass
+unit * unit.TestDCE.testInterface TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface has no instance fields to reflection (Type.getInstanceFields of an interface is empty: its methods are in no table)
+unit * unit.TestDCE.testProperty TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): an interface has no instance fields to reflection (Type.getInstanceFields of an interface is empty: its methods are in no table)
 unit * unit.TestDCE.testClasses TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): classes only referenced or implemented are not found by Type.resolveClass
 unit * unit.TestDCE.testDceField TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): methods no live code reaches are not in the class's tables, @:keep or not
 unit * unit.TestDCE.testIssue6500 TARGET reflection sees hxmc's reachability on top of the compiler's DCE (docs/hxmc.md, "Reachability"): a kept class never constructed is not found by Type.resolveClass
@@ -40,3 +31,5 @@ sys native io.TestProcess.testCommand EXTERNAL runs `haxe compile-each.hxml --ru
 # --- unit on wasm32-wasi ---
 
 unit wasm unit.teststd.sys.net.TestSocket TARGET wasm32-wasi has no sockets (docs/hxmc.md, "Targets"): binding one fails with "Function not implemented"
+unit wasm unit.TestExceptions.testExceptionStack TARGET no call stacks on wasm32-wasi: a module cannot walk its own stack (no frame records, the engine's stack is not readable from WASI), so haxe.CallStack and exception stacks are empty (docs/hxmc.md, "Debugging")
+unit wasm unit.teststd.haxe.TestCallStack.test TARGET no call stacks on wasm32-wasi (as TestExceptions.testExceptionStack): haxe.CallStack.exceptionStack() is empty

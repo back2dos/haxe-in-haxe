@@ -36,9 +36,17 @@ class Types {
 	public static inline var T_NATIVE_REFS = 27; // a C resource (slot 0) and references
 	// a Date: a record of one slot, the milliseconds since the epoch (a double: MemRepr.dateOf)
 	public static inline var T_DATE = 15;
+	// Math's class value: an extern class the runtime implements, named
+	// (Type.getClassName, resolveClass); no instance has it (one of the free
+	// indices, 28 to 31)
+	public static inline var T_MATH = 28;
 	public static inline var T_FIRST = 32;
 	// (the header of an object the collector copied)
 	public static inline var T_FWD = 0xFFFF;
+	// a closure type's tag: a Dynamic converted to a function type (hxmc.ir.Facts, Dyn.unadapt)
+	public static inline var TAG_DYN_ADAPTER = 1;
+	// and a closure converted to another function type (Lower.adapter)
+	public static inline var TAG_ADAPTER = 2;
 	// object kinds: what Mem.alloc makes (K_OBJ a record, else an array of
 	// 8-byte slots), and how the collector scans (kind)
 	public static inline var K_OBJ = 0;
