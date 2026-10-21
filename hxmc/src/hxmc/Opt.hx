@@ -571,6 +571,7 @@ class Opt {
 	function knownPhiArgs() {
 		var vals = f.vals;
 		var boolMemo = new Map<Int, Bool>();
+		var assumed:Array<Int> = []; // (the phis the query under way took as booleans)
 		function isBool(v:Int, depth:Int):Bool {
 			var x = vals[v];
 			switch x.op {
@@ -580,6 +581,7 @@ class Opt {
 					var m = boolMemo.get(v);
 					if (m != null) return m;
 					boolMemo.set(v, true); // (a cycle through phis: assumed, checked by the other operands)
+					assumed.push(v);
 					var r = true;
 					for (a in x.args)
 						if (!isBool(a, depth + 1)) {
@@ -591,6 +593,18 @@ class Opt {
 				case _: return false;
 			}
 		}
+		// (a phi found a boolean while a phi of its cycle was only assumed one
+		// is not one when that one is not: `a = c ? a : 5` in a loop makes the
+		// loop's phi(1, a) no boolean, yet a query of a found it one; a query
+		// that fails forgets the phis it found booleans)
+		function isBoolQuery(v:Int):Bool {
+			var r = isBool(v, 0);
+			if (!r)
+				for (a in assumed)
+					if (boolMemo.get(a) == true) boolMemo.remove(a);
+			assumed.resize(0);
+			return r;
+		}
 		for (b in f.blocks)
 			for (i in b.ins) {
 				if (i.op != Phi) break;
@@ -600,7 +614,7 @@ class Opt {
 					if (p.preds.length != 1 || p.handler) continue;
 					var t = p.preds[0].term();
 					if (t == null || t.op != Br || t.a != i.args[k] || t.targets[0] == t.targets[1]) continue;
-					var known = if (t.targets[1] == p) 0 else if (t.targets[0] == p && isBool(i.args[k], 0)) 1 else -1;
+					var known = if (t.targets[1] == p) 0 else if (t.targets[0] == p && isBoolQuery(i.args[k])) 1 else -1;
 					if (known < 0) continue;
 					var c = new MIns(Const, I32);
 					c.id = vals.length;
