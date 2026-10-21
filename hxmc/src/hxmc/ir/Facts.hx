@@ -549,7 +549,13 @@ class Facts {
 						}
 						gc = gc || GcPoints.gcPoint(e) != 0;
 					case ECallHost(n, _, _):
+						// (a safe region is no GC point of the function itself: it
+						// blocks, f.blocks, which its callers take as one, GcPoints)
 						if (n == "rt_blocking_enter") here = true;
+						if (n == "rt_blocking_enter" || n == "rt_blocking_leave") {
+							Facts.iterEx(ex, e);
+							return;
+						}
 						if (n == "hxmc_unsafe_Mem_addr") addr = true;
 						gc = gc || GcPoints.gcPoint(e) != 0;
 					case EFieldAddr(_):
@@ -759,10 +765,21 @@ class GcPoints {
 	// GC point of an expression; 2: operands are read after an allocation
 	public static function gcPoint(e:Ex):Int
 		return switch e {
-			case ECall(f, _) if (f.noGc): 0;
+			// (a no-GC function that enters a safe region, f.blocks: another
+			// thread may collect meanwhile, as at rt_blocking_enter below)
+			case ECall(f, _) if (f.noGc && !f.blocks): 0;
 			case ECall(_) | ECallDispatch(_) | ECallClos(_) | ECallAnon(_) | EBox(_) | EAnonGet(_) | EArrGet(TRef(RAny), _, _) | EArrGetU(TRef(RAny), _, _): 1;
 			// (a NativeArray literal: its elements stored after the allocation, MirBuild)
 			case ECallHost("hxmc_narray_lit", _, _): 2;
+			// (a safe region the runtime's code enters and leaves itself,
+			// Leaf.rt_blocking_enter and rt_blocking_leave, @:hxmc.fast C
+			// functions: another thread may collect, and move what the
+			// references point to, until it is left; the references live
+			// across it are in their slots before, and read back after.
+			// Without that, WinSys.fileRead copied a pipe's data into a
+			// Bytes the collection had moved, its old copy, and the
+			// reader lost it: the Windows corpus check)
+			case ECallHost("rt_blocking_enter" | "rt_blocking_leave", _, _): 1;
 			case ECallHost(n, _, _): FnLower.noGcHost(n) ? 0 : 1;
 			case ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): 2;
 			case _: 0;
