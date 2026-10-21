@@ -172,17 +172,18 @@ wasm32-wasi.
 
 | Suite | Target | Passed | Skipped: BUG | TARGET | EXTERNAL | Failed |
 | --- | --- | --- | --- | --- | --- | --- |
-| unit | linux-x86_64 | 1510 | 8 | 13 | 0 | 0 |
+| unit | linux-x86_64 | 1519 | 0 | 12 | 0 | 0 |
 | sys | linux-x86_64 | 37 | 0 | 0 | 2 | 0 |
 | threads | linux-x86_64 | 38 | 0 | 0 | 0 | 0 |
-| unit | wasm32-wasi | 1509 | 8 | 14 | 0 | 0 |
+| unit | wasm32-wasi | 1516 | 0 | 15 | 0 | 0 |
 
-The `BUG` entries are the open ones: a class extending `StringBuf` (an
-extern class of the runtime), a dynamic method assigned through an
-interface, a `Reflect.makeVarArgs` function that went through a function
-type, `Reflect.compareMethods` on two closures of an Array method, an enum's
-`haxe.rtti.Meta`, `Math` as a class value and call stacks
-(`haxe.CallStack`).
+No `BUG` entry is left: the last ones (a class extending `StringBuf`, a
+dynamic method assigned through an interface, a `Reflect.makeVarArgs`
+function that went through a function type, `Reflect.compareMethods` on two
+closures of an Array method, an enum's `haxe.rtti.Meta`, `Math` as a class
+value, call stacks) are fixed, each with a corpus case. On wasm32-wasi the
+two call-stack tests are `TARGET` skips: a module cannot read its own stack
+(docs/hxmc.md, "Call stacks").
 
 ## The runtime's symbols
 

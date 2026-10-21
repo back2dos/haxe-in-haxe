@@ -84,6 +84,13 @@ class Dyn {
 		Mem.setPtr(c, 16, Ptr.nil());
 		Mem.setI32(c, 24, -1);
 		var f = findField(ty, fid);
+		// (a dynamic method's field, null before first use: not cached, the
+		// slow paths read it, anonGetSlow)
+		if (!f.isNull() && !findMethod(ty, fid).isNull()) {
+			Mem.setI32(c, 4, -1);
+			Mem.setI8(c, 8, 0);
+			return;
+		}
 		if (!f.isNull()) {
 			Mem.setI32(c, 4, fSlot(f) + 1);
 			Mem.setI8(c, 8, fKind(f));
@@ -266,8 +273,13 @@ class Dyn {
 		if (t == T_NATIVE_ARRAY) return null;
 		var ty = ty(t);
 		var f = findField(ty, fid);
-		if (!f.isNull()) return boxSlot(o, fSlot(f), fKind(f));
 		var m = findMethod(ty, fid);
+		if (!f.isNull()) {
+			var v = boxSlot(o, fSlot(f), fKind(f));
+			// (a field and a method of one name: a dynamic method, whose field
+			// is null until first use or assignment, FnLower.dynMethod: the method)
+			return Str.isNull(v) && !m.isNull() ? boundMethod(o, m) : v;
+		}
 		if (!m.isNull()) return boundMethod(o, m);
 		var i = overflowFind(o, fid);
 		return i >= 0 ? Mem.getRefAt(Mem.addr(Mem.getRef(Mem.addr(o), 0)), 0, i + 1) : null;
@@ -471,7 +483,21 @@ class Dyn {
 	@:hxmc.export("hx_dyn_set") static function dynSet(o:Dynamic, name:String, v:Dynamic):Void
 		anonSetSlow(o, fid(name), v);
 
+	// the Dynamic a closure adapts to a function type (Lower.dynAdapter: its
+	// capture), else f: called dynamically, it takes every argument, not
+	// the function type's (a Reflect.makeVarArgs function typed String ->
+	// String and passed on as Dynamic: upstream's Issue12028)
+	@:hxmc.noGc static function unadapt(f:Dynamic):Dynamic {
+		while (!Str.isNull(f) && tindex(f) >= T_FIRST) {
+			var t = ty(tindex(f));
+			if (tk(t) != TK_CLOSURE || tag(t) != TAG_DYN_ADAPTER) break;
+			f = Mem.getRef(Mem.addr(f), 8);
+		}
+		return f;
+	}
+
 	@:hxmc.host("hx_dyn_call") static function dynCall(f:Dynamic, args:Array<Dynamic>):Dynamic {
+		f = unadapt(f);
 		// (Reflect.makeVarArgs's: the arguments as an array of their own)
 		if (closureSig(f) < 0 && Std.isOfType(f, VarArgs)) return (f : VarArgs).f(Str.isNull(args) ? [] : args.copy());
 		if (Str.isNull(args)) return callBoxed(f, [], 0);
@@ -648,6 +674,7 @@ class Dyn {
 		if (ta == T_TYPEOBJ && tb == T_TYPEOBJ) return described(a) == described(b);
 		// (two closures of one method and object: equal, as on Eval and hl)
 		if (ta == tb && ta >= T_FIRST && (tk(ty(ta)) == TK_BOUND || isMethodClosure(ta))) return compareMethods(a, b);
+		if (isAdapter(a) || isAdapter(b)) return compareMethods(a, b);
 		return false;
 	}
 
@@ -1036,7 +1063,7 @@ class Dyn {
 		var nt = Mem.getI32(Mem.sym("rt_ntypes"), 0);
 		for (t in T_FIRST...nt) {
 			var k = tk(ty(t));
-			if ((k == TK_CLASS || k == TK_ENUM) && LibC.strcmp(name(ty(t)), c) == 0) {
+			if ((k == TK_CLASS || k == TK_INTERFACE || k == TK_ENUM) && LibC.strcmp(name(ty(t)), c) == 0) {
 				r = typeObj(t);
 				break;
 			}
@@ -1044,6 +1071,7 @@ class Dyn {
 		LibC.free(c);
 		if (Str.isNull(r) && n == "String") r = typeObj(T_STRING);
 		if (Str.isNull(r) && n == "Date") r = typeObj(T_DATE);
+		if (Str.isNull(r) && n == "Math") r = typeObj(T_MATH);
 		if (Str.isNull(r) && n == "Array") r = typeObj(T_ARRAY);
 		if (Str.isNull(r) && n == "haxe.io.Bytes") r = typeObj(T_BYTES);
 		return r;
@@ -1258,7 +1286,26 @@ class Dyn {
 		return Mem.getU8(nm, 0) == "<".code && Mem.getU8(nm, 1) == "m".code;
 	}
 
+	// what an adapter converts to its function type (Lower.adapter,
+	// dynAdapter: its capture), else f
+	@:hxmc.noGc static function peel(f:Dynamic):Dynamic {
+		while (isAdapter(f))
+			f = Mem.getRef(Mem.addr(f), 8);
+		return f;
+	}
+
+	@:hxmc.noGc static function isAdapter(f:Dynamic):Bool {
+		if (Str.isNull(f) || tindex(f) < T_FIRST) return false;
+		var t = ty(tindex(f));
+		return tk(t) == TK_CLOSURE && (tag(t) == TAG_ADAPTER || tag(t) == TAG_DYN_ADAPTER);
+	}
+
 	@:hxmc.noGc public static function compareMethods(a:Dynamic, b:Dynamic):Bool {
+		if (Mem.addr(a) == Mem.addr(b)) return true;
+		// (two adapters of one method, `a.push` made where it is used: that
+		// method's; upstream's TestReflect)
+		a = peel(a);
+		b = peel(b);
 		if (Mem.addr(a) == Mem.addr(b)) return true;
 		if (Str.isNull(a) || Str.isNull(b) || tindex(a) != tindex(b)) return false;
 		if (tk(ty(tindex(a))) == TK_BOUND) {
