@@ -96,6 +96,14 @@ class Str {
 		// UTF-16 units first
 		var units = 0, i = from;
 		while (i < end) {
+			#if !hxmc.wasm_gc
+			// (four ASCII bytes at a time)
+			if (i + 4 <= end && Mem.getI32(o.at(i), 0) & 0x80808080 == 0) {
+				units += 4;
+				i += 4;
+				continue;
+			}
+			#end
 			var b = o.get(i);
 			if (b < 0x80) {
 				units++;
@@ -116,6 +124,19 @@ class Str {
 		var j = 0;
 		i = from;
 		while (i < end) {
+			#if !hxmc.wasm_gc
+			// (four ASCII bytes at a time: two units per store)
+			if (i + 4 <= end) {
+				var x = Mem.getI32(o.at(i), 0);
+				if (x & 0x80808080 == 0) {
+					Mem.setI32(d.at(j), 0, (x & 0xFF) | ((x & 0xFF00) << 8));
+					Mem.setI32(d.at(j + 2), 0, ((x >>> 16) & 0xFF) | ((x >>> 8) & 0xFF0000));
+					i += 4;
+					j += 4;
+					continue;
+				}
+			}
+			#end
 			var b = o.get(i);
 			if (b < 0x80) {
 				d.set(j++, b);

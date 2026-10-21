@@ -133,6 +133,9 @@ class Lower {
 		for (t in types)
 			switch t {
 				case TClassDecl(c) if (!c.hasClassFlag(CExtern) && !(c.clPath.pack.length > 0 && c.clPath.pack[0] == "hxmc")):
+					// a class's __init__ runs at startup whether or not code uses the
+					// class (initClass, otherwise made when a static is used)
+					if (c.clInit != null) initClass(c);
 					for (cf in c.clOrderedStatics)
 						if (cf.cfMeta.length > 0 && cf.cfKind.match(Method(_)) && hasMeta(":hxmc.export", cf.cfMeta)) {
 							var n = metaString(":hxmc.export", cf.cfMeta);

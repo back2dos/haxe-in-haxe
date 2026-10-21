@@ -1203,20 +1203,24 @@ class MirBuild {
 		}
 	}
 
-	// rt_set_ptr(obj, slot, val)
+	// rt_set_ptr(obj, slot, val): the runtime's part (GcPaths.barrierSlow)
+	// only for a young value stored into an object that is not young (a
+	// value that is null or old, the common store into an old object, needs
+	// nothing)
 	function setPtr(obj:Int, slot:Int, val:Int, cls = 0) {
 		var prev = loadM(cls, I64, 8, slot, 0);
 		storeM(cls, 8, slot, 0, val);
 		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
 		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
 		var size = op2(Sub, I64, ye, ys);
-		var done = newBlock();
-		var b2 = newBlock();
-		b2.cold = true;
-		// the object is not young: the rest in the runtime (rthxmc.c)
-		br(cmp(CULt, op2(Sub, I64, obj, ys), size), done, b2);
-		seal(b2);
-		cur = b2;
+		var check = newBlock(), slow = newBlock(), done = newBlock();
+		slow.cold = true;
+		br(cmp(CULt, op2(Sub, I64, val, ys), size), check, done);
+		seal(check);
+		cur = check;
+		br(cmp(CULt, op2(Sub, I64, obj, ys), size), done, slow);
+		seal(slow);
+		cur = slow;
 		call("hxmc_barrier_slow", vector(obj, slot, val, prev), Void);
 		jmp(done);
 		seal(done);
