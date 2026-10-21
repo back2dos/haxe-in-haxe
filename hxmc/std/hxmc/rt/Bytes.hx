@@ -8,12 +8,14 @@ import hxmc.unsafe.LibC;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
-// haxe.io.Bytes, BytesBuffer and FPHelper natives (formerly in rt_std.c),
-// written over hxmc.rt.Repr for both runtimes (@:hxmc.anyHeap). In linear
-// memory Bytes is K_RAW, int32 length, the bytes from offset 8, and
-// BytesBuffer (T_BYTESBUFFER) slot 0 the length, slot 1 a Bytes (its
-// capacity); under -D hxmc.wasm-gc a Bytes is an array of bytes whose
-// accessors are instructions (hxmc.wasmgc.FuncGen).
+// haxe.io.Bytes's natives (hxmc.NativeBytes), BytesBuffer's and FPHelper's
+// (formerly in rt_std.c), written over hxmc.rt.Repr for both runtimes
+// (@:hxmc.anyHeap). They take and make haxe.io.BytesData, which a
+// haxe.io.Bytes wraps: in linear memory NativeArray storage of bytes
+// (NativeArray<hxmc.Byte>: T_BYTES, its length in its header, the bytes from
+// offset 0); under -D hxmc.wasm-gc an array of bytes, some accessors of which
+// are instructions (hxmc.wasmgc.FuncGen). BytesBuffer (T_BYTESBUFFER): slot 0
+// the length, slot 1 its storage (its capacity).
 @:keep @:allow(hxmc) @:hxmc.anyHeap
 class Bytes {
 	static inline function len(b:Dynamic):Int
@@ -21,7 +23,7 @@ class Bytes {
 
 	// linear memory's: the address of the bytes (valid until the next GC point)
 	static inline function bytes(b:Dynamic):Ptr
-		return Mem.addr(b).add(8);
+		return Mem.addr(b);
 
 	static inline function outside()
 		Repr.fail("OutsideBounds");
@@ -30,39 +32,19 @@ class Bytes {
 	static function allocUninit(n:Int):Dynamic
 		return Repr.bytesAllocUninit(n);
 
-	#if !(hxmc.wasm_gc)
-	// zeroed, as hxc's rt_alloc and the other targets leave them (the API
-	// leaves the contents unspecified, but programs read them: the crypto
-	// library's Sha512 pads its blocks with Bytes.alloc's zeros); a nursery
-	// reused after a minor collection holds the bytes of dead objects
-	@:hxmc.host("haxe_io_Bytes_alloc") static function alloc(n:Int):Dynamic {
-		var b = Mem.alloc((n + 15) >> 3, T_BYTES, K_RAW);
-		Mem.setI32(Mem.addr(b), 0, n);
-		return b;
-	}
-
-	@:hxmc.host("haxe_io_Bytes_get_length") @:hxmc.noGc static function getLength(b:Dynamic):Int
-		return len(b);
-
-	@:hxmc.host("haxe_io_Bytes_get") @:hxmc.noGc static function get(b:Dynamic, pos:Int):Int
-		return Mem.getU8At(Mem.addr(b), 8, pos);
-
-	@:hxmc.host("haxe_io_Bytes_set") @:hxmc.noGc static function set(b:Dynamic, pos:Int, v:Int):Void
-		Mem.setU8At(Mem.addr(b), 8, pos, v);
-	#else
+	// zeroed storage (WasmGC's arrays start zeroed)
 	static inline function alloc(n:Int):Dynamic
-		return haxe.io.Bytes.alloc(n);
-	#end
+		return #if (hxmc.wasm_gc) Repr.bytesAllocUninit(n) #else NArray.alloc(AK_BYTE, n) #end;
 
-	@:hxmc.host("haxe_io_Bytes_blit") static function blit(b:Dynamic, pos:Int, src:Dynamic, srcpos:Int, n:Int):Void {
+	@:hxmc.host("hxmc_NativeBytes_blit") static function blit(b:Dynamic, pos:Int, src:Dynamic, srcpos:Int, n:Int):Void {
 		if (pos < 0 || srcpos < 0 || n < 0 || pos + n > len(b) || srcpos + n > len(src)) outside();
 		Repr.bytesMove(b, pos, src, srcpos, n);
 	}
 
-	@:hxmc.host("haxe_io_Bytes_fill") @:hxmc.noGc static function fill(b:Dynamic, pos:Int, n:Int, v:Int):Void
+	@:hxmc.host("hxmc_NativeBytes_fill") @:hxmc.noGc static function fill(b:Dynamic, pos:Int, n:Int, v:Int):Void
 		Repr.bytesFill(b, pos, n, v);
 
-	@:hxmc.host("haxe_io_Bytes_sub") static function sub(b:Dynamic, pos:Int, n:Int):Dynamic {
+	@:hxmc.host("hxmc_NativeBytes_sub") static function sub(b:Dynamic, pos:Int, n:Int):Dynamic {
 		if (pos < 0 || n < 0 || pos + n > len(b)) outside();
 		var r = allocUninit(n);
 		Repr.bytesCopyFrom(r, b, pos, n);
@@ -70,7 +52,7 @@ class Bytes {
 	}
 
 	// the difference of the first differing bytes, else of the lengths
-	@:hxmc.host("haxe_io_Bytes_compare") @:hxmc.noGc static function compare(a:Dynamic, b:Dynamic):Int {
+	@:hxmc.host("hxmc_NativeBytes_compare") @:hxmc.noGc static function compare(a:Dynamic, b:Dynamic):Int {
 		var na = len(a), nb = len(b);
 		var n = na < nb ? na : nb;
 		var pa = Repr.octets(a), pb = Repr.octets(b);
@@ -79,33 +61,33 @@ class Bytes {
 		return na - nb;
 	}
 
-	@:hxmc.host("haxe_io_Bytes_getUInt16") @:hxmc.noGc static function getUInt16(b:Dynamic, pos:Int):Int
+	@:hxmc.host("hxmc_NativeBytes_getUInt16") @:hxmc.noGc static function getUInt16(b:Dynamic, pos:Int):Int
 		return Repr.octets(b).getU16(pos);
 
-	@:hxmc.host("haxe_io_Bytes_setUInt16") @:hxmc.noGc static function setUInt16(b:Dynamic, pos:Int, v:Int):Void
+	@:hxmc.host("hxmc_NativeBytes_setUInt16") @:hxmc.noGc static function setUInt16(b:Dynamic, pos:Int, v:Int):Void
 		Repr.octets(b).setU16(pos, v);
 
 	#if !(hxmc.wasm_gc)
-	@:hxmc.host("haxe_io_Bytes_getInt32") @:hxmc.noGc static function getInt32(b:Dynamic, pos:Int):Int
+	@:hxmc.host("hxmc_NativeBytes_getInt32") @:hxmc.noGc static function getInt32(b:Dynamic, pos:Int):Int
 		return Mem.getI32(bytes(b), pos);
 
-	@:hxmc.host("haxe_io_Bytes_setInt32") @:hxmc.noGc static function setInt32(b:Dynamic, pos:Int, v:Int):Void
+	@:hxmc.host("hxmc_NativeBytes_setInt32") @:hxmc.noGc static function setInt32(b:Dynamic, pos:Int, v:Int):Void
 		Mem.setI32(bytes(b), pos, v);
 
-	@:hxmc.host("haxe_io_Bytes_getDouble") @:hxmc.noGc static function getDouble(b:Dynamic, pos:Int):Float
+	@:hxmc.host("hxmc_NativeBytes_getDouble") @:hxmc.noGc static function getDouble(b:Dynamic, pos:Int):Float
 		return Mem.getF64(bytes(b), pos);
 
-	@:hxmc.host("haxe_io_Bytes_setDouble") @:hxmc.noGc static function setDouble(b:Dynamic, pos:Int, v:Float):Void
+	@:hxmc.host("hxmc_NativeBytes_setDouble") @:hxmc.noGc static function setDouble(b:Dynamic, pos:Int, v:Float):Void
 		Mem.setF64(bytes(b), pos, v);
 
-	@:hxmc.host("haxe_io_Bytes_getFloat") @:hxmc.noGc static function getFloat(b:Dynamic, pos:Int):Float
+	@:hxmc.host("hxmc_NativeBytes_getFloat") @:hxmc.noGc static function getFloat(b:Dynamic, pos:Int):Float
 		return Mem.getF32(bytes(b), pos);
 
-	@:hxmc.host("haxe_io_Bytes_setFloat") @:hxmc.noGc static function setFloat(b:Dynamic, pos:Int, v:Float):Void
+	@:hxmc.host("hxmc_NativeBytes_setFloat") @:hxmc.noGc static function setFloat(b:Dynamic, pos:Int, v:Float):Void
 		Mem.setF32(bytes(b), pos, v);
 	#end
 
-	@:hxmc.host("haxe_io_Bytes_getString") static function getString(b:Dynamic, pos:Int, n:Int, encoding:Dynamic):String {
+	@:hxmc.host("hxmc_NativeBytes_getString") static function getString(b:Dynamic, pos:Int, n:Int, encoding:Dynamic):String {
 		if (pos < 0 || n < 0 || pos + n > len(b)) outside();
 		#if (hxmc.wasm_gc)
 		return Str.decode(b, pos, pos + n);
@@ -120,10 +102,7 @@ class Bytes {
 		#end
 	}
 
-	@:hxmc.host("haxe_io_Bytes_toString") static function toString(b:Dynamic):String
-		return getString(b, 0, len(b), null);
-
-	@:hxmc.host("haxe_io_Bytes_ofString") static function ofString(s:String, encoding:Dynamic):Dynamic {
+	@:hxmc.host("hxmc_NativeBytes_ofString") static function ofString(s:String, encoding:Dynamic):Dynamic {
 		#if (hxmc.wasm_gc)
 		// (encoded into a buffer kept for this, then copied)
 		var buf = hxmc.rt.gc.GcRepr.scratch(3 * Str.len(s) + 1);
@@ -143,7 +122,7 @@ class Bytes {
 		#end
 	}
 
-	@:hxmc.host("haxe_io_Bytes_toHex") static function toHex(b:Dynamic):String {
+	@:hxmc.host("hxmc_NativeBytes_toHex") static function toHex(b:Dynamic):String {
 		var n = len(b);
 		var s = Str.make(2 * n);
 		var d = Str.chars(s), p = Repr.octets(b);
@@ -157,7 +136,7 @@ class Bytes {
 		return s;
 	}
 
-	@:hxmc.host("haxe_io_Bytes_ofHex") static function ofHex(s:String):Dynamic {
+	@:hxmc.host("hxmc_NativeBytes_ofHex") static function ofHex(s:String):Dynamic {
 		var n = Str.len(s) >> 1;
 		var b = allocUninit(n);
 		var c = Str.chars(s), p = Repr.octets(b);
@@ -205,7 +184,7 @@ class Bytes {
 		Repr.bbSetLen(bb, l + 1);
 	}
 
-	@:hxmc.host("haxe_io_BytesBuffer_addBytes") static function addBytes(bb:Dynamic, b:Dynamic, pos:Int, n:Int):Void {
+	@:hxmc.host("haxe_io_BytesBuffer_addData") static function addBytes(bb:Dynamic, b:Dynamic, pos:Int, n:Int):Void {
 		if (pos < 0 || n < 0 || pos + n > len(b)) outside();
 		reserve(bb, n);
 		var l = bbLen(bb);
@@ -213,7 +192,7 @@ class Bytes {
 		Repr.bbSetLen(bb, l + n);
 	}
 
-	@:hxmc.host("haxe_io_BytesBuffer_add") static function add(bb:Dynamic, b:Dynamic):Void
+	static function add(bb:Dynamic, b:Dynamic):Void
 		addBytes(bb, b, 0, len(b));
 
 	@:hxmc.host("haxe_io_BytesBuffer_addString") static function addString(bb:Dynamic, s:String, encoding:Dynamic):Void
@@ -240,7 +219,7 @@ class Bytes {
 		Repr.bbSetLen(bb, l + 8);
 	}
 
-	@:hxmc.host("haxe_io_BytesBuffer_getBytes") static function getBytes(bb:Dynamic):Dynamic
+	@:hxmc.host("haxe_io_BytesBuffer_getData") static function getBytes(bb:Dynamic):Dynamic
 		return sub(bbData(bb), 0, bbLen(bb));
 
 	// ---- FPHelper (bit patterns: Repr's)

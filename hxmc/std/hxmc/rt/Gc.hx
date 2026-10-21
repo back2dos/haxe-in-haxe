@@ -75,8 +75,9 @@ class Gc {
 	static inline var K_OBJ = 0;
 	static inline var K_PARR = 1;
 	static inline var K_RAW = 2;
-	static inline var K_FWD = 15;
-	static inline var T_NATIVE = 16; // a native handle
+	static inline var T_FWD = 0xFFFF;
+	static inline var T_NATIVE = Types.T_NATIVE; // a native handle
+	static inline var T_NATIVE_REFS = Types.T_NATIVE_REFS; // one holding references
 	static inline var MINOR_MAX = 256 << 20;
 	static inline var MINOR_MIN = 4 << 20; // per allocating thread
 	static inline var FLOOR_MAX = 32 << 20;
@@ -202,24 +203,46 @@ class Gc {
 	static var gcBfs:Bool;
 	static var major:Bool; // which forwarding runs
 
-	// ---- objects (the header word at -8; slot count bits 0..27, kind
-	// 28..31, type index 32..47)
+	// ---- objects: the header at -8, its type index first (Types), which says
+	// what the rest is (a record's slots, an array's words and length, a
+	// string's hash and length) and how to scan; forwarded: T_FWD, the copy's
+	// address in slot 0 (every object on the heap has one: an empty string or
+	// NativeArray is the static one)
 
-	static inline function hdrLo(p:Ptr):Int
+	// the header's first word: the type index, then a record's slots or an array's words
+	static inline function hdrW0(p:Ptr):Int
 		return Mem.getI32(p, -8);
 
-	static inline function nslotsOf(p:Ptr):Int
-		return hdrLo(p) & 0x0FFFFFFF;
+	static inline function isFwd(w0:Int):Bool
+		return w0 & 0xFFFF == T_FWD;
 
+	// a forwarded object's copy
+	static inline function fwdAddr(p:Ptr):Ptr
+		return Mem.getPtr(p, 0);
+
+	static inline function setFwd(p:Ptr, n:Ptr) {
+		Mem.setI16(p, -8, T_FWD);
+		Mem.setPtr(p, 0, n);
+	}
+
+	// p's payload words, the header's first word w0 (Types.wordsAt: the
+	// length read only for a large array)
+	static inline function wordsOf(p:Ptr, w0:Int):Int
+		return Types.wordsAt(p, w0);
+
+	static inline function nslotsOf(p:Ptr):Int
+		return wordsOf(p, hdrW0(p));
+
+	// how p is scanned: K_OBJ by its pointer map, K_PARR every slot, K_RAW not at all
 	static inline function kindOf(p:Ptr):Int
-		return (hdrLo(p) >>> 28) & 15;
+		return Types.kindOfWord(hdrW0(p));
 
 	static inline function objBytes(p:Ptr):Int
 		return 8 * (nslotsOf(p) + 1);
 
 	// the type's pointer map (a bit per slot), or null
 	static inline function ptrmapOf(p:Ptr):Ptr
-		return Types.ptrmap(Types.ty(Mem.getU16(p, -4)));
+		return Types.ptrmap(Types.ty(Mem.getU16(p, -8)));
 
 	static inline function isPtrSlot(pm:Ptr, i:Int):Bool
 		return ((Mem.getI32At(pm, 0, i >> 5) >>> (i & 31)) & 1) != 0;
@@ -252,12 +275,13 @@ class Gc {
 
 	// (inline in the drain loops: no call per copied object)
 	static inline function copyIn(p:Ptr):Ptr {
-		var lo = hdrLo(p);
-		return if ((lo >>> 28) & 15 == K_FWD) Mem.getPtr(p, 0) else copyTo(p, lo);
+		var w0 = hdrW0(p);
+		return if (isFwd(w0)) fwdAddr(p) else copyTo(p, wordsOf(p, w0));
 	}
 
-	static inline function copyTo(p:Ptr, lo:Int):Ptr {
-		var words = (lo & 0x0FFFFFFF) + 1;
+	// p (its payload's words: n) copied
+	static inline function copyTo(p:Ptr, n:Int):Ptr {
+		var words = n + 1;
 		var dst = oldPtr, s = p.add(-8);
 		if (words <= 8) { // most objects: a few words, no call (unrolled)
 			do {
@@ -281,8 +305,7 @@ class Gc {
 			LibC.memcpy(dst, s, (words : I64) << 3);
 		oldPtr = dst.add(words << 3);
 		var n = dst.add(8);
-		Mem.setI32(p, -8, (lo & 0x0FFFFFFF) | (K_FWD << 28));
-		Mem.setPtr(p, 0, n);
+		setFwd(p, n);
 		return n;
 	}
 
@@ -319,13 +342,14 @@ class Gc {
 			if (gcTop + SMALL_SLOTS + 1 > gcCap) reserve(gcTop + SMALL_SLOTS + 1);
 			var top = gcTop - 1;
 			var o = Mem.getPtr(gcStack, top << 4);
-			var lo = hdrLo(o);
-			if (lo & 0x0FFFFFFF > SMALL_SLOTS)
+			var w0 = hdrW0(o);
+			var n = wordsOf(o, w0);
+			if (n > SMALL_SLOTS)
 				scanLarge(o);
 			else {
 				// (gcTop: where its children go, until they are reversed)
 				gcTop = top;
-				pushed(scanYoung(o, lo, top));
+				pushed(scanYoung(o, w0, n, top));
 			}
 		}
 	}
@@ -339,16 +363,17 @@ class Gc {
 		if (gcTop + LARGE_SLICE > gcCap) reserve(gcTop + LARGE_SLICE);
 		var at = gcTop - 1;
 		var e = gcStack.add(at << 4);
-		var lo = hdrLo(o);
-		var n = lo & 0x0FFFFFFF;
+		var w0 = hdrW0(o);
+		var n = wordsOf(o, w0);
+		var k = Types.kindOfWord(w0);
 		var pm = Ptr.nil();
-		if (lo >>> 28 == K_OBJ) {
+		if (k == K_OBJ) {
 			pm = ptrmapOf(o);
 			if (pm.isNull()) {
 				gcTop = at;
 				return;
 			}
-		} else if (lo >>> 28 != K_PARR) { // (raw: a root fwdRoot pushed)
+		} else if (k != K_PARR) { // (raw: a root fwdRoot pushed)
 			gcTop = at;
 			return;
 		}
@@ -363,7 +388,6 @@ class Gc {
 		var top = gcTop;
 		var i = from;
 		if (pm.isNull()) {
-			if (i == 0 && Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY) i = 1;
 			while (i < to) {
 				top = minorSlot(o, i, top);
 				i++;
@@ -378,12 +402,11 @@ class Gc {
 
 	static inline var LARGE_SLICE = 256;
 
-	// o's young children copied, pushed from gcStack[top] (which has room
-	// for all of them): the new top
-	static inline function scanYoung(o:Ptr, lo:Int, top:Int):Int {
+	// o's young children copied (its header's first word w0, its words n),
+	// pushed from gcStack[top] (which has room for all of them): the new top
+	static inline function scanYoung(o:Ptr, w0:Int, n:Int, top:Int):Int {
 		var t = top;
-		var n = lo & 0x0FFFFFFF;
-		var k = lo >>> 28;
+		var k = Types.kindOfWord(w0);
 		if (k == K_OBJ) {
 			// (at most SMALL_SLOTS slots: one word of the map)
 			var pm = ptrmapOf(o);
@@ -395,7 +418,7 @@ class Gc {
 				i++;
 			}
 		} else if (k == K_PARR) {
-			var i = Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY ? 1 : 0;
+			var i = 0;
 			while (i < n) {
 				t = minorSlot(o, i, t);
 				i++;
@@ -426,12 +449,12 @@ class Gc {
 		var t = top;
 		var v = Ptr.ofI64(Mem.getI64At(o, 0, i));
 		if (!v.ult(youngStart) && v.ult(youngEnd)) {
-			var vlo = hdrLo(v);
-			if (vlo >>> 28 == K_FWD)
-				Mem.setI64At(o, 0, i, Mem.getI64(v, 0));
+			var vw0 = hdrW0(v);
+			if (isFwd(vw0))
+				Mem.setI64At(o, 0, i, fwdAddr(v).toI64());
 			else {
 				// (copyTo, without the call of memcpy)
-				var words = (vlo & 0x0FFFFFFF) + 1;
+				var words = wordsOf(v, vw0) + 1;
 				var dst = oldPtr;
 				if (words <= 8) {
 					do {
@@ -460,10 +483,9 @@ class Gc {
 				}
 				oldPtr = dst.add(words << 3);
 				var nv = dst.add(8);
-				Mem.setI32(v, -8, (vlo & 0x0FFFFFFF) | (K_FWD << 28));
-				Mem.setPtr(v, 0, nv);
+				setFwd(v, nv);
 				Mem.setI64At(o, 0, i, nv.toI64());
-				if (vlo >>> 28 == K_OBJ || vlo >>> 28 == K_PARR) {
+				if (!Types.isRawArray(vw0)) {
 					Mem.setPtr(gcStack, t << 4, nv);
 					Mem.setI32(gcStack, (t << 4) + 8, 0);
 					t++;
@@ -486,8 +508,8 @@ class Gc {
 	static inline function drainWith(maj:Bool) {
 		while (gcTop > 0) {
 			var o = Mem.getPtr(gcStack, (gcTop - 1) << 4);
-			var lo = hdrLo(o);
-			var k = lo >>> 28; // (never forwarded: copied just now)
+			var w0 = hdrW0(o); // (never forwarded: copied just now)
+			var k = Types.kindOfWord(w0);
 			var pm = Ptr.nil();
 			if (k != K_PARR) {
 				if (k != K_OBJ) { // K_RAW: no references
@@ -500,9 +522,8 @@ class Gc {
 					continue;
 				}
 			}
-			var n = lo & 0x0FFFFFFF;
+			var n = wordsOf(o, w0);
 			var i = Mem.getI32(gcStack, ((gcTop - 1) << 4) + 8);
-			if (i == 0 && k == K_PARR && Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY) i = 1;
 			var pushed = false;
 			while (i < n) {
 				if (!pm.isNull() && (Mem.getI32At(pm, 0, i >> 5) >>> (i & 31)) & 1 == 0) {
@@ -517,13 +538,13 @@ class Gc {
 					if (!maj) continue;
 					if (v.ult(fromStart) || !v.ult(fromEnd)) continue;
 				}
-				var vlo = hdrLo(v);
-				if ((vlo >>> 28) & 15 == K_FWD) {
-					Mem.setI64At(o, 0, i - 1, Mem.getI64(v, 0));
+				var vw0 = hdrW0(v);
+				if (isFwd(vw0)) {
+					Mem.setI64At(o, 0, i - 1, fwdAddr(v).toI64());
 					continue;
 				}
 				// copied now: its subtree next
-				var nv = copyTo(v, vlo);
+				var nv = copyTo(v, wordsOf(v, vw0));
 				Mem.setI64At(o, 0, i - 1, nv.toI64());
 				Mem.setI32(gcStack, ((gcTop - 1) << 4) + 8, i);
 				push(nv);
@@ -578,7 +599,7 @@ class Gc {
 					w++;
 				}
 			case K_PARR:
-				for (i in (Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY ? 1 : 0)...n) {
+				for (i in 0...n) {
 					var v = Mem.getPtr(o, 8 * i);
 					if (!v.isNull()) Mem.setPtr(o, 8 * i, fwdAs(v, root));
 				}
@@ -691,7 +712,7 @@ class Gc {
 	// alone by the collector); freeFn(p) (a no-GC @:hxmc.callback or a C
 	// function) frees p once it is unreachable
 	@:hxmc.host("rt_native_new_refs") static function nativeNew(p:Ptr, freeFn:Ptr, nrefs:Int):Dynamic {
-		var o:Dynamic = Mem.alloc(1 + nrefs, T_NATIVE, nrefs > 0 ? K_PARR : K_RAW);
+		var o:Dynamic = nrefs > 0 ? Mem.alloc(1 + nrefs, T_NATIVE_REFS, K_PARR) : Mem.alloc(1, T_NATIVE, K_RAW);
 		nativeRegister(o, p, freeFn);
 		return o;
 	}
@@ -721,7 +742,7 @@ class Gc {
 			var e = natives.add(24 * i);
 			var o = Mem.getPtr(e, 0);
 			if (inYoung(o) || (!o.ult(lo) && o.ult(hi))) {
-				if (kindOf(o) != K_FWD) {
+				if (!isFwd(hdrW0(o))) {
 					if (ndead == deadCap) {
 						deadCap = deadCap == 0 ? 64 : deadCap * 2;
 						deadNatives = LibC.realloc(deadNatives, (deadCap : I64) * 24);
@@ -730,7 +751,7 @@ class Gc {
 					ndead++;
 					continue;
 				}
-				o = Mem.getPtr(o, 0);
+				o = fwdAddr(o);
 			}
 			var d = natives.add(24 * live);
 			if (d != e) LibC.memcpy(d, e, 24);
@@ -806,7 +827,7 @@ class Gc {
 			var i = nfinals;
 			while (i-- > 0) {
 				var v = Mem.getPtr(finals, 16 * i + 8);
-				if ((inYoung(v) || inFrom(v)) && kindOf(v) != K_FWD) {
+				if ((inYoung(v) || inFrom(v)) && !isFwd(hdrW0(v))) {
 					if (finalQlen == finalQcap) {
 						finalQcap = finalQcap == 0 ? 64 : finalQcap * 2;
 						finalQueue = LibC.realloc(finalQueue, (finalQcap : I64) * 16);
@@ -819,7 +840,7 @@ class Gc {
 			for (i in 0...nfinals)
 				if (!Mem.getPtr(finals, 16 * i).isNull()) {
 					var v = Mem.getPtr(finals, 16 * i + 8);
-					if (inYoung(v) || inFrom(v)) v = Mem.getPtr(v, 0);
+					if (inYoung(v) || inFrom(v)) v = fwdAddr(v);
 					Mem.setPtr(finals, 16 * live, Mem.getPtr(finals, 16 * i));
 					Mem.setPtr(finals, 16 * live + 8, v);
 					live++;
@@ -1629,7 +1650,6 @@ class Gc {
 					if (pm.isNull() || !isPtrSlot(pm, i)) continue;
 				} else if (k != K_PARR)
 					break;
-				if (i == 0 && Mem.getU16(o, -4) == Types.T_NATIVE_ARRAY) continue;
 				var c = Mem.getPtr(o, 8 * i);
 				if (!inHeap(c)) continue;
 				if (sp == cap) {

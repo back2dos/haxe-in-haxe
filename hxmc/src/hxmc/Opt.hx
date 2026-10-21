@@ -27,13 +27,13 @@ using core.ds.VectorTools;
 class Opt {
 	// memory classes (MIns.mem)
 	public static inline var MOther = 0; // anything: written by any store or call
-	public static inline var MHdr = 1; // array headers (length, kind, data)
+	public static inline var MHdr = 1; // array headers (length, kind, storage)
 	public static inline var MElem = 2; // array elements
 	public static inline var MField = 3; // object fields
 	public static inline var MGlobal = 4; // global variables
 	public static inline var MCallOnly = 5; // changed only by calls (rt_globals, the nursery bounds, inline caches)
 	public static inline var MFrame = 6; // shadow-stack slots (calls may move what they hold)
-	public static inline var MConst = 7; // never written (type tables, string lengths, object type indices)
+	public static inline var MConst = 7; // never written (type tables, string and NativeArray lengths, object type indices)
 	public static inline var MInit = 8; // stores initializing a fresh object (no load can see it before)
 	static inline var MTls = 9; // thread-local variables (TlsLoad)
 	// object fields by displacement (8 buckets): a field store at one

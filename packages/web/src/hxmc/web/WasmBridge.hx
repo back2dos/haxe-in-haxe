@@ -39,7 +39,7 @@ class WasmBridge {
 	// the n bytes at p, copied
 	public static function bytesIn(p:Int, n:Int):Bytes {
 		var b = Bytes.alloc(n);
-		copy(Mem.addr(b).add(8), Ptr.ofI64((p : I64)), n);
+		copy(Mem.addr(b.getData()), Ptr.ofI64((p : I64)), n);
 		return b;
 	}
 
@@ -49,7 +49,7 @@ class WasmBridge {
 		var n = b.length;
 		var p = LibC.malloc(((n + 4) : I64));
 		Mem.setI32(p, 0, n);
-		copy(p.add(4), Mem.addr(b).add(8), n);
+		copy(p.add(4), Mem.addr(b.getData()), n);
 		return p.toI64().toInt();
 	}
 

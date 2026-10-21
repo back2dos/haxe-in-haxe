@@ -174,13 +174,14 @@ class DataGen {
 		for (s in e.strOrder) {
 			var n = e.strNames.get(s);
 			var units = [for (i in 0...s.length) s.charCodeAt(i)];
-			var nslots = Std.int((8 + 2 * units.length + 7) / 8);
 			data.buf.align(8);
-			obj.define(n, data, data.buf.len, 8 + 8 + 2 * (units.length + 1), true);
-			// MKHDR(nslots, K_RAW, T_STRING)
-			data.buf.u64(nslots | (Abi.K_RAW << 28), 1);
+			obj.define(n, data, data.buf.len, 8 + 4 + 2 * (units.length + 1), true);
+			// the header (hxmc.rt.Types): T_STRING, its words, its hash (as
+			// Str.hash computes it); the length, the units, then a 0 unit
+			var words = (units.length + 5) >> 2;
+			data.buf.u32(Abi.T_STRING | ((words < 0xFFFF ? words : 0xFFFF) << 16));
+			data.buf.u32(hxmc.ir.FnLower.strHash(s));
 			data.buf.u32(s.length);
-			data.buf.u32(0);
 			for (u in units)
 				data.buf.u16(u);
 			data.buf.u16(0);
@@ -332,7 +333,7 @@ class DataGen {
 				for (f in fs) {
 					rodata.buf.u32(e.fid(f.name));
 					rodata.buf.u32(f.slot);
-					rodata.buf.u32(kindChar(f.ty));
+					rodata.buf.u32(f.kind != null ? f.kind : kindChar(f.ty));
 				}
 			}
 			var ms = t.methods.copy();
@@ -411,8 +412,9 @@ class DataGen {
 		for (l in p.lambdas)
 			if (l.captures.length == 0) {
 				data.buf.align(8);
-				data.buf.u32(1 | (Abi.K_OBJ << 28));
-				data.buf.u32(l.tindex);
+				// (a record of one slot, its hash 0: hxmc.rt.Types)
+				data.buf.u32((1 << 16) | l.tindex);
+				data.buf.u32(0);
 				obj.define(prep.closureSym(l), data, data.buf.len, 8, true);
 				ptr(data, e.symbol(l.fn));
 			}
@@ -521,8 +523,8 @@ class DataGen {
 	}
 
 	// the empty NativeArrays the program refers to (MirBuild.EMPTY_ARRAY), in
-	// .data as string literals are: MKHDR(1, K_RAW, T_NATIVE_ARRAY), length 0,
-	// the kind
+	// .data as string literals are: the header (Types: length 0, the type of
+	// the kind), a zero slot
 	public function emptyArrays(objs:Array<Obj>) {
 		var names = new Map<String, Bool>();
 		for (o in objs.concat([obj]))
@@ -533,9 +535,8 @@ class DataGen {
 		for (n in list) {
 			data.buf.align(8);
 			obj.define(n, data, data.buf.len, 16, true);
-			data.buf.u64(1 | (Abi.K_RAW << 28), Abi.T_NATIVE_ARRAY);
-			data.buf.u32(0);
-			data.buf.u32(Std.parseInt(n.substr(MirBuild.EMPTY_ARRAY.length)));
+			data.buf.u64(MirBuild.naType(Std.parseInt(n.substr(MirBuild.EMPTY_ARRAY.length))), 0);
+			data.buf.u64(0, 0);
 		}
 	}
 

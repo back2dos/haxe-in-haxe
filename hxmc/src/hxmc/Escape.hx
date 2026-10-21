@@ -461,11 +461,12 @@ class Escape {
 		if (!part("screen")) sure = new Vector<Bool>(all.length); // (debugging: everything analyzed)
 		for (i in tindex)
 			if (sure[root(exact[i.a])]) {
+				// (the type index: the header word's low 16 bits, a record's slots above them)
 				var tc = constOf(all[exact[i.a]].ty.c);
 				i.op = Const;
 				i.a = -1;
 				i.sym = tc.sym;
-				i.imm = tc.imm;
+				i.imm = tc.imm & 0xFFFF;
 				i.imm2 = tc.imm2;
 				i.size = 0;
 				i.mem = 0;
@@ -557,10 +558,12 @@ class Escape {
 							tls = i;
 							bytes = c.imm;
 						}
-					case Store if (i.a == ptr.id && i.b < 0 && i.size == 4 && i.imm == 0 && hdr == null):
-						hdr = i;
-					case Store if (i.a == ptr.id && i.b < 0 && i.size == 4 && i.imm == 4 && ty == null):
+					// (the header, hxmc.rt.Types: its first word the type index and
+					// slots, then the hash)
+					case Store if (i.a == ptr.id && i.b < 0 && i.size == 4 && i.imm == 0 && ty == null):
 						ty = i;
+					case Store if (i.a == ptr.id && i.b < 0 && i.size == 4 && i.imm == 4 && hdr == null):
+						hdr = i;
 					case _:
 						ok = false;
 				}
@@ -569,7 +572,7 @@ class Escape {
 			var hc = constOf(hdr.c), tc = constOf(ty.c);
 			if (hc == null || tc == null || hc.sym != null) continue;
 			// (an array: the runtime takes it for any growth; not worth the analysis)
-			if (tc.sym == null && tc.imm == Abi.T_ARRAY) return null;
+			if (tc.sym == null && tc.imm & 0xFFFF == Abi.T_ARRAY) return null;
 			var s = new Site(p, j);
 			// (its values are defined where it is first used: what the block
 			// computes before, its constructor's arguments, may read the
@@ -1106,7 +1109,7 @@ class Escape {
 						u.op = Const;
 						u.a = -1;
 						u.sym = tc.sym;
-						u.imm = tc.imm;
+						u.imm = tc.imm & 0xFFFF;
 						u.imm2 = tc.imm2;
 						u.size = 0;
 						u.mem = 0;
@@ -1461,8 +1464,8 @@ class Escape {
 		// the ranges they cover)
 		var vars:Array<Var> = [];
 		if (box == 0) {
-			vars.push(new Var(-8, 4, I32));
 			vars.push(new Var(Abi.HDR_TINDEX, 4, I32));
+			vars.push(new Var(-4, 4, I32));
 		} else
 			vars.push(box == 1 ? new Var(0, 4, I32) : box == 2 ? new Var(0, 8, F64) : new Var(0, 8, I64));
 		var nslots = sites[g.root].nslots;
@@ -1527,7 +1530,7 @@ class Escape {
 		var nrooted = 0;
 		if (box == 0) {
 			var s = sites[g.root];
-			var refs = refSlots == null ? null : refSlots.get(s.tySym != null ? s.tySym : "#" + s.tyImm);
+			var refs = refSlots == null ? null : refSlots.get(s.tySym != null ? s.tySym : "#" + (s.tyImm & 0xFFFF));
 			for (j in 0...vars.length) {
 				var r = vars[j];
 				if (r.off < 0 || r.size != 8 || r.ty == F64) continue;
@@ -1611,8 +1614,8 @@ class Escape {
 		function siteValue(s:Site, v:Int):Int {
 			var r = vars[v];
 			if (s.box > 0) return s.v.args[0];
-			if (r.off == -8) return s.hdr.c;
 			if (r.off == Abi.HDR_TINDEX) return s.ty.c;
+			if (r.off == -4) return s.hdr.c;
 			return zero(r.ty);
 		}
 		// what one instruction defines (cur: the variables' values)
@@ -1774,7 +1777,15 @@ class Escape {
 		i.signed = false;
 		i.mem = 0;
 		if (r.off == Abi.HDR_TINDEX) {
-			// (the 16-bit type index: the whole constant, as every comparison takes it)
+			// (the 16-bit type index: the word's low half, a record's slots above it)
+			if (size == 2) {
+				var m = newIns(Const, I32, b, i);
+				m.imm = 0xFFFF;
+				i.op = And;
+				i.a = x;
+				i.b = m.id;
+				return;
+			}
 			i.op = Copy;
 			i.a = x;
 			return;

@@ -417,7 +417,7 @@ class FnLower {
 	// a runtime function call that is not a GC point
 	public static function noGcHost(n:String):Bool
 		return isPure(n) || NOGC.exists(n) || C_EXTERNS.exists(n) || StringTools.startsWith(n, "hxmc_narray_set_")
-			|| (isIntrinsic(n) && n != "hxmc_unsafe_Mem_alloc" && n != "hxmc_unsafe_Mem_allocRaw" && !StringTools.startsWith(n, "hxmc_unsafe_Mem_call"));
+			|| (isIntrinsic(n) && !StringTools.startsWith(n, "hxmc_unsafe_Mem_alloc") && !StringTools.startsWith(n, "hxmc_unsafe_Mem_call"));
 
 	// the layout an object literal of the structural type t gets, when the
 	// field `name` has the representation rt there
@@ -673,7 +673,7 @@ class FnLower {
 
 	function nullOf(t:Ty):Ex
 		return switch t {
-			case TI32 | TBool: EInt(0);
+			case TI32 | TBool | TU8: EInt(0);
 			case TF64: EF64(0);
 			case TI64: EConv(I2L, EInt(0));
 			case TVoid: EInt(0);
@@ -763,8 +763,16 @@ class FnLower {
 			case TBool: 4;
 			case TF64: 2;
 			case TI64: 3;
+			case TU8: 5;
 			case _: 0;
 		};
+
+	// the type of the values of a NativeArray's elements: a byte's an Int
+	static function elemValue(elem:Ty):Ty
+		return elem == TU8 ? TI32 : elem;
+
+	// the suffix of the typed accesses of a NativeArray (MirBuild), by nativeKind
+	static final NATIVE_SUFFIX = ["p", "i", "f", "l", "b", "u"];
 
 	// a NativeArray whose element is Dynamic (Dynamic, Any, an erased type
 	// parameter) may hold any kind of storage, or be a wrapper (rt/NArray)
@@ -776,12 +784,12 @@ class FnLower {
 	// hxmc.native-array-outofbounds says (Lower.bounds); no p: not tested (the
 	// std's own loops)
 	function nativeRead(elem:Ty, a:Ex, i:Ex, ?p:core.Globals.Pos):Ex {
-		var get = ECallHost(dynElem(elem) ? "hxmc_narray_dget" : "hxmc_narray_get_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], vector(a, i), elem);
+		var get = ECallHost(dynElem(elem) ? "hxmc_narray_dget" : "hxmc_narray_get_" + NATIVE_SUFFIX[nativeKind(elem)], vector(a, i), elemValue(elem));
 		switch p == null ? Lower.BOUNDS_UNCHECKED : Lower.bounds {
 			case Lower.BOUNDS_SILENT:
-				var r = newLocal("e", elem);
+				var r = newLocal("e", elemValue(elem));
 				// (seen as Dynamic: the default of the storage's kind)
-				var none = dynElem(elem) ? ECallHost(l.native("hx_narray_default"), vector(a), elem) : nullOf(elem);
+				var none = dynElem(elem) ? ECallHost(l.native("hx_narray_default"), vector(a), elem) : nullOf(elemValue(elem));
 				out.push(SIf(inBounds(a, i), vector(SSet(r, get)), vector(SSet(r, none))));
 				return ELocal(r);
 			case Lower.BOUNDS_THROWS:
@@ -793,7 +801,7 @@ class FnLower {
 
 	// a[i] = x (x: a local or constant), as nativeRead
 	function nativeWrite(elem:Ty, a:Ex, i:Ex, x:Ex, ?p:core.Globals.Pos) {
-		var set = SExpr(ECallHost(dynElem(elem) ? "hxmc_narray_dset" : "hxmc_narray_set_" + ["p", "i", "f", "l", "b"][nativeKind(elem)], vector(a, i, x), TVoid));
+		var set = SExpr(ECallHost(dynElem(elem) ? "hxmc_narray_dset" : "hxmc_narray_set_" + NATIVE_SUFFIX[nativeKind(elem)], vector(a, i, x), TVoid));
 		out.push(switch p == null ? Lower.BOUNDS_UNCHECKED : Lower.bounds {
 			case Lower.BOUNDS_SILENT: SIf(inBounds(a, i), vector(set), vector());
 			case Lower.BOUNDS_THROWS: SIf(inBounds(a, i), vector(set), vector(SThrow(outOfBounds(a, i, p))));
@@ -1067,7 +1075,8 @@ class FnLower {
 		}
 	}
 
-	// FNV-1a over the UTF-16 units, as Str.hash computes (and caches) it at run time
+	// FNV-1a over the UTF-16 units, never 0, as Str.hash computes (and
+	// caches) it at run time
 	public static function strHash(s:String):Int {
 		var x = 0x811C9DC5;
 		for (i in 0...s.length)
@@ -1298,7 +1307,7 @@ class FnLower {
 					case TRef(RNativeArr(elem)):
 						var xs = operands(vector(a, i));
 						var al = ELocal(asLocal(xs[0], tyOf(a)));
-						coerce(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elem, tyOf(e));
+						coerce(nativeRead(elem, al, ELocal(asLocal(coerce(xs[1], tyOf(i), TI32), TI32)), e.epos), elemValue(elem), tyOf(e));
 					case TRef(RArr(elem)):
 						var xs = operands(vector(a, i));
 						var ix = coerce(xs[1], tyOf(i), TI32);
@@ -1944,9 +1953,10 @@ class FnLower {
 					case TRef(RNativeArr(elem)):
 						var al = asLocal(value(a), tyOf(a));
 						var ix = ELocal(asLocal(coerce(value(i), tyOf(i), TI32), TI32));
-						var x = pure(compute(() -> nativeRead(elem, ELocal(al), ix, lhs.epos), elem, elem), elem);
+						var t = elemValue(elem);
+						var x = pure(compute(() -> nativeRead(elem, ELocal(al), ix, lhs.epos), t, t), t);
 						nativeWrite(elem, ELocal(al), ix, x, lhs.epos);
-						return coerce(x, elem, et);
+						return coerce(x, t, et);
 					case TRef(RArr(elem)):
 						var al = asLocal(value(a), tyOf(a));
 						var ix = ELocal(asLocal(coerce(value(i), tyOf(i), TI32), TI32));
@@ -2018,8 +2028,8 @@ class FnLower {
 				};
 				var xs = operands(VectorTools.cons(obj, cargs));
 				var a = ELocal(asLocal(xs[0], tyOf(obj))), i = coerce(xs[1], tyOf(cargs[0]), TI32);
-				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elem, rt);
-				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elem), elem)));
+				if (cf.cfName == "unsafeGet") return coerce(nativeRead(elem, a, i), elemValue(elem), rt);
+				nativeWrite(elem, a, i, ELocal(asLocal(coerce(xs[2], tyOf(cargs[1]), elemValue(elem)), elemValue(elem))));
 				return EInt(0);
 			// NativeArray.literal([a, b, c]) (VectorTools' `vector(a, b, c)`): one
 			// allocation and the elements stored in order, as an Array literal is
@@ -2043,11 +2053,11 @@ class FnLower {
 				};
 				var xs = operands(el);
 				if (!erased && !Lower.wasmGc)
-					return ECallHost("hxmc_narray_lit", VectorTools.cons(EInt(nativeKind(elem)), xs.mapi((i, x) -> coerce(x, tyOf(el[i]), elem))), rt);
+					return ECallHost("hxmc_narray_lit", VectorTools.cons(EInt(nativeKind(elem)), xs.mapi((i, x) -> coerce(x, tyOf(el[i]), elemValue(elem)))), rt);
 				var a = ELocal(asLocal(erased ? ECallHost(l.native("hx_narray_open"), vector(EInt(el.length)), rt) : ECallHost("hxmc_narray_new",
 					vector(EInt(nativeKind(elem)), EInt(el.length)), rt), rt));
 				for (i in 0...el.length)
-					nativeWrite(elem, a, EInt(i), ELocal(asLocal(coerce(xs[i], tyOf(el[i]), elem), elem)));
+					nativeWrite(elem, a, EInt(i), ELocal(asLocal(coerce(xs[i], tyOf(el[i]), elemValue(elem)), elemValue(elem))));
 				return a;
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);

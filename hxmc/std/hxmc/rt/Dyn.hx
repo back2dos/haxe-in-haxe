@@ -101,8 +101,9 @@ class Dyn {
 		}
 	}
 
-	// ---- slots by kind ('i' Int, 'b' Bool, 'f' Float, 'l' Int64, else a
-	// reference); Int/Bool slots are 4-byte indices
+	// ---- slots by kind ('i' Int, 'b' Bool, 'f' Float, 'l' Int64, 'L' the
+	// length of the NativeArray in the slot: a field without storage,
+	// @:hxmc.lengthOf; else a reference); Int/Bool slots are 4-byte indices
 
 	static function boxSlot(o:Dynamic, slot:Int, k:Int):Dynamic {
 		var p = Mem.addr(o);
@@ -111,6 +112,9 @@ class Dyn {
 			case "b".code: (Mem.getI32(p, 4 * slot) != 0 : Dynamic);
 			case "f".code: (Mem.getF64(p, 8 * slot) : Dynamic);
 			case "l".code: (Mem.getI64(p, 8 * slot) : Dynamic);
+			case "L".code:
+				var a:Dynamic = Mem.getRef(p, 8 * slot);
+				Str.isNull(a) ? null : (arrLength(a) : Dynamic);
 			case _: Mem.getRef(p, 8 * slot);
 		}
 	}
@@ -129,6 +133,8 @@ class Dyn {
 			case "l".code:
 				var x:I64 = v;
 				Mem.setI64(Mem.addr(o), 8 * slot, x);
+			case "L".code:
+				Rt.rt_throw("a length without storage (@:hxmc.lengthOf) cannot be set");
 			case _:
 				Mem.setRefBarrier(o, 8 * slot, v);
 		}
@@ -254,8 +260,8 @@ class Dyn {
 		var t = tindex(o);
 		if (t == T_STRING && isLength(fid)) return (Str.len(o) : Dynamic);
 		if (t == T_ARRAY && isLength(fid)) return ((o : Array<Dynamic>).length : Dynamic);
-		if (t == T_NATIVE_ARRAY && isLength(fid)) return (Mem.getI32(Mem.addr(o), 0) : Dynamic);
-		if (t == T_NATIVE_ARRAY) return null;
+		if (isNativeArray(t) && isLength(fid)) return (arrLength(o) : Dynamic);
+		if (isNativeArray(t)) return null;
 		var ty = ty(t);
 		var f = findField(ty, fid);
 		if (!f.isNull()) return boxSlot(o, fSlot(f), fKind(f));
@@ -273,7 +279,7 @@ class Dyn {
 			(o : Array<Dynamic>).resize(n);
 			return;
 		}
-		if (tindex(o) == T_NATIVE_ARRAY) Rt.rt_throw("NativeArray fields are read-only");
+		if (isNativeArray(tindex(o))) Rt.rt_throw("NativeArray fields are read-only");
 		var st = findStatic(o, fid);
 		if (!st.isNull()) {
 			staticSet(st, v);
@@ -335,7 +341,7 @@ class Dyn {
 			refs[i] = args[i];
 		var buf = Mem.stack(128);
 		if (want > 0) {
-			var d = Mem.getPtr(Mem.addr(refs), 8);
+			var d = Mem.getPtr(Mem.addr(refs), 8); // (the storage: its elements from 0, Boxes)
 			for (i in 0...want)
 				Mem.setPtr(buf, 8 * i, Mem.getPtr(d, 8 * i));
 		}
@@ -425,7 +431,7 @@ class Dyn {
 		if (Str.len(name) == 6 && name == "length") {
 			if (t == T_STRING) return (Str.len(o) : Dynamic);
 			if (t == T_ARRAY) return ((o : Array<Dynamic>).length : Dynamic);
-			if (t == T_NATIVE_ARRAY) return (Mem.getI32(Mem.addr(o), 0) : Dynamic);
+			if (isNativeArray(t)) return (arrLength(o) : Dynamic);
 		}
 		return anonGetSlow(o, fid(name));
 	}
@@ -531,8 +537,8 @@ class Dyn {
 	// hxmc.native-array-outofbounds says for typed access (FnLower.nativeRead;
 	// silent: the default of the storage's kind), an error when it is not defined
 	@:hxmc.host("hx_dyn_aget") static function dynAget(a:Dynamic, i:Int):Dynamic {
-		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
-			var n = Mem.getI32(Mem.addr(a), 0);
+		if (!Str.isNull(a) && isNativeArray(tindex(a))) {
+			var n = arrLength(a);
 			if (!Mem.ult(i, n)) {
 				#if (hxmc.native_array_outofbounds == "silent")
 				return NArray.defaultOf(a);
@@ -549,8 +555,8 @@ class Dyn {
 	}
 
 	@:hxmc.host("hx_dyn_aset") static function dynAset(a:Dynamic, i:Int, v:Dynamic):Void {
-		if (!Str.isNull(a) && tindex(a) == T_NATIVE_ARRAY) {
-			var n = Mem.getI32(Mem.addr(a), 0);
+		if (!Str.isNull(a) && isNativeArray(tindex(a))) {
+			var n = arrLength(a);
 			if (!Mem.ult(i, n)) {
 				#if (hxmc.native_array_outofbounds == "silent")
 				return;
@@ -708,7 +714,9 @@ class Dyn {
 				return f == Math.ffloor(f) && Math.abs(f) < 2147483648.0;
 			case T_BOXFLOAT:
 				return t == T_BOXINT || t == T_BOXFLOAT;
-			case T_BOXBOOL | T_STRING | T_ARRAY | T_BYTES | T_NATIVE_ARRAY:
+			case T_NATIVE_ARRAY:
+				return isNativeArray(t);
+			case T_BOXBOOL | T_STRING | T_ARRAY:
 				return t == c;
 			case _:
 		}
@@ -865,24 +873,30 @@ class Dyn {
 	@:hxmc.noGc static inline function threadId():Int
 		return #if (hxmc.target == "wasm32-wasi") hxmc.rt.wasm.Threads.current() #else Threads.current() #end;
 
+	// (Types: a record's 32 bits at -4; a string's content hash; an array has
+	// none (Vectors, Bytes as keys through Dynamic: its type and length, which
+	// never change, all such keys of a length colliding))
 	@:hxmc.noGc public static function objHash(o:Dynamic):Int {
 		if (Str.isNull(o)) return 0;
+		var t = tindex(o);
+		if (t == T_STRING) return Str.hash(o) * (0x9E3779B1 : Int);
+		if (isArray(t)) return (arrLength(o) * 31 + t) * (0x9E3779B1 : Int);
 		var hp = Mem.addr(o).add(-8);
-		var h = Mem.getU16(hp, 6);
+		var h = Mem.getI32(hp, 4);
 		if (h == 0) {
 			var seed = hashSeed;
 			if (seed == 0) seed = 0x9E37 + 0x10000 * (threadId() - 1); // the main thread's sequence is the single-threaded one
 			seed = seed * 1103515245 + 12345;
 			hashSeed = seed;
-			h = (seed >>> 16) & 0xFFFF;
+			h = seed ^ (seed >>> 16);
 			if (h == 0) h = 1;
 			var old = Atomic.load64(hp);
-			while ((old >>> 48).toInt() == 0) {
-				var seen = Atomic.cas64(hp, old, old | ((h : I64) << 48));
+			while ((old >>> 32).toInt() == 0) {
+				var seen = Atomic.cas64(hp, old, old | ((h : I64) << 32));
 				if (seen == old) break;
 				old = seen;
 			}
-			var got = (old >>> 48).toInt();
+			var got = (old >>> 32).toInt();
 			if (got != 0) h = got;
 		}
 		return h * (0x9E3779B1 : Int);
@@ -1150,7 +1164,7 @@ class Dyn {
 	public static function copyObject(o:Dynamic):Dynamic {
 		if (Str.isNull(o) || tindex(o) < T_FIRST) return o;
 		var n = nslots(o);
-		var c = Mem.alloc(n, tindex(o), kind(o));
+		var c = Mem.alloc(n, tindex(o), K_OBJ); // (a generated type: a record)
 		LibC.memcpy(Mem.addr(c), Mem.addr(o), (8 * n : I64));
 		// an anonymous object's dynamic fields (slot 0) are its own
 		if (tk(ty(tindex(o))) == TK_ANON && !Str.isNull(Mem.getRef(Mem.addr(o), 0))) {

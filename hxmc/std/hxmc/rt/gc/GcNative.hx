@@ -239,7 +239,7 @@ class GcNative {
 		if (names != null) {
 			var i = find(names, name);
 			if (i >= 0) {
-				W.objSet(o, i, v);
+				if (!W.objSet(o, i, v)) throw "a length without storage (@:hxmc.lengthOf) cannot be set";
 				return;
 			}
 		}

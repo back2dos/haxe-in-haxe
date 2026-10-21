@@ -20,7 +20,7 @@ class Inline {
 	public static inline var MAX_IR = 40; // IR nodes of a candidate
 	// instructions outside slow paths: of a callee inlined anywhere, at a
 	// call in a loop, and of the runtime's Haxe functions (hxmc.rt) outside
-	// loops: 3, those no bigger than their call (Bytes.get, set and length:
+	// loops: 3, those no bigger than their call (Bytes.get, set and length, then:
 	// the tool 0.2% smaller, its self-compile 1% less CPU; 16 inlines
 	// hx_str_or_null at every concatenation too: 0.5% faster still, the
 	// port 1.2% larger) (size against speed;

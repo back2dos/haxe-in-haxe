@@ -326,7 +326,7 @@ class X11Window {
 				var n = count.value.toInt() * (format.value == 32 ? 8 : format.value == 16 ? 2 : 1);
 				var b = haxe.io.Bytes.alloc(n);
 				if (!data.value.isNull()) {
-					if (n > 0) LibC.memcpy(Mem.addr(b).add(8), data.value, (n : Int64));
+					if (n > 0) LibC.memcpy(Mem.addr(b.getData()), data.value, (n : Int64));
 					Xlib.XFree(data.value);
 				}
 				{type: type.value, format: format.value, bytes: b};

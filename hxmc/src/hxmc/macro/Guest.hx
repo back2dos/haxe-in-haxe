@@ -160,7 +160,7 @@ class Guest {
 				tk: t.tk,
 				sup: supIsSig ? e.sigNames[t.sup] : tyName(t.sup),
 				slots: [for (s in t.slots) kindChar(s)].join(""),
-				fields: [for (f in t.fields) {name: f.name, slot: f.slot, kind: kindChar(f.ty)}],
+				fields: [for (f in t.fields) {name: f.name, slot: f.slot, kind: f.kind != null ? String.fromCharCode(f.kind) : kindChar(f.ty)}],
 				methods: [for (m in t.methods) {name: m.name, fn: m.fn, sig: e.sigNames[m.sig]}],
 				ifaces: [for (x in t.ifaces) tyName(x)],
 				tag: t.tag,

@@ -477,6 +477,13 @@ class Lower {
 	public static function isNativeArray(c:TClass):Bool
 		return c.clPath.name == "NativeArray" && c.clPath.pack.join(".") == "hxmc";
 
+	// hxmc.Byte (through typedefs): a NativeArray of them stores bytes (TU8)
+	static function isByte(t:T):Bool
+		return switch TFunctions.followWithoutNull(t) {
+			case TAbstract(a, _): a.aPath.name == "Byte" && a.aPath.pack.join(".") == "hxmc";
+			case _: false;
+		};
+
 	public static function isCore(c:TClass, name:String):Bool
 		return c.clPath.pack.length == 0 && c.clPath.name == name;
 
@@ -605,7 +612,7 @@ class Lower {
 					case _:
 						if (isCore(c, "String")) TRef(RStr);
 						else if (isCore(c, "Array")) TRef(RArr(boxed(ty(params[0]))));
-						else if (isNativeArray(c)) TRef(RNativeArr(boxed(ty(params[0]))));
+						else if (isNativeArray(c)) TRef(RNativeArr(isByte(params[0]) ? TU8 : boxed(ty(params[0]))));
 						else if (CInterop.isStruct(c)) {
 							var n = core.Globals.sTypePath(c.clPath);
 							structClasses.set(n, c);
@@ -781,6 +788,8 @@ class Lower {
 		prog.classes.push(ci);
 		for (f in sup.fields)
 			ci.fields.push(f);
+		for (d in sup.derived)
+			ci.derived.push(d);
 		var own = [];
 		for (f in c.clOrderedFields)
 			switch f.cfKind {
@@ -793,8 +802,14 @@ class Lower {
 					var slot = {name: f.cfName, ty: null};
 					ci.fields.push(slot);
 					own.push({slot: slot, f: f});
+				// a property Dynamic access and reflection read as the length of a NativeArray field
+				case Var(_) if (f.cfMeta.length > 0 && hasMeta(":hxmc.lengthOf", f.cfMeta)):
+					ci.derived.push({name: f.cfName, of: metaString(":hxmc.lengthOf", f.cfMeta)});
 				case _:
 			}
+		for (d in ci.derived)
+			if (d.of == null || !Lambda.exists(ci.fields, x -> x.name == d.of))
+				fail("@:hxmc.lengthOf on " + ci.name + "." + d.name + ": the name of a field of the class, as a string literal");
 		// field types may refer back to this class
 		outsideUnfolding(() -> for (o in own)
 			o.slot.ty = ty(o.f.cfType));
