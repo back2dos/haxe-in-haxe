@@ -389,7 +389,8 @@ class Str {
 		var n = len(s), m = len(sub);
 		var from:Int = start == null ? 0 : start;
 		if (from < 0) from = 0;
-		if (m == 0) return from <= n ? from : -1;
+		// ("" past the end: the length, as String.indexOf says; upstream's TestString)
+		if (m == 0) return from <= n ? from : n;
 		var c = chars(s), d = chars(sub);
 		var i = from;
 		while (i + m <= n) {
@@ -577,7 +578,8 @@ class Str {
 		var n = len(s), i = 0;
 		inline function at(k:Int):Int
 			return unit(s, k);
-		while (i < n && (at(i) == 32 || at(i) == 9 || at(i) == 10 || at(i) == 13))
+		// (space, \t, \n, \v, \f, \r: upstream's TestStd)
+		while (i < n && (at(i) == 32 || (at(i) >= 9 && at(i) <= 13)))
 			i++;
 		var neg = false;
 		if (i < n && (at(i) == 45 || at(i) == 43)) {

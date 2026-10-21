@@ -252,6 +252,7 @@ class Type {
 			case 7: TEnum(Native.getEnum(v));
 			case 8: TClass(String);
 			case 9: TClass(Array);
+			case 12: TInt64;
 			case _: TUnknown;
 		}
 	}

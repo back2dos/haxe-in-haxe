@@ -943,6 +943,8 @@ class Dyn {
 				return 2;
 			case T_BOXBOOL:
 				return 3;
+			case T_BOXI64:
+				return 12;
 			case T_STRING:
 				return 8;
 			case T_ARRAY:
@@ -1001,6 +1003,7 @@ class Dyn {
 		LibC.free(c);
 		if (Str.isNull(r) && n == "String") r = typeObj(T_STRING);
 		if (Str.isNull(r) && n == "Date") r = typeObj(T_DATE);
+		if (Str.isNull(r) && n == "Array") r = typeObj(T_ARRAY);
 		return r;
 	}
 
@@ -1057,6 +1060,8 @@ class Dyn {
 		var ct = ctor(ty(t), index);
 		// (its own value: `==` to the constructor)
 		var g = single(ty(ct));
+		// (the arguments the constructor takes, as hl and Eval check them: upstream's TestReflect)
+		if ((Str.isNull(params) ? 0 : params.length) != (g >= 0 ? 0 : nfields(ty(ct)))) Rt.rt_throw("Invalid number of constructor arguments");
 		if (g >= 0) return Mem.getRef(globalSlot(g), 0);
 		var n = slotCount(ty(ct));
 		var o = Mem.alloc(n > 0 ? n : 1, ct, K_OBJ);
