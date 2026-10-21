@@ -12,9 +12,10 @@
 //   fault of the engine (fault-worker.js); the playground page (Monaco
 //   blocked: its plain editor) picks its module (?eh=legacy, and a Chromium
 //   without exnref) and runs its first example;
-// - with a benchmark history in the site (bench/): the benchmarks page's
-//   Programs tables, and with ?bench-history one chart per case with a
-//   hover tooltip, light and dark, and at a phone's width.
+// - the benchmarks page: the compiler's charts with a tooltip (hover, or a
+//   tap on a phone) and its table; with a benchmark history in the site
+//   (bench/) the Programs charts and table; light and dark, and at a phone's
+//   width.
 // Screenshots into $SCREENSHOTS when set.
 //   node site/tools/browser-test.mjs bin/site [chromium firefox webkit]
 import { createServer } from 'node:http';
@@ -270,75 +271,65 @@ async function pageTest(browser, query, expect) {
 	return check(fetched.length === 1 && fetched[0] === expect && run.startsWith('exit 0'), `playground.html${query}: fetched ${fetched.join(', ') || 'nothing'} (expected ${expect}); ${ready}; ${run}`);
 }
 
-// the Programs benchmarks: the latest run's table and the compile-time table
-// below it, with the "Over time" charts hidden; then with ?bench-history (the
-// charts' code kept for later) one chart per case with a hover tooltip; at a
-// phone's width, no horizontal scrolling of the page
+// the benchmarks page: the compiler's charts (hxmc over its runs, from
+// bench/compile-history.json or the committed compile-history.json) with a
+// tooltip on hover or tap, its latest run's table; with a benchmark history in
+// the site (bench/): the Programs charts (hxmc per case) and the latest run's
+// table with its tabs; light and dark, and at a phone's width (one Programs
+// chart at a time), no horizontal scrolling of the page
 async function benchTest(browser, name) {
 	let ok = true;
 	const latest = existsSync(path.join(dir, 'bench/latest.json'));
+	const history = existsSync(path.join(dir, 'bench/history.json'));
 	const views = [
-		{ colorScheme: 'light', width: 1100, query: '' },
-		{ colorScheme: 'dark', width: 1100, query: '' },
-		{ colorScheme: 'light', width: 1100, query: '?bench-history' },
-		{ colorScheme: 'dark', width: 1100, query: '?bench-history' },
-		{ colorScheme: 'light', width: 375, query: '' },
+		{ colorScheme: 'light', width: 1100 },
+		{ colorScheme: 'dark', width: 1100 },
+		{ colorScheme: 'light', width: 375 },
 	];
-	for (const { colorScheme, width, query } of views) {
-		const view = `${colorScheme}, ${width} px${query ? ', ' + query : ''}`;
+	for (const { colorScheme, width } of views) {
+		const view = `${colorScheme}, ${width} px`;
 		let pass = true;
-		const page = await browser.newPage({ colorScheme, viewport: { width, height: 900 } });
+		const phone = width < 600;
+		const page = await browser.newPage({ colorScheme, viewport: { width, height: 900 }, ...(phone && name !== 'firefox' ? { isMobile: true, hasTouch: true } : {}) });
 		const errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
 		await page.route(/^https:\/\/cdn\.jsdelivr\.net\//, (r) => r.abort());
-		await page.goto(`http://localhost:${port}/benchmarks.html${query}`);
-		await page.evaluate(() => document.getElementById('programs').scrollIntoView());
+		await page.goto(`http://localhost:${port}/benchmarks.html`);
 		let facts = '';
 		try {
-			// (the tables: the latest run, which a history of imported points only lacks)
-			if (latest) {
-				await page.waitForSelector('#programs-results table', { timeout: 30000 });
-				await page.waitForSelector('#programs-compile table', { timeout: 5000 });
-			}
-			if (query) {
-				await page.waitForSelector('#programs-history svg', { timeout: 30000 });
-				const svg = page.locator('#programs-history .plot svg').first();
-				await svg.scrollIntoViewIfNeeded();
-				const box = await svg.boundingBox();
-				await svg.hover({ position: { x: box.width * 0.95, y: box.height / 2 } });
-				await page.waitForSelector('#programs-history .tip:not([hidden])', { timeout: 5000 });
-			} else {
-				// (the history would have been fetched and drawn by now if it were shown)
-				await page.waitForTimeout(500);
-			}
+			await page.waitForSelector('#compiler-history .plot svg', { timeout: 30000 });
+			await page.waitForSelector('#compiler-results table', { timeout: 30000 });
+			if (latest) await page.waitForSelector('#programs-results table', { timeout: 30000 });
+			if (history) await page.waitForSelector('#programs-history .plot svg', { timeout: 30000 });
+			// the tooltip: a hover, or a tap on a phone
+			const svg = page.locator('#compiler-history .plot svg').first();
+			await svg.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+			const box = await svg.boundingBox();
+			if (phone && name !== 'firefox') await page.touchscreen.tap(box.x + box.width * 0.95, box.y + box.height / 2);
+			else await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2);
+			await page.waitForSelector('#compiler-history .tip:not([hidden])', { timeout: 5000 });
 			facts = await page.evaluate(() => {
 				const q = (s) => document.querySelectorAll(s).length;
-				const visible = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
-				const compileCells = [...document.querySelectorAll('#programs-compile tbody tr:not(.ref) td.num')];
+				const visible = (s) => [...document.querySelectorAll(s)].filter((e) => e.getClientRects().length > 0).length;
 				return {
+					compilerCharts: q('#compiler-history .plot svg'),
+					compilerRows: q('#compiler-results tbody tr'),
+					tip: document.querySelector('#compiler-history .tip:not([hidden])')?.textContent.slice(0, 60) ?? '',
+					tipLink: document.querySelector('#compiler-history .tip:not([hidden]) a')?.href ?? '',
+					programCharts: q('#programs-history .plot svg'),
+					programChartsVisible: visible('#programs-history .plot svg'),
 					rows: q('#programs-results tbody tr'),
-					cols: q('#programs-results thead th'),
 					tabs: [...document.querySelectorAll('#programs-results .tabs button')].map((b) => b.textContent).join(','),
-					compileRows: q('#programs-compile tbody tr:not(.ref)'),
-					compileCols: q('#programs-compile thead th'),
-					compileVisible: visible(document.querySelector('#programs-compile table')),
-					compileValues: compileCells.filter((td) => /\d/.test(td.textContent)).length,
-					compileSplit: q('#programs-compile td .parts'),
-					compileNote: (document.querySelector('#programs-compile .note')?.textContent ?? '').slice(0, 40),
-					historyVisible: visible(document.getElementById('programs-over-time')),
-					charts: q('#programs-history svg'),
-					lines: q('#programs-history svg .series path'),
-					tip: document.querySelector('#programs-history .tip')?.textContent.slice(0, 60) ?? '',
 					series: getComputedStyle(document.documentElement).getPropertyValue('--s1').trim(),
 					pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
 				};
 			});
-			if (latest && (facts.rows < 1 || !facts.compileVisible || facts.compileRows !== facts.rows || facts.compileCols !== facts.cols || facts.compileValues < 1 || !/Compile time/.test(await page.textContent('#programs-compile h4'))))
-				pass = false;
-			if (query ? !facts.historyVisible || facts.charts < 1 || facts.lines < 1 : facts.historyVisible || facts.charts > 0) pass = false;
+			if (facts.compilerCharts < 1 || facts.compilerRows < 1 || !/\/commit\/[0-9a-f]+$/.test(facts.tipLink)) pass = false;
+			if (latest && (facts.rows < 1 || !/Compile/.test(facts.tabs))) pass = false;
+			if (history && (facts.programCharts < 1 || facts.programChartsVisible !== (phone ? 1 : facts.programCharts))) pass = false;
 			if (facts.pageScroll > 0) pass = false;
 			if (process.env.SCREENSHOTS) {
-				await page.locator('#programs').screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}-${width}${query ? '-history' : ''}.png`) });
+				await page.screenshot({ path: path.join(process.env.SCREENSHOTS, `bench-${name}-${colorScheme}-${width}.png`), fullPage: true });
 			}
 		} catch (e) {
 			pass = false;
@@ -389,7 +380,7 @@ for (const { name, label, opts, noExnref } of launches) {
 		}
 		if (name === 'chromium' && modules.length) await faultTest(browser, modules[0]);
 		await pagesTest(browser, name);
-		if (existsSync(path.join(dir, 'bench/history.json')) && !(await benchTest(browser, name))) failed++;
+		if (!(await benchTest(browser, name))) failed++;
 		if (modules.length) {
 			await pageTest(browser, '', 'hih.wasm');
 			if (modules.includes('hih-legacy.wasm')) await pageTest(browser, '?eh=legacy', 'hih-legacy.wasm');

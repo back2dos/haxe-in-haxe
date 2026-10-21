@@ -58,6 +58,8 @@ LIX_DIR ?=
 BENCH_DATA ?=
 # `make bench`: the arguments of hxmc/test/Bench.hx (e.g. "-n 3 -c nbody -t hxmc,js")
 BENCH_ARGS ?=
+# `make bench-compile`: the arguments of hxmc/test/CompileBench.hx (e.g. "-n 5 --build --out site/data/bench.json")
+COMPILE_BENCH_ARGS ?=
 # `make bench-arrays`: length, rounds, samples, optional JSON output
 ARRAY_BENCH_ARGS ?=
 # `make bench-maps`: keys, rounds
@@ -114,7 +116,7 @@ endef
 
 .DEFAULT_GOAL := help
 .PHONY: help std deps rt rt-build rt-target rt-layouts hxmc tool bootstrap fixpoint stage0 crosshost port dev release wasm npm site fuzz \
-	lix lix-release lix-dist reference bench bench-arrays bench-maps test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
+	lix lix-release lix-dist reference bench bench-compile bench-arrays bench-maps test test-fuzz test-display test-server test-jsonrpc test-unit-targets test-interp \
 	test-haxelib test-eval-debugger test-node-libs test-module-cache smoke hxmc-test upstream-suites corpus-stage \
 	android-programs android-check android-device-check shared-check ios-programs ios-check ios-sim-check \
 	native-macros dev-check portcheck measure site-check \
@@ -193,6 +195,9 @@ help:
 ## portcheck   the port built by hxmc self-compiles to the reference's HXB (hxmc/test/Selfcheck.hx)
 ## bench       the HaxeBenchmarks cases on hxmc (native, wasm under node), C++, JVM, JS, HL/C and
 ##             HL, built by hxmc and the port: times, peak RSS, sizes (hxmc/test/Bench.hx; BENCH_ARGS)
+## bench-compile  the port (native, wasm under node and wasmtime) against the reference compiling
+##             hello, stdlib and itself to HXB: times, peak RSS, hxmc's builds of the port
+##             (hxmc/test/CompileBench.hx; COMPILE_BENCH_ARGS; the site's site/data/bench.json)
 ## bench-arrays  Array vs hxmc.NativeArray vs Vector: nine element types and five workloads
 ##             (ARRAY_BENCH_ARGS="65536 128 7 bin/vector-bench/results.json")
 ## bench-maps  ObjectMap get/set/exists/remove on objects, hits and misses, and StringMap's
@@ -217,7 +222,7 @@ help:
 ## distclean   also remove bin/ entirely
 ##
 ## Variables: JOBS, NODE, ZIG, HOST, TARGET, RT_TARGET, ANDROID_TARGET, IOS_TARGET, HXFLAGS, PORT_BIN, REFERENCE, LANE, N, CASES, PORT,
-## LIX_DIR, BENCH_DATA, BENCH_ARGS, ARRAY_BENCH_ARGS, MAP_BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
+## LIX_DIR, BENCH_DATA, BENCH_ARGS, COMPILE_BENCH_ARGS, ARRAY_BENCH_ARGS, MAP_BENCH_ARGS, CROSSHOST_ARGS, CORPUS_TARGETS (defaults and meaning: the top of the Makefile).
 
 std: $(STD)
 $(STD): hxmc/src/hxmc/MkStd.hx $(STD_SRC)
@@ -367,7 +372,8 @@ npm: $(NPM_GEN) $(NPM_NATIVES)
 # their scripts (site/client, compiled by the port: site/build.hxml), the
 # playground's compiler (bin/wasm) and examples, the std subset its compiler
 # reads (site/tools/MkBundle.hx), the measured results (site/data), lix under
-# tools/ (LIX_DIR), the benchmark history (BENCH_DATA) and the build facts
+# tools/ (LIX_DIR), the benchmark histories (BENCH_DATA: the programs', the
+# compiler's, the target generators') and the build facts
 # (build-info.json). The site's build in the addresses of the files its pages
 # fetch (Version.hx, and the pages' scripts and stylesheet): a deploy reaches
 # browsers at once.
@@ -384,6 +390,7 @@ site: wasm $(TOOL) $(STD) $(PORT_BIN)
 	if [ -n "$(LIX_DIR)" ]; then mkdir -p bin/site/tools && cp $(LIX_DIR)/lix-* bin/site/tools/; fi
 	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/history.json bin/site/bench/ && { cp $(BENCH_DATA)/latest.json bin/site/bench/ 2>/dev/null || true; }; fi
 	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/targets.json" ]; then cp $(BENCH_DATA)/targets.json bin/site/targets.json; fi
+	if [ -n "$(BENCH_DATA)" ] && [ -f "$(BENCH_DATA)/compile-history.json" ]; then mkdir -p bin/site/bench && cp $(BENCH_DATA)/compile-history.json $(BENCH_DATA)/compile-latest.json bin/site/bench/; fi
 	printf '{\n\t"date": "%s",\n\t"commit": "%s",\n\t"wasmSize": "%s",\n\t"wasmGz": "%s",\n\t"wasmLegacyGz": "%s",\n\t"dataGz": "%s",\n\t"lixSize": "%s"\n}\n' \
 		"$$(date -u +%Y-%m-%d)" "$$(git rev-parse --short HEAD)" \
 		"$$(wc -c < bin/site/hih.wasm | $(mb))" \
@@ -570,6 +577,9 @@ portcheck: $(TOOL) $(STD) $(HOST_RT) $(REFERENCE)
 
 bench: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN) bin/lix/lix
 	$(SCRIPT) Bench $(BENCH_ARGS)
+
+bench-compile: $(TOOL) $(STD) $(HOST_RT) $(PORT_BIN) $(REFERENCE)
+	$(SCRIPT) CompileBench $(COMPILE_BENCH_ARGS)
 
 bench-arrays: bin/vector-bench/m
 	bin/vector-bench/m $(ARRAY_BENCH_ARGS)

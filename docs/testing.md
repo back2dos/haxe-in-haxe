@@ -264,7 +264,8 @@ handshake and libuv, lix, the corpus, the self-compile), `wasm` (the corpus
 and the self-compile under node and wasmtime, both also with legacy exception
 handling under node), `playground` (the website in three browser engines,
 `make site-check`: a link check; every page at a desktop's and a phone's
-width, no errors and no horizontal scrolling; the benchmark tables; the
+width, no errors and no horizontal scrolling; the benchmark charts, their
+tooltips and tables; the
 playground's compiler with both modules, its fallback to the legacy one in a
 Chromium without exnref, and its worker running a request again after a
 fault of the engine, faked (the WebKit of Safari 26.0 at times faults in
@@ -321,6 +322,49 @@ joins them) and appends `targets/<date>-<commit>.json`, regenerating
 replace the committed `site/data/targets.json` in the site's build. The first points on `bench-data` are earlier measurements
 imported from this repository's history (`"source": "imported"`: a
 development VM, best of the runs).
+
+Compiler benchmarks (`make bench-compile`, `hxmc/test/CompileBench.hx`): the
+port built by hxmc (natively, and as a wasm32-wasi module under node and
+wasmtime) against the reference, compiling three workloads to HXB with
+`-D disable-parallelism`: `hello` (`hxmc/test/bench/Hello.hx`: start-up and
+the core std), `stdlib` (32 std modules as roots) and `self` (the port's own
+source, its std macros run by Eval). N runs per runner, interleaved round by
+round; wall time, CPU time and peak RSS per run (`/usr/bin/time`), median,
+min and max reported; every runner's archive compared with the reference's
+before its times count. `--build` also times hxmc's cold builds of the port
+(native and wasm, an empty object cache) and records their sizes. The output
+has the format of `site/data/bench.json`, the website's fallback when the
+site is built without `BENCH_DATA`. `bench.yml`'s `compile` job runs it on
+every measured commit (5 runs of the reference and native hxmc; the wasm
+runners and the builds once) and appends `compile/<date>-<commit>.json` to
+`bench-data`, regenerating `compile-history.json` and `compile-latest.json`
+(`CompileBench --history <dir> --seed site/data/compile-history.json`: the
+seed holds the runs measured before CI did, imported from this repository's
+history). The reference runs on the same machine in every run, so the
+website's "vs. reference" view (hxmc / reference) cancels most of the
+difference between CI machines; the absolute times of nightlies that land on
+different CPU types move by more than the code does.
+
+The website shows hxmc's history only (one chart per compiler workload and
+per HaxeBenchmarks case: the median of each run, the band its min-max, the
+points off CI hollow on a shaded background, each linked to its commit); the
+other targets and compilers, which change only with their pinned toolchains,
+appear once, as tables of the latest run. Their method in short: Programs'
+time is the wall time of the whole process (start-up, JIT and module
+compilation included); peak RSS includes the JVM, node and the HashLink VM;
+size is the artifact gzipped (the static executable for hxmc, the module for
+wasm, stripped executables dynamically linked to libstdc++ or libhl for C++
+and HL/C, the jar, the script, the bytecode); compile time is a cold build:
+hxmc's whole build (typing, code generation, link; its typed runtime cached
+per tool, as always), the port's run for the JVM, JS and HashLink, the port
+plus hxcpp with g++ (its runtime compiled once beforehand) or gcc -O3 against
+libhl for C++ and HL/C. The target generators compare the port with the
+reference on haxe-formatter and the port itself: sequential (one core, CPU
+time) and with each compiler's default parallelism (wall time), best of 3,
+every sequential output file identical (HL/C after renaming the type names
+that hash the reference binary; C++ and HL/C stop at the sources); a
+parallel output where the reference's own varies between runs (genjvm's
+closures, HXB's string pools) is marked `varies`.
 
 Micro-benchmarks (`hxmc/test/micro`, built and run by hand, not a lane):
 `VectorBlitBench`, `haxe.ds.Vector.blit` against the plain loop for Float
