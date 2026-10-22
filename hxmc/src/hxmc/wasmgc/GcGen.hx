@@ -29,16 +29,20 @@ class GcGen {
 		hxmc.ir.Reach.run(prog, o.stats, calls);
 		var t0 = haxe.Timer.stamp();
 		var u = new Uses(prog, o.opt, o.jobs > 0 ? o.jobs : hxmc.Driver.domains());
+		var t1 = haxe.Timer.stamp();
 		hxmc.ir.Reach.run(prog, o.stats, calls, u.summary);
 		u.scan();
 		if (o.stats) {
-			Sys.println('hxmc: wasm-gc Mir ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms, ${u.sitesReplaced} allocation sites replaced, ${Lambda.count(u.unbuilt)} functions not built');
+			var t2 = haxe.Timer.stamp();
+			Sys.println('hxmc: wasm-gc Mir ${Std.int((t1 - t0) * 1000)} ms, reach and uses ${Std.int((t2 - t1) * 1000)} ms, ${u.sitesReplaced} allocation sites replaced, ${Lambda.count(u.unbuilt)} functions not built');
 			for (f => why in u.unbuilt)
 				Sys.println('  ${f.name}: $why');
 		}
 		var survey = Sys.getEnv("HXMC_GC_SURVEY");
 		if (survey != "1" && survey != "2") {
+			var t3 = haxe.Timer.stamp();
 			sys.io.File.saveBytes(out, new GcModule(prog, u, !o.strip).build());
+			if (o.stats) Sys.println("hxmc: wasm-gc module " + Std.int((haxe.Timer.stamp() - t3) * 1000) + " ms");
 			return;
 		}
 		u.report();
@@ -103,6 +107,7 @@ class Uses {
 	public final unbuilt = new Map<FuncInfo, String>();
 	public var sitesReplaced = 0; // (Escape)
 	final cands = new Map<FuncInfo, Bool>(); // (the functions that may be inlined: Inline.candidate)
+	final inlined = new Map<FuncInfo, Map<FuncInfo, Bool>>(); // (each function's: the callees inlined into it, to any depth)
 	final summaries = new Map<FuncInfo, haxe.ds.Vector<Stmt>>();
 	// the program works on linear memory (hxmc.unsafe, C functions: GcModule.memory)
 	public var memory = false;
@@ -133,6 +138,7 @@ class Uses {
 		MirBuild.inlineCands = optimize ? cands : null;
 		var abi = Abi.get("wasm32-wasi");
 		var dump = Sys.getEnv("HXMC_GC_DUMP"); // (a function's Mir, by its name)
+		var inl = new haxe.ds.Vector<Map<FuncInfo, Bool>>(prog.funcs.length);
 		var bisect = Sys.getEnv("HXMC_GC_BISECT") == null ? [0, 1 << 30] : [for (x in Sys.getEnv("HXMC_GC_BISECT").split(",")) Std.parseInt(x)];
 		// (each function's on its own, on threads: the callees' templates shared)
 		var templates = new haxe.ds.ObjectMap<FuncInfo, {t:Null<Inline.Template>}>();
@@ -151,11 +157,12 @@ class Uses {
 			tlock.release();
 			return t;
 		}
-		function build(fn:FuncInfo):MFunc {
+		function build(fn:FuncInfo, k:Int):MFunc {
 			var mb = new MirBuild(null, abi, fn);
 			mb.gc = true;
 			var mf = mb.objects();
 			if (!optimize) return mf;
+			var into = new Map<FuncInfo, Bool>();
 			function rounds(todo:Array<{call:MIns, fn:FuncInfo}>) {
 				for (_ in 0...Inline.DEPTH) {
 					if (todo.length == 0) break;
@@ -163,8 +170,10 @@ class Uses {
 					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
 						var t = template(s.fn);
-						if (t != null && s.fn != fn && t.size <= Inline.maxSize(true, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt.")))
+						if (t != null && s.fn != fn && t.size <= Inline.maxSize(true, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt."))) {
 							sites.push({call: s.call, callee: t});
+							into.set(s.fn, true);
+						}
 					}
 					todo = Inline.run(mf, sites);
 				}
@@ -181,7 +190,7 @@ class Uses {
 					tlock.release();
 				}
 			}
-			var k = prog.funcs.indexOf(fn);
+			inl[k] = into;
 			if (dump != null && (dump == fn.name || dump == "#" + k)) Sys.println(fn.name + " before Opt:\n" + mf.dump());
 			if (k >= bisect[0] && k < bisect[1]) new Opt(mf).run();
 			if (dump != null && (dump == fn.name || dump == "#" + k)) Sys.println(mf.dump());
@@ -201,7 +210,7 @@ class Uses {
 				var end = k + 16 < fs.length ? k + 16 : fs.length;
 				for (i in k...end)
 					try {
-						out[i] = build(fs[i]);
+						out[i] = build(fs[i], i);
 					} catch (e:MirBuild.Unsupported) {
 						// (what MirBuild does not take: the function traps, GcModule.survey)
 						out[i] = null;
@@ -229,14 +238,18 @@ class Uses {
 		}
 		if (failure != null) throw failure;
 		for (i in 0...fs.length)
-			if (out[i] != null) mirs.set(fs[i], out[i]);
+			if (out[i] != null) {
+				mirs.set(fs[i], out[i]);
+				if (inl[i] != null) inlined.set(fs[i], inl[i]);
+			}
 	}
 
 	// What Reach's second pass reads of f (Reach.bodyOf): its IR, flattened,
-	// each call its Mir no longer makes (inlined everywhere, or gone) replaced
-	// by the callee's body, its parameters by the arguments (so that the names
-	// passed to lookups are still seen: Reach.findSinks); what the Mir dropped
-	// otherwise stays, which keeps more than needed, never less
+	// each call of a callee inlined into it (Uses.inlined) followed by the
+	// callee's body, its parameters replaced by the arguments (so that the
+	// names passed to lookups are still seen: Reach.findSinks), a call its Mir
+	// no longer makes dropped; what the Mir dropped otherwise stays, which
+	// keeps more than needed, never less
 	public function summary(f:FuncInfo):haxe.ds.Vector<Stmt> {
 		var mf = mirs.get(f);
 		if (mf == null) return f.body;
@@ -246,28 +259,29 @@ class Uses {
 		for (b in mf.blocks)
 			for (i in b.ins)
 				if (!i.dead && i.op == Call && i.sym != null) called.set(i.sym, true);
+		var into = inlined.get(f);
 		var out:Array<Stmt> = [];
 		var open:Array<FuncInfo> = [f];
-		function flatten(body:haxe.ds.Vector<Stmt>, subst:Null<Map<Local, Ex>>, depth:Int) {
+		function flatten(body:haxe.ds.Vector<Stmt>, subst:Null<Map<Local, Ex>>) {
 			function ex(e:Ex):Ex {
 				switch e {
 					case ELocal(l) if (subst != null && subst.exists(l)):
 						return subst.get(l);
-					// (a call made at other sites may have been inlined at some: its body too)
-					case ECall(g, args) if ((cands.exists(g) || !called.exists(MirBuild.gcSymOf(g))) && depth < Inline.DEPTH && open.indexOf(g) < 0):
+					case ECall(g, args):
 						var xs = args.map(ex);
-						var m = new Map<Local, Ex>();
-						for (k in 0...g.args.length)
-							if (k < xs.length) m.set(g.args[k], xs[k]);
-						open.push(g);
-						flatten(g.body, m, depth + 1);
-						open.pop();
+						if (into != null && into.exists(g) && open.indexOf(g) < 0) {
+							var m = new Map<Local, Ex>();
+							for (k in 0...g.args.length)
+								if (k < xs.length) m.set(g.args[k], xs[k]);
+							open.push(g);
+							flatten(g.body, m);
+							open.pop();
+						}
 						return called.exists(MirBuild.gcSymOf(g)) ? ECall(g, xs) : ECallHost("hxmc_gc_inlined", xs, g.ret);
-					// (a closure called where it is made may have been inlined there, to
-					// the depth of a call of its own: Escape.closureCalls)
-					case ENewClos(l, _) if (cands.exists(l.fn) && open.indexOf(l.fn) < 0 && open.length < 8):
+					// (a closure called where it is made, inlined there: Escape.closureCalls)
+					case ENewClos(l, _) if (into != null && into.exists(l.fn) && open.indexOf(l.fn) < 0):
 						open.push(l.fn);
-						flatten(l.fn.body, null, 1);
+						flatten(l.fn.body, null);
 						open.pop();
 						return hxmc.ir.Facts.mapEx(ex, e);
 					case _:
@@ -319,7 +333,7 @@ class Uses {
 			for (s in body)
 				st(s);
 		}
-		flatten(f.body, null, 0);
+		flatten(f.body, null);
 		var r = haxe.ds.Vector.fromArrayCopy(out);
 		summaries.set(f, r);
 		return r;
