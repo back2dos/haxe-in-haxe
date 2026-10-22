@@ -77,7 +77,7 @@ class MirBuild {
 
 	public static function mty(t:Ty):MTy
 		return switch t {
-			case TI32 | TBool: I32;
+			case TI32 | TBool | TU8: I32;
 			case TF64: F64;
 			case TI64: I64;
 			case TVoid: Void;
@@ -1273,13 +1273,13 @@ class MirBuild {
 		var get = name == "hxmc_narray_dget";
 		var r = get ? newVar(I64) : -1;
 		var fast = newBlock(), slow = newBlock(), join = newBlock();
-		br(cmp(CEq, loadM(Opt.MConst, I32, 4, a, 4), iconst(Abi.AK_PTR)), fast, slow);
+		br(cmp(CEq, tindex(a), iconst(naType(Abi.AK_PTR))), fast, slow);
 		seal(fast);
 		seal(slow);
 		cur = fast;
 		var ix = op1(SExt, I64, xs[1]);
-		if (get) writeVar(r, cur, loadM(Opt.MElem, I64, 8, a, 8, false, ix, 8));
-		else nativeSetPtr(a, op2(Add, I64, a, op2(Add, I64, lconst32(8), op2(Shl, I64, ix, iconst(3)))), xs[2]);
+		if (get) writeVar(r, cur, loadM(Opt.MElem, I64, 8, a, 0, false, ix, 8));
+		else nativeSetPtr(a, op2(Add, I64, a, op2(Shl, I64, ix, iconst(3))), xs[2]);
 		jmp(join);
 		cur = slow;
 		var list = coldList;
@@ -1386,9 +1386,6 @@ class MirBuild {
 
 	// ---- allocation
 
-	static function hdrLo(nslots:Int, kind:Int):Int
-		return nslots | (kind << 28);
-
 	// an object of n slots: inline bump allocation; the slow path collects.
 	// zero: the slots must read as zeros (Mem.alloc), else every slot is
 	// written before it is read (Mem.allocRaw). The runtime zeroes the nursery
@@ -1409,8 +1406,13 @@ class MirBuild {
 		seal(slow);
 		cur = fast;
 		tlsStore("rt_young_ptr", op2(Add, I64, ptr, lconst32(bytes)));
-		storeM(Opt.MInit, 4, ptr, 0, iconst(hdrLo(n, kind)));
-		storeM(Opt.MInit, 4, ptr, 4, tyConst(tidx));
+		// (the header, hxmc.rt.Types: K_OBJ a record, its type index, its slots,
+		// its hash 0; else an array of n 8-byte slots, its type index, its
+		// words, its length)
+		var record = kind == Abi.K_OBJ;
+		var flags = (n < 0xFFFF ? n : 0xFFFF) << 16;
+		storeM(Opt.MInit, 4, ptr, 0, tyConst(tidx, flags));
+		storeM(Opt.MInit, 4, ptr, 4, iconst(record ? 0 : n));
 		var o = op2(Add, I64, ptr, lconst32(8));
 		writeVar(res, cur, o);
 		jmp(join);
@@ -1420,7 +1422,7 @@ class MirBuild {
 		// (the header is assembled in the runtime, rthxmc.c; a stub per
 		// header and size passes it, DataGen.allocStubs: one call here)
 		var ts = p.tySym(tidx);
-		var r = call(ALLOC_STUB + hdrLo(n, kind) + "$" + (ts != null ? ts : "#" + tidx) + "$" + bytes, vector(), I64);
+		var r = call(ALLOC_STUB + (record ? 0 : n) + "$" + (ts != null ? ts : "#" + (record ? tidx : tidx | flags)) + "$" + bytes, vector(), I64);
 		spillClose(list, sp);
 		writeVar(res, cur, r);
 		jmp(join);
@@ -1503,9 +1505,12 @@ class MirBuild {
 			case _: Abi.AK_PTR;
 		};
 
+	// (an Array's storage is a NativeArray of its kind: its length the
+	// capacity, then the elements, a Bool one byte; Boxes)
 	static function elemSize(t:Ty):Int
 		return switch t {
-			case TI32 | TBool: 4;
+			case TBool: 1;
+			case TI32: 4;
 			case _: 8;
 		};
 
@@ -1576,19 +1581,16 @@ class MirBuild {
 		var vv = ex(v);
 		var av = nullCheck(readLocal(a));
 		var k = arrKind(elem);
-		var fast = newBlock(), slow = newBlock(), join = newBlock(), c1 = newBlock(), c2 = newBlock();
+		var fast = newBlock(), slow = newBlock(), join = newBlock(), c1 = newBlock();
 		slow.cold = true;
 		br(cmp(CEq, loadM(Opt.MHdr, I32, 4, av, 4), iconst(k)), c1, slow);
 		seal(c1);
 		cur = c1;
+		// (the storage's length, the capacity, never changes; one without
+		// room is the empty one)
 		var d = loadM(Opt.MHdr, I64, 8, av, 8);
-		br(cmp(CNe, d, lconst(0, 0)), c2, slow);
-		seal(c2);
-		cur = c2;
 		var len = loadM(Opt.MHdr, I32, 4, av, 0);
-		var cap = op2(And, I32, loadM(Opt.MHdr, I32, 4, d, -8), iconst(0x0FFFFFFF));
-		if (k == Abi.AK_I32 || k == Abi.AK_BOOL) cap = op2(Shl, I32, cap, iconst(1));
-		br(cmp(CULt, len, cap), fast, slow);
+		br(cmp(CULt, len, loadM(Opt.MConst, I32, 4, d, -4)), fast, slow);
 		seal(fast);
 		seal(slow);
 		cur = fast;
@@ -1947,7 +1949,7 @@ class MirBuild {
 			case TREnum(e): e.tindex;
 			case TRBuiltin(n):
 				switch n {
-					case "String": 1;
+					case "String": Abi.T_STRING;
 					case "Int": 2;
 					case "Float": 3;
 					case "Bool": 4;
@@ -1955,7 +1957,6 @@ class MirBuild {
 					case "hxmc_NativeArray": Abi.T_NATIVE_ARRAY;
 					case "Date": Abi.T_DATE;
 					case "Math": Abi.T_MATH;
-					case "haxe_io_Bytes": 8;
 					case _: 0;
 				}
 		};
@@ -1968,11 +1969,6 @@ class MirBuild {
 		br(cmp(CNe, o, lconst(0, 0)), nn, join);
 		seal(nn);
 		cur = nn;
-		var kind = op2(And, I32, op2(Shr, I32, load(I32, 4, o, -8), iconst(28)), iconst(15));
-		var k2 = newBlock();
-		br(cmp(CEq, kind, iconst(Abi.K_OBJ)), k2, join);
-		seal(k2);
-		cur = k2;
 		var t = tindex(o);
 		// lo <= t <= hi as one unsigned comparison
 		writeVar(r, cur, cmp(CULe, op2(Sub, I32, t, tyConst(c.tindex)), idConst(p.spanSym(c), 0)));
@@ -1986,8 +1982,10 @@ class MirBuild {
 		var k = arrKind(elem);
 		var o:Int;
 		if (vs.length == 0) {
+			// (no room: the empty storage of the kind)
 			o = alloc(2, Abi.T_ARRAY, Abi.K_OBJ, true);
 			storeM(Opt.MInit, 4, o, 4, iconst(k));
+			storeM(Opt.MInit, 8, o, 8, symAddr(EMPTY_ARRAY + k, 8));
 			return o;
 		}
 		o = call("hx_arr_new_n", vector(iconst(k), iconst(vs.length)), I64);
@@ -1996,7 +1994,8 @@ class MirBuild {
 			var v = ex(vs[i]);
 			switch elem {
 				case TF64 | TI64: storeM(Opt.MElem, 8, d, 8 * i, v);
-				case TI32 | TBool: storeM(Opt.MElem, 4, d, 4 * i, v);
+				case TI32: storeM(Opt.MElem, 4, d, 4 * i, v);
+				case TBool: storeM(Opt.MElem, 1, d, i, v);
 				case _: setPtr(d, op2(Add, I64, d, lconst32(8 * i)), v, Opt.MElem);
 			}
 		}
@@ -2203,13 +2202,13 @@ class MirBuild {
 			var k = intLiteral(args[0], "NativeArray kind");
 			var n = args.length - 1;
 			if (n == 0) return symAddr(EMPTY_ARRAY + k, 8);
-			if (n > (k == Abi.AK_BOOL ? 0x7FFFFFE8 : k == Abi.AK_I32 ? 0x1FFFFFFA : 0x0FFFFFFD)) throw "hxmc: NativeArray literal of " + n + " elements";
+			if (n > Abi.akMax(k)) throw "hxmc: NativeArray literal of " + n + " elements";
 			var o = call("hx_narray_new_n", vector(iconst(k), iconst(n)), I64);
-			var size = k == Abi.AK_BOOL ? 1 : k == Abi.AK_I32 ? 4 : 8;
+			var size = Abi.akSize(k);
 			for (i in 0...n) {
 				var v = ex(args[i + 1]);
-				if (k == Abi.AK_PTR) setPtr(o, op2(Add, I64, o, lconst32(8 + 8 * i)), v, Opt.MElem);
-				else storeM(Opt.MElem, size, o, 8 + size * i, v);
+				if (k == Abi.AK_PTR) setPtr(o, op2(Add, I64, o, lconst32(8 * i)), v, Opt.MElem);
+				else storeM(Opt.MElem, size, o, size * i, v);
 			}
 			return o;
 		}
@@ -2223,7 +2222,7 @@ class MirBuild {
 				// test; none: the empty array of the kind, EMPTY_ARRAY)
 				var valid = newBlock(), other = newBlock(), empty = newBlock(), invalid = newBlock(), join = newBlock();
 				other.cold = true;
-				br(cmp(CULt, op2(Sub, I32, n, iconst(1)), iconst(k == Abi.AK_BOOL ? 0x7FFFFFE8 : k == Abi.AK_I32 ? 0x1FFFFFFA : 0x0FFFFFFD)), valid, other);
+				br(cmp(CULt, op2(Sub, I32, n, iconst(1)), iconst(Abi.akMax(k))), valid, other);
 				seal(other);
 				cur = other;
 				br(cmp(CEq, n, iconst(0)), empty, invalid);
@@ -2239,12 +2238,10 @@ class MirBuild {
 				jmp(join);
 				seal(valid);
 				cur = valid;
-				// One metadata word plus the elements; the header counts 8-byte slots.
-				var words = k == Abi.AK_BOOL ? op2(Shr, I32, op2(Add, I32, n, iconst(7)), iconst(3))
+				// (the elements' words; the header holds the length, the type the kind)
+				var words = Abi.akSize(k) == 1 ? op2(Shr, I32, op2(Add, I32, n, iconst(7)), iconst(3))
 					: k == Abi.AK_I32 ? op2(Shr, I32, op2(Add, I32, n, iconst(1)), iconst(1)) : n;
-				var a = allocDyn(op2(Add, I32, words, iconst(1)), iconst(Abi.T_NATIVE_ARRAY), iconst(k == Abi.AK_PTR ? Abi.K_PARR : Abi.K_RAW), true);
-				storeM(Opt.MInit, 4, a, 0, n);
-				storeM(Opt.MInit, 4, a, 4, iconst(k));
+				var a = allocDyn(words, arrWord(iconst(naType(k)), words), n, true);
 				writeVar(res, cur, a);
 				jmp(join);
 				seal(join);
@@ -2252,14 +2249,14 @@ class MirBuild {
 				return readVar(res, cur);
 			}
 			nullCheck(xs[0]);
-			if (name == "hxmc_narray_length") return loadM(Opt.MConst, I32, 4, xs[0], 0);
+			if (name == "hxmc_narray_length") return loadM(Opt.MConst, I32, 4, xs[0], -4);
 			if (name == "hxmc_narray_dget" || name == "hxmc_narray_dset") return narrayDyn(name, xs);
 			var suffix = name.substr(name.length - 1);
-			var size = suffix == "b" ? 1 : suffix == "i" ? 4 : 8;
+			var size = suffix == "b" || suffix == "u" ? 1 : suffix == "i" ? 4 : 8;
 			var ix = op1(SExt, I64, xs[1]);
-			if (StringTools.startsWith(name, "hxmc_narray_get_")) return loadM(Opt.MElem, mty(ret), size, xs[0], 8, false, ix, size);
-			if (suffix == "p") nativeSetPtr(xs[0], op2(Add, I64, xs[0], op2(Add, I64, lconst32(8), op2(Shl, I64, ix, iconst(3)))), xs[2]);
-			else storeM(Opt.MElem, size, xs[0], 8, xs[2], ix, size);
+			if (StringTools.startsWith(name, "hxmc_narray_get_")) return loadM(Opt.MElem, mty(ret), size, xs[0], 0, false, ix, size);
+			if (suffix == "p") nativeSetPtr(xs[0], op2(Add, I64, xs[0], op2(Shl, I64, ix, iconst(3))), xs[2]);
+			else storeM(Opt.MElem, size, xs[0], 0, xs[2], ix, size);
 			return iconst(0);
 		}
 		// Dynamic access by a literal name: the field id is known here
@@ -2278,16 +2275,16 @@ class MirBuild {
 		if (hxmc.ir.FnLower.isIntrinsic(name)) return intrinsic(name, args);
 		var xs = exs(args);
 		return switch name {
-			case "String_length": loadM(Opt.MConst, I32, 4, nullCheck(xs[0]), 0);
+			case "String_length": strLen(nullCheck(xs[0]));
 			case "String_charCodeAt_i":
 				nullCheck(xs[0]);
 				var r = newVar(I32);
 				writeVar(r, cur, iconst(0));
 				var ok = newBlock(), join = newBlock();
-				br(cmp(CULt, xs[1], load(I32, 4, xs[0], 0)), ok, join);
+				br(cmp(CULt, xs[1], strLen(xs[0])), ok, join);
 				seal(ok);
 				cur = ok;
-				writeVar(r, cur, load(I32, 2, xs[0], 8, false, op1(SExt, I64, xs[1]), 2));
+				writeVar(r, cur, load(I32, 2, xs[0], 4, false, op1(SExt, I64, xs[1]), 2)); // (the units after the length)
 				jmp(join);
 				seal(join);
 				cur = join;
@@ -2782,6 +2779,11 @@ class MirBuild {
 				tlsStore(literal(args[0], "Mem.tlsSet"), ex(args[1]));
 				iconst(0);
 			case "abi": iconst(abiConst(literal(args[0], "Mem.abi")));
+			case "typeIndexOf":
+				switch args[0] {
+					case EType(TRClass(c)) | ECast(_, EType(TRClass(c))) if (!c.isInterface): tyConst(c.tindex);
+					case _: throw new Unsupported("Mem.typeIndexOf: a class, by name");
+				}
 			case "os": iconst(abi.osCode());
 			case "arm": iconst(abi.arm ? 1 : 0);
 			case "target": iconst(targetCode(abi));
@@ -2840,7 +2842,19 @@ class MirBuild {
 					case _: 0;
 				}];
 				alloc(c[0], c[1], c[2], short == "alloc");
-			case "alloc" | "allocRaw": allocDyn(ex(args[0]), ex(args[1]), ex(args[2]), short == "alloc");
+			case "alloc" | "allocRaw":
+				// (the kind, a literal: K_OBJ a record; else an array of 8-byte
+				// slots, references or not)
+				var n = ex(args[0]), t = ex(args[1]);
+				switch args[2] {
+					case EInt(0): allocDyn(n, op2(Or, I32, t, op2(Shl, I32, n, iconst(16))), iconst(0), short == "alloc"); // (K_OBJ)
+					case EInt(_): allocDyn(n, arrWord(t, n), n, short == "alloc");
+					case _: throw new Unsupported("Mem.alloc: the kind, not a literal");
+				}
+			case "allocArray" | "allocArrayRaw":
+				// (the type, the length, the words)
+				var t = ex(args[0]), len = ex(args[1]), words = ex(args[2]);
+				allocDyn(words, arrWord(t, words), len, short == "allocArray");
 			case "callRef1" | "callRef2":
 				var xs = exs(args);
 				callInd(xs[0], xs.slice(1), I64);
@@ -2864,7 +2878,10 @@ class MirBuild {
 
 	// Mem.alloc: an object of a run-time size (n slots), type index and kind;
 	// zero as for alloc
-	function allocDyn(n:Int, tidx:Int, kind:Int, zero:Bool):Int {
+	// an object of n slots, its header's words w0 (the type index first) and
+	// w1 (hxmc.rt.Types), as alloc's; the slow path assembles it from them
+	// and the bytes (GcPaths)
+	function allocDyn(n:Int, w0:Int, w1:Int, zero:Bool):Int {
 		var n64 = op1(ZExt, I64, n);
 		var bytes = op2(Shl, I64, op2(Add, I64, n64, lconst(1, 0)), lconst(3, 0));
 		var ptr = tlsLoad("rt_young_ptr");
@@ -2877,21 +2894,35 @@ class MirBuild {
 		seal(slow);
 		cur = fast;
 		tlsStore("rt_young_ptr", op2(Add, I64, ptr, bytes));
-		var lo = op2(Or, I32, n, op2(Shl, I32, kind, iconst(28)));
-		storeM(Opt.MInit, 4, ptr, 0, lo);
-		storeM(Opt.MInit, 4, ptr, 4, tidx);
+		storeM(Opt.MInit, 4, ptr, 0, w0);
+		storeM(Opt.MInit, 4, ptr, 4, w1);
 		writeVar(res, cur, op2(Add, I64, ptr, lconst32(8)));
 		jmp(join);
 		cur = slow;
 		var list = coldList;
 		var sp = spillOpen(list, 0);
-		var r = call("hxmc_alloc_slow", vector(op2(Or, I32, n, op2(Shl, I32, kind, iconst(28))), tidx, op1(Trunc, I32, bytes)), I64);
+		var r = call("hxmc_alloc_slow", vector(w1, w0, op1(Trunc, I32, bytes)), I64);
 		spillClose(list, sp);
 		writeVar(res, cur, r);
 		jmp(join);
 		seal(join);
 		cur = join;
 		return readVar(res, cur);
+	}
+
+	// a string's length (its payload's first word: hxmc.rt.Types)
+	function strLen(s:Int):Int
+		return loadM(Opt.MConst, I32, 4, s, 0);
+
+	// the type of NativeArray storage of element kind k (hxmc.rt.Types.naType)
+	public static function naType(k:Int):Int
+		return Abi.T_NATIVE_ARRAY - k;
+
+	// an array's first header word: its type t, its words (0xFFFF from that
+	// many on, without a branch: hxmc.rt.Types.arrWord)
+	function arrWord(t:Int, words:Int):Int {
+		var sat = op2(Sar, I32, op2(Sub, I32, iconst(0xFFFE), words), iconst(31));
+		return op2(Or, I32, t, op2(Shl, I32, op2(Or, I32, words, sat), iconst(16)));
 	}
 
 	function strEq(a:Int, b:Int):Int {
@@ -2908,7 +2939,7 @@ class MirBuild {
 		br(cmp(CEq, b, lconst(0, 0)), join, c3);
 		seal(c3);
 		cur = c3;
-		br(cmp(CEq, load(I32, 4, a, 0), load(I32, 4, b, 0)), slow, join);
+		br(cmp(CEq, strLen(a), strLen(b)), slow, join);
 		seal(slow);
 		cur = slow;
 		writeVar(r, cur, call("hx_str_eq_slow", vector(a, b), I32));
@@ -2927,7 +2958,7 @@ class MirBuild {
 		br(cmp(CULt, c, iconst(0x10000)), c2, slow);
 		seal(c2);
 		cur = c2;
-		var cap = op2(Shl, I32, op2(And, I32, load(I32, 4, d, -8), iconst(0x0FFFFFFF)), iconst(2));
+		var cap = op2(Shl, I32, load(I32, 4, d, -4), iconst(2));
 		br(cmp(CULt, len, cap), fast, slow);
 		seal(fast);
 		seal(slow);

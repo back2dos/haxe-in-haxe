@@ -123,7 +123,7 @@ class Uv {
 	// ---- C data <-> Haxe values
 
 	static inline function data(b:Bytes):Ptr
-		return Mem.addr(b).add(8);
+		return Mem.addr(b.getData());
 
 	// a NUL-terminated copy of a Bytes in the arena (null for null)
 	static function bytesZ(a:Arena, b:Null<Bytes>):CString

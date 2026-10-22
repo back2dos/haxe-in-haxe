@@ -1124,7 +1124,7 @@ class FuncGen {
 	// inline, the rest through Helpers.naGet and GcNArray.set
 
 	// the most elements of each kind (MirBuild's: the same programs fail)
-	static final NA_LIMITS:haxe.ds.Vector<Int> = core.ds.VectorTools.vector(0x0FFFFFFD, 0x1FFFFFFA, 0x0FFFFFFD, 0x0FFFFFFD, 0x7FFFFFE8);
+	static final NA_LIMITS:haxe.ds.Vector<Int> = core.ds.VectorTools.vector(0x0FFFFFFD, 0x1FFFFFFA, 0x0FFFFFFD, 0x0FFFFFFD, 0x7FFFFFE8, 0x7FFFFFE8);
 
 	function narray(name:String, args:haxe.ds.Vector<Ex>) {
 		var p = m.dataType("p");
@@ -1216,8 +1216,8 @@ class FuncGen {
 				var k = name.substr(name.length - 1), d = m.naType(k);
 				derefAs(args[0], d);
 				expr(args[1]);
-				// (Bools: unsigned bytes)
-				gc(k == "b" ? 0x0D : 0x0B, d);
+				// (Bools and Bytes: unsigned bytes)
+				gc(k == "b" || k == "u" ? 0x0D : 0x0B, d);
 			case _ if (StringTools.startsWith(name, "hxmc_narray_set_")):
 				var d = m.naType(name.substr(name.length - 1));
 				derefAs(args[0], d);
@@ -1718,43 +1718,28 @@ class FuncGen {
 			case "hx_dyn_call":
 				all();
 				call(m.dynCall());
-			case "haxe_io_Bytes_alloc":
-				all();
-				gc(0x07, m.bytesType);
-			case "haxe_io_Bytes_get_length":
-				exprAs(args[0], m.bytesType);
-				gc(0x0F);
-			case "haxe_io_Bytes_get":
-				exprAs(args[0], m.bytesType);
-				expr(args[1]);
-				gc(0x0D, m.bytesType);
-			case "haxe_io_Bytes_set":
-				exprAs(args[0], m.bytesType);
-				expr(args[1]);
-				expr(args[2]);
-				gc(0x0E, m.bytesType);
-			case "haxe_io_Bytes_getInt32":
+			case "hxmc_NativeBytes_getInt32":
 				all();
 				call(Helpers.bytesGet(m, false));
-			case "haxe_io_Bytes_setInt32":
+			case "hxmc_NativeBytes_setInt32":
 				all();
 				call(Helpers.bytesSet(m, false));
-			case "haxe_io_Bytes_getDouble":
+			case "hxmc_NativeBytes_getDouble":
 				all();
 				call(Helpers.bytesGet(m, true));
 				op(0xBF);
-			case "haxe_io_Bytes_setDouble":
+			case "hxmc_NativeBytes_setDouble":
 				expr(args[0]);
 				expr(args[1]);
 				expr(args[2]);
 				op(0xBD);
 				call(Helpers.bytesSet(m, true));
-			case "haxe_io_Bytes_getFloat":
+			case "hxmc_NativeBytes_getFloat":
 				all();
 				call(Helpers.bytesGet(m, false));
 				op(0xBE);
 				op(0xBB);
-			case "haxe_io_Bytes_setFloat":
+			case "hxmc_NativeBytes_setFloat":
 				expr(args[0]);
 				expr(args[1]);
 				expr(args[2]);

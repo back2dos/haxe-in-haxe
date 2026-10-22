@@ -12,6 +12,9 @@ import core.ds.VectorTools.vector;
 enum Ty {
 	TI32;
 	TBool; // an i32 at run time; kept apart so boxing and Std.string know it
+	// hxmc.Byte as the element of a NativeArray (RNativeArr's only): one
+	// byte of storage, its values TI32s from 0 to 255; elsewhere a Byte is TI32
+	TU8;
 	TF64;
 	TI64; // haxe.Int64 (hxmc.I64): an int64_t, boxed in Dynamic
 	TVoid;
@@ -45,6 +48,10 @@ class ClassInfo {
 	public var ident:String; // the prefix of its symbols
 	public var sup:Null<ClassInfo>;
 	public var fields:Array<{name:String, ty:Ty}> = []; // including inherited (the class is the header's type index)
+	// properties without storage that Dynamic access and reflection read as
+	// fields (@:hxmc.lengthOf("f"): the length of the NativeArray field f;
+	// Facts gives them a field entry of kind L), including inherited ones
+	public var derived:Array<{name:String, of:String}> = [];
 	public var locs:Vector<Int>; // per field: its slot, or for Int/Bool its 4-byte index (packed two per slot; Facts.layout)
 	public var nslots:Int;
 	public var methods:Map<String, FuncInfo> = new Map(); // own implementations
@@ -471,7 +478,7 @@ class Program {
 class Ir {
 	public static function repr(t:Ty):String
 		return switch t {
-			case TI32: "i";
+			case TI32 | TU8: "i";
 			case TBool: "b";
 			case TF64: "f";
 			case TI64: "l";

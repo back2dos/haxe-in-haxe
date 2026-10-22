@@ -186,7 +186,7 @@ class GcRepr {
 
 	// b's bytes [pos, pos + n) copied into a buffer of the linear memory kept
 	// for this (hxmc.unsafe.BytesPtr.of), its address
-	public static function lend(b:haxe.io.Bytes, pos:Int, n:Int):hxmc.unsafe.Ptr {
+	public static function lend(b:haxe.io.BytesData, pos:Int, n:Int):hxmc.unsafe.Ptr {
 		if (pos < 0 || n < 0 || pos + n > W.bytesLen(b)) throw "OutsideBounds";
 		if (n > lentCap) {
 			if (!lent.isNull()) hxmc.unsafe.LibC.free(lent);
@@ -247,7 +247,7 @@ class GcRepr {
 		return 0;
 	}
 
-	static var scratchBytes:haxe.io.Bytes = null;
+	static var scratchBytes:Dynamic = null;
 
 	// a buffer of at least n bytes, kept for the next call
 	public static function scratch(n:Int):GcOctets {
@@ -358,8 +358,9 @@ abstract GcElems(Dynamic) from Dynamic to Dynamic {
 		return W.arrGetP(this, i);
 }
 
-// bytes: a haxe.io.Bytes (an array of bytes)
-abstract GcOctets(haxe.io.Bytes) from haxe.io.Bytes to haxe.io.Bytes {
+// bytes: a haxe.io.BytesData (an array of bytes; Dynamic: no view of it as
+// a NativeArray to take, hxmc.rt.gc.GcNArray)
+abstract GcOctets(Dynamic) from Dynamic to Dynamic {
 	public inline function get(i:Int):Int
 		return W.bytesGet(this, i);
 

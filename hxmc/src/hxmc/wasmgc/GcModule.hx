@@ -137,7 +137,7 @@ class GcModule {
 
 	public static function repr(t:Ty):String
 		return switch t {
-			case TI32 | TBool: "i";
+			case TI32 | TBool | TU8: "i";
 			case TF64: "f";
 			case TI64: "l";
 			case TVoid: "v";
@@ -258,7 +258,6 @@ class GcModule {
 			case TRef(RNativeArr(e)) if (!e.match(TRef(RAny))): "t" + naType(elemKind(e));
 			case TRef(REnum(e)): "t" + (e == null ? tEnum : enumBase(e));
 			case TRef(RClos(s)): "t" + closType(s);
-			case TRef(RNative("haxe_io_Bytes")): "t" + tBytes;
 			case _: repr(t);
 		}
 
@@ -941,9 +940,10 @@ class GcModule {
 	public function dataType(k:String):Int
 		return tData.get(k);
 
-	// a NativeArray's storage of the kind: an Array's data array, but Bool's packed (i8)
+	// a NativeArray's storage of the kind: an Array's data array, but Bool's
+	// packed (i8), and a Byte's the array of bytes (haxe.io.BytesData)
 	public function naType(k:String):Int
-		return k == "b" ? tNBool : tData.get(k);
+		return k == "b" ? tNBool : k == "u" ? tBytes : tData.get(k);
 
 	// the kind of NativeArray storage of the type, or null
 	public function naKindOf(t:Int):Null<String> {
@@ -953,7 +953,7 @@ class GcModule {
 	}
 
 	// a NativeArray's element kinds by their numbers (FnLower.nativeKind, rt.Types.AK_*)
-	public static final NA_KINDS:haxe.ds.Vector<String> = core.ds.VectorTools.vector("p", "i", "f", "l", "b");
+	public static final NA_KINDS:haxe.ds.Vector<String> = core.ds.VectorTools.vector("p", "i", "f", "l", "b", "u");
 
 	public var nwrapType(get, never):Int;
 
@@ -977,9 +977,10 @@ class GcModule {
 		return g;
 	}
 
-	// an array's element kind in the IR: b for Bool, else its representation
+	// an array's element kind in the IR: b for Bool, u for a NativeArray's
+	// Byte, else its representation
 	public static function elemKind(t:Ty):String
-		return t == TBool ? "b" : repr(t);
+		return t == TBool ? "b" : t == TU8 ? "u" : repr(t);
 
 	// An object's first i32 (a class instance's class index, an anonymous
 	// structure's layout index) holds its identity hash in its top 16 bits,
