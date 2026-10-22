@@ -1189,6 +1189,8 @@ class Opt {
 
 	var barriers = 0;
 
+	public var freshStores = 0; // (stats: the stores freshTargets took the barrier of)
+
 	// the largest object (slots) the runtime always allocates in the nursery
 	// (Gc.allocNow: a quarter of it at most; it is 4 KB at least)
 	static inline var YOUNG_SLOTS = 63;
@@ -1216,6 +1218,7 @@ class Opt {
 					i.args = i.args.slice(0, i.args.length - 2);
 					i.info.young = false;
 					i.info.fresh = true;
+					freshStores++;
 				}
 				if (i.isObj() ? objKill(i) == ALL : i.op == Call && (!i.keepsFrame || i.returnsTwice)) last = -1;
 				if (i.op == New && i.info.n <= YOUNG_SLOTS) last = i.id;

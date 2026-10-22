@@ -98,6 +98,7 @@ class Driver {
 	var escFolds = 0;
 	var allocsFolded = 0; // (Fold)
 	var rootStores = 0; // (Frames)
+	var freshStores = 0; // (Opt.freshTargets)
 	var framesRemoved = 0;
 	var foldWhy = new Map<String, Int>(); // (Fold.whyOn)
 	var escTime = 0.0;
@@ -181,12 +182,14 @@ class Driver {
 			// dead code
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) {
-				new Opt(mf).run();
+				var op = new Opt(mf);
+				op.run();
 				// (the rooted locals' slots nothing reads any more)
 				var fs = new Frames(mf);
 				fs.run();
-				if (fs.storesRemoved > 0 || fs.frameRemoved) {
+				if (fs.storesRemoved > 0 || fs.frameRemoved || op.freshStores > 0) {
 					lock.acquire();
+					freshStores += op.freshStores;
 					rootStores += fs.storesRemoved;
 					if (fs.frameRemoved) framesRemoved++;
 					lock.release();
@@ -280,7 +283,8 @@ class Driver {
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded (cpu ${ms(escTime)})');
 		Sys.println('hxmc: $allocsFolded allocations folded into the one before them (Fold)');
-		Sys.println('hxmc: frames: $rootStores root stores and $framesRemoved frames removed');
+		Sys.println('hxmc: frames: $rootStores root stores and $framesRemoved frames removed; $freshStores write barriers of objects just allocated left out');
+
 
 		var ks = [for (k in foldWhy.keys()) k];
 		ks.sort((a, b) -> foldWhy.get(b) - foldWhy.get(a));
