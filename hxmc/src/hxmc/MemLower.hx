@@ -172,7 +172,7 @@ class MemLower extends MirWriter {
 				}
 			}
 			var v = lower(x, o);
-			if (v >= 0) {
+			if (v >= 0 && v != x.id) {
 				replace(x.id, v);
 				var y = f.vals[v];
 				if (y.vty == null) y.vty = x.vty;
@@ -231,13 +231,17 @@ class MemLower extends MirWriter {
 				v;
 			case NewDyn:
 				allocDyn(r(x.a), r(x.b), r(x.c), o.zero);
+			// (the field accesses rewritten in place: the same instruction)
 			case InitField:
 				var v = r(x.a);
-				storeInit(v, o.loc, o.t, r(x.b));
+				if (o.t != TVoid) access(x, Store, Opt.MInit, v, r(x.b), o.loc, o.t);
 				if (o.next >= 0) storeM(Opt.MInit, 8, v, 8 * o.next, lconst(0, 0));
 				-1;
 			case GetField:
-				slotLoad(r(x.a), o.loc, o.t);
+				o.t == TVoid ? iconst(0) : access(x, Load, Opt.MField, r(x.a), -1, o.loc, o.t);
+			case SetField if (!o.t.match(TRef(_)) || o.flag):
+				access(x, Store, Opt.MField, r(x.a), r(x.b), o.loc, o.t);
+				-1;
 			case SetField:
 				storeSlot(r(x.a), o.loc, o.t, r(x.b), o.flag);
 				-1;
@@ -339,6 +343,27 @@ class MemLower extends MirWriter {
 	}
 
 	// ---- object slots
+
+	// field access x becomes the load or store of slot loc of type t
+	// (value: the store's) where control is; a load's value is x's
+	function access(x:MIns, op:Op, cls:Int, o:Int, value:Int, loc:Int, t:Ty):Int {
+		var four = !t.match(TRef(_) | TF64 | TI64);
+		x.op = op;
+		x.ty = op == Load ? (t == TF64 ? F64 : four ? I32 : I64) : Void;
+		x.info = null;
+		x.a = o;
+		x.b = -1;
+		x.c = value;
+		x.imm = four ? 4 * loc : 8 * loc;
+		x.imm2 = 1;
+		x.size = four ? 4 : 8;
+		x.signed = false;
+		x.mem = cls;
+		if (x.pos == 0) x.pos = curPos;
+		x.block = cur;
+		cur.ins.push(x);
+		return x.id;
+	}
 
 	function slotLoad(o:Int, loc:Int, t:Ty):Int
 		return switch t {
