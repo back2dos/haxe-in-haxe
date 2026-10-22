@@ -116,11 +116,11 @@ class Emit implements hxmc.Target.Emitter {
 		lastPos = 0;
 		var off = f.outArgs;
 		var n = 0;
-		for (r in Isel.CALLEE_SAVED)
+		for (r in hxmc.CallConv.Aapcs64.CALLEE_SAVED)
 			if (usedRegs[r]) n++;
 		saved = new Vector(n);
 		n = 0;
-		for (r in Isel.CALLEE_SAVED)
+		for (r in hxmc.CallConv.Aapcs64.CALLEE_SAVED)
 			if (usedRegs[r]) saved[n++] = r;
 		split = 0;
 		if (probe && off + 8 * saved.length > 504) {
