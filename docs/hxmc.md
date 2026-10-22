@@ -247,6 +247,22 @@ would otherwise wait for the kernel to zero each fresh page they copy into
 (`RT_PREFAULT=0`: no helper). It trades CPU time for wall time: the
 HaxeBenchmarks' alloc takes 7.6% less wall time and 20% more CPU time with it. `RT_STATS=1` prints the resizes and what was promoted.
 
+Threads that race on a field see objects whole: a store of a reference
+into an object, an array or a static publishes it (`MIns.release`), so a
+thread that reads the reference also sees the stores that initialised the
+object, as OCaml's `caml_modify` (a release store) guarantees the
+reference compiler's code. Upstream's parallel phases rely on it: Dce reads
+`a_meta` without its lock and adds the `@:used` entry under it. Free on
+x86-64; arm64 orders the stores with a `dmb ishst` before each such store
+(not before initialising stores or null ones); the reading thread's loads
+through the reference are ordered by their address dependency. Without
+it, the port on arm64 read a new metadata array whose length was there but
+not its element: a null access in a child compiler in about one run in 700
+of TestUnicode (some 230 compilers each through testIPC; 9 in 6000 runs,
+none in 10 080 with the barrier). It costs arm64 1-2% of the port's
+self-compile and 12% of HaxeBenchmarks' binarytrees (two such stores per
+node, in its constructor); json and formatter stay within 3%.
+
 Strings are UTF-16; they cross the system boundaries (files, processes,
 sockets, the environment, `Bytes.getString` and `ofString`) as UTF-8
 (`Str.decode`, `Str.utf8Into`). A byte that does not begin a well-formed

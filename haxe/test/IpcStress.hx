@@ -7,8 +7,9 @@
 //
 // The children are the same program, compiled once to HXB and run with
 // `--hxb-lib ... --run IpcStress child <mode> ...`. Each round runs every mode:
-// - echo: the child prints the line it reads from stdin (the parent reads
-//   after the exit code, as runUtility does);
+// - echo, readString, readUntil: the child prints what it reads from stdin
+//   with readLine, readString(byte length) and readUntil(0x70) (the parent
+//   reads after the exit code, as runUtility does);
 // - nested: the child sets an environment variable and prints what a
 //   grandchild prints of it (TestUnicode's putEnv + getEnv / environment);
 // - stream: the child writes the string a few bytes at a time, flushing and
