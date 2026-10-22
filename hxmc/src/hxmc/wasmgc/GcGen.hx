@@ -133,6 +133,7 @@ class Uses {
 		MirBuild.inlineCands = optimize ? cands : null;
 		var abi = Abi.get("wasm32-wasi");
 		var dump = Sys.getEnv("HXMC_GC_DUMP"); // (a function's Mir, by its name)
+		var bisect = Sys.getEnv("HXMC_GC_BISECT") == null ? [0, 1 << 30] : [for (x in Sys.getEnv("HXMC_GC_BISECT").split(",")) Std.parseInt(x)];
 		// (each function's on its own, on threads: the callees' templates shared)
 		var templates = new haxe.ds.ObjectMap<FuncInfo, {t:Null<Inline.Template>}>();
 		var tlock = new sys.thread.Mutex();
@@ -180,8 +181,10 @@ class Uses {
 					tlock.release();
 				}
 			}
-			new Opt(mf).run();
-			if (dump != null && dump == fn.name) Sys.println(mf.dump());
+			var k = prog.funcs.indexOf(fn);
+			if (dump != null && (dump == fn.name || dump == "#" + k)) Sys.println(fn.name + " before Opt:\n" + mf.dump());
+			if (k >= bisect[0] && k < bisect[1]) new Opt(mf).run();
+			if (dump != null && (dump == fn.name || dump == "#" + k)) Sys.println(mf.dump());
 			return mf;
 		}
 		var fs = prog.funcs;
@@ -245,22 +248,28 @@ class Uses {
 				if (!i.dead && i.op == Call && i.sym != null) called.set(i.sym, true);
 		var out:Array<Stmt> = [];
 		var open:Array<FuncInfo> = [f];
-		function flatten(body:haxe.ds.Vector<Stmt>, subst:Null<Map<Local, Ex>>) {
+		function flatten(body:haxe.ds.Vector<Stmt>, subst:Null<Map<Local, Ex>>, depth:Int) {
 			function ex(e:Ex):Ex {
 				switch e {
 					case ELocal(l) if (subst != null && subst.exists(l)):
 						return subst.get(l);
 					// (a call made at other sites may have been inlined at some: its body too)
-					case ECall(g, args) if ((cands.exists(g) || !called.exists(MirBuild.gcSymOf(g))) && open.length <= Inline.DEPTH
-						&& open.indexOf(g) < 0):
+					case ECall(g, args) if ((cands.exists(g) || !called.exists(MirBuild.gcSymOf(g))) && depth < Inline.DEPTH && open.indexOf(g) < 0):
 						var xs = args.map(ex);
 						var m = new Map<Local, Ex>();
 						for (k in 0...g.args.length)
 							if (k < xs.length) m.set(g.args[k], xs[k]);
 						open.push(g);
-						flatten(g.body, m);
+						flatten(g.body, m, depth + 1);
 						open.pop();
 						return called.exists(MirBuild.gcSymOf(g)) ? ECall(g, xs) : ECallHost("hxmc_gc_inlined", xs, g.ret);
+					// (a closure called where it is made may have been inlined there, to
+					// the depth of a call of its own: Escape.closureCalls)
+					case ENewClos(l, _) if (cands.exists(l.fn) && open.indexOf(l.fn) < 0 && open.length < 8):
+						open.push(l.fn);
+						flatten(l.fn.body, null, 1);
+						open.pop();
+						return hxmc.ir.Facts.mapEx(ex, e);
 					case _:
 						return hxmc.ir.Facts.mapEx(ex, e);
 				}
@@ -310,7 +319,7 @@ class Uses {
 			for (s in body)
 				st(s);
 		}
-		flatten(f.body, null);
+		flatten(f.body, null, 0);
 		var r = haxe.ds.Vector.fromArrayCopy(out);
 		summaries.set(f, r);
 		return r;
