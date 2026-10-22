@@ -22,6 +22,7 @@ class Frames {
 		this.f = f;
 
 	static inline var NONE = 0x40000000; // (no offset: not the frame's address)
+	static var live = Sys.getEnv("HXMC_FRAMES_LIVE") != "0";
 
 	public function run() {
 		var r:Null<MIns> = null;
@@ -44,74 +45,129 @@ class Frames {
 		// slots, an array store's rooted array)
 		var off = MFunc.ints(vals.length, NONE);
 		off[r.id] = 0;
-		inline function derived(v:Int):Bool
-			return v >= 0 && off[v] != NONE;
 		var slot = MFunc.ints(vals.length, -1);
 		var nslots = 0, stores = 0, reads = 0;
+		var read:Array<Bool> = []; // (the slots some load reads)
 		var manage:Array<MIns> = [], takers:Array<MIns> = [], phis:Array<MIns> = [];
 		for (b in order)
 			for (i in b.ins) {
 				if (i.dead) continue;
-				switch i.op {
-					case Call if (i.returnsTwice):
-						return; // (a try: its handlers read the slots)
-					case Phi:
-						phis.push(i);
-						continue;
-					case Add if (derived(i.a)):
-						var c = vals[i.b];
-						if (c.op != Const || c.sym != null || c.imm2 != (c.imm < 0 ? -1 : 0)) return;
-						off[i.id] = off[i.a] + c.imm;
-						continue;
-					case Load | Store if (derived(i.a)):
-						if (i.b >= 0 || i.size != 8 || i.op == Store && derived(i.c)) return;
-						var s = off[i.a] + i.imm;
-						if (s < 0 || s & 7 != 0) return;
-						slot[i.id] = s >> 3;
-						if ((s >> 3) >= nslots) nslots = (s >> 3) + 1;
-						if (i.op == Store) stores++ else reads++;
-						continue;
-					case TlsStore if ((i.sym == "rt_sp" || i.sym == "rt_sp_hw") && derived(i.a)):
-						manage.push(i);
-						continue;
-					case Cmp if (derived(i.a) || derived(i.b)):
-						if (i.imm != CUGt || !derived(i.a) || derived(i.b)) return;
-						manage.push(i);
-						continue;
-					case _:
+				var op = i.op;
+				if (op == Phi) {
+					phis.push(i);
+					continue;
 				}
-				if (derived(i.a) || derived(i.b) || derived(i.c)) return;
-				var takes = false;
-				for (k in 0...i.args.length)
-					if (derived(i.args[k])) {
-						if (!i.isObj() || !i.info.fr || k != i.info.nspill || i.args[k] != r.id) return;
-						takes = true;
+				if (op == Call && i.returnsTwice) return; // (a try: its handlers read the slots)
+				// (the operands that are the frame's addresses)
+				var da = i.a >= 0 && off[i.a] != NONE, db = i.b >= 0 && off[i.b] != NONE, dc = i.c >= 0 && off[i.c] != NONE;
+				var dargs = false;
+				for (x in i.args)
+					if (off[x] != NONE) dargs = true;
+				if (!da && !db && !dc && !dargs) continue;
+				if (op == Add && da && !db && !dc) {
+					var c = vals[i.b];
+					if (c.op != Const || c.sym != null || c.imm2 != (c.imm < 0 ? -1 : 0)) return;
+					off[i.id] = off[i.a] + c.imm;
+				} else if ((op == Load || op == Store) && da && !db && !dc && !dargs) {
+					if (i.b >= 0 || i.size != 8) return;
+					var s = off[i.a] + i.imm;
+					if (s < 0 || s & 7 != 0) return;
+					slot[i.id] = s >> 3;
+					if ((s >> 3) >= nslots) nslots = (s >> 3) + 1;
+					if (op == Store) stores++ else {
+						reads++;
+						read[s >> 3] = true;
 					}
-				if (takes) {
+				} else if (op == TlsStore && (i.sym == "rt_sp" || i.sym == "rt_sp_hw") && da) {
+					manage.push(i);
+				} else if (op == Cmp && da && !db && i.imm == CUGt) {
+					manage.push(i);
+				} else if (i.isObj() && !da && !db && !dc && i.info.fr && i.args[i.info.nspill] == r.id) {
+					// (only as an operation's frame: OInfo.fr)
+					for (k in 0...i.args.length)
+						if (k != i.info.nspill && off[i.args[k]] != NONE) return;
 					takers.push(i);
 					var s = i.info.rootSlot;
 					if (s >= 0) {
 						slot[i.id] = s;
 						if (s >= nslots) nslots = s + 1;
 						reads++;
+						read[s] = true;
 					}
-				}
+				} else return;
 			}
 		for (p in phis)
 			for (x in p.args)
-				if (derived(x)) return;
+				if (off[x] != NONE) return;
 		if (nslots == 0 && takers.length == 0) return;
 		inline function isStore(i:MIns):Bool
 			return i.op == Store && slot[i.id] >= 0;
-		if (reads == 0) {
-			// nothing reads the frame: no store is seen
+		// the stores into slots nothing reads
+		if (stores > 0)
 			for (b in order)
 				for (i in b.ins)
-					if (isStore(i)) {
+					if (isStore(i) && !i.dead && read[slot[i.id]] != true) {
 						i.dead = true;
 						storesRemoved++;
 					}
-		} else if (stores > 0) {
+		if (reads > 0 && stores > storesRemoved && live && nslots <= 32) {
+			// (the same with the slots as the bits of an Int: most frames)
+			var inOrder = f.newMark();
+			for (k in 0...n) {
+				order[k].mark = inOrder;
+				order[k].tmp = k;
+			}
+			var gen = MFunc.ints(n, 0), kill = MFunc.ints(n, 0), liveIn = MFunc.ints(n, 0);
+			for (k in 0...n) {
+				var g = 0, x = 0;
+				var ins = order[k].ins;
+				var q = ins.length;
+				while (q-- > 0) {
+					var i = ins[q];
+					var s = slot[i.id];
+					if (s < 0 || i.dead) continue;
+					if (i.op == Store) {
+						x |= 1 << s;
+						g &= ~(1 << s);
+					} else g |= 1 << s;
+				}
+				gen[k] = g;
+				kill[k] = x;
+				liveIn[k] = g;
+			}
+			var changed = true;
+			while (changed) {
+				changed = false;
+				var k = n;
+				while (k-- > 0) {
+					var o = 0;
+					for (s in order[k].succs)
+						if (s.mark == inOrder) o |= liveIn[s.tmp];
+					var v = gen[k] | (o & ~kill[k]);
+					if (v != liveIn[k]) {
+						liveIn[k] = v;
+						changed = true;
+					}
+				}
+			}
+			for (k in 0...n) {
+				var o = 0;
+				for (s in order[k].succs)
+					if (s.mark == inOrder) o |= liveIn[s.tmp];
+				var ins = order[k].ins;
+				var q = ins.length;
+				while (q-- > 0) {
+					var i = ins[q];
+					var s = slot[i.id];
+					if (s < 0 || i.dead) continue;
+					if (i.op != Store) o |= 1 << s else if (o & (1 << s) == 0) {
+						i.dead = true;
+						storesRemoved++;
+					} else o &= ~(1 << s);
+				}
+			}
+		} else if (reads > 0 && stores > storesRemoved && live) {
+
 			// the slots live at each point: read by a later load before a
 			// store replaces them
 			var inOrder = f.newMark();

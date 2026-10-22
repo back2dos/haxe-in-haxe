@@ -84,16 +84,20 @@ optimization tier for #15's interpreted macros.
   struct value is the address of its memory (typed `TStruct` in
   `MIns.vty`); `MirBuild` builds C calls and entries from C with structs
   by value (`cCall`, `cEntry`, `CAbi`) as memory code, and `Sroa` replaces
-  frame slots after the lowering. Struct values as objects (scalar
+  frame slots (on object-level Mir since stage 4). Struct values as objects (scalar
   replacement of the value itself, methods on structs:
   [lowlevel.md](lowlevel.md)) are a later step none of #34's stages need.
 - **`Facts.checkRawAddresses` stays on the IR.** It checks
   `hxmc.unsafe`'s raw heap addresses against the GC points, which are the
-  IR's (`Roots`, cold sites) as long as `MirBuild` places the roots; it
-  moves when root placement moves after optimization (stage 4), where GC
-  points are object-level calls and allocations.
+  IR's (`Roots`, cold sites) as long as `MirBuild` places the roots. Stage
+  4 keeps that placement and only takes away, after optimization, the
+  slot stores nothing reads and the frames left unread (`Frames`), which
+  makes no raw address safer or less safe: the check stays where the GC
+  points are decided.
 - **What stays memory-level in `MirBuild`**: the shadow-stack frame and
-  the rooted locals' slots (stage 4 moves them), globals, `hxmc.unsafe`'s
+  the rooted locals' slots (stage 4 prunes them after optimization:
+  `Frames`), globals, `hxmc.unsafe`'s
+
   intrinsics (opaque memory operations inside object-level functions, as
   the plan has it), C calls, and strings' inline helpers (`String.length`,
   `charCodeAt`, `hx_str_eq`, `StringBuf.addChar`): no object-level pass
@@ -295,8 +299,8 @@ port's build 525 to 261 ms.
 
 ## Allocation folding
 
-Built (`hxmc/src/hxmc/Fold.hx`, on Mir after `Escape` and `Sroa`, before
-`Opt`; `HXMC_FOLD=0` turns it off): an allocation of a constant size that
+Built (`hxmc/src/hxmc/Fold.hx`, on Mir after `MemLower`, `Escape`, `Sroa` and `Opt`
+having run on object-level Mir; `HXMC_FOLD=0` turns it off): an allocation of a constant size that
 follows another on a straight line, with nothing between them that could
 collect or allocate (no call, no use of `rt_young_ptr`), becomes part of
 it. One test of the room left and one bump for both; the second's header is
