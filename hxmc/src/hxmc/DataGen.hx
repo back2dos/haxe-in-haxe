@@ -495,18 +495,18 @@ class DataGen {
 			obj.define(e.selNames[rows[i].s], data, base + 8 * at[i], 0, true);
 	}
 
-	// the allocation stubs the program's code calls (MirBuild.ALLOC_STUB):
+	// the allocation stubs the program's code calls (MemLower.ALLOC_STUB):
 	// each passes its header words and size to hxmc_alloc_slow, so an
 	// allocation site's slow path is one call (after run: hx_main_body allocates)
 	public function allocStubs(objs:Array<Obj>, emit:Target.Emitter) {
 		var names = new Map<String, Bool>();
 		for (o in objs.concat([obj]))
 			for (s in o.symbols)
-				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MirBuild.ALLOC_STUB)) names.set(s.name, true);
+				if (s.section == null && !s.abs && StringTools.startsWith(s.name, MemLower.ALLOC_STUB)) names.set(s.name, true);
 		var list = [for (n in names.keys()) n];
 		list.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
 		for (n in list) {
-			var parts = n.substr(MirBuild.ALLOC_STUB.length).split("$");
+			var parts = n.substr(MemLower.ALLOC_STUB.length).split("$");
 			var lo = Std.parseInt(parts[0]), bytes = Std.parseInt(parts[2]);
 			var ty = parts[1];
 			var sym = StringTools.startsWith(ty, "#") ? null : ty;

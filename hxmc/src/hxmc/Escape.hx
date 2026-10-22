@@ -13,7 +13,7 @@ using core.ds.VectorTools;
 //
 // The allocations are MirBuild's: the inline bump allocation of an object
 // (a phi of the fast path's address and the slow path's stub call,
-// MirBuild.alloc: class instances, anonymous objects, enum values,
+// MemLower.alloc: class instances, anonymous objects, enum values,
 // closures, the boxes of captured variables) and the runtime's boxing of an
 // Int, Float or Int64 into a Dynamic (hx_box_int, hx_box_float,
 // hx_box_i64). An allocation's aliases are its value, its copies, phis of
@@ -530,7 +530,7 @@ class Escape {
 		return c != null && c.sym == null && c.imm == k && c.imm2 == (k < 0 ? -1 : 0);
 	}
 
-	// MirBuild.alloc's shape: head: ptr = young_ptr ... br (enough room) fast, slow;
+	// MemLower.alloc's shape: head: ptr = young_ptr ... br (enough room) fast, slow;
 	// fast: young_ptr = ptr + bytes, the header's two words, ptr + 8; join: phi(ptr + 8, stub())
 	function objectSite(p:MIns):Null<Site> {
 		if (p.ty != I64 || p.args.length != 2) return null;
@@ -538,7 +538,7 @@ class Escape {
 		if (j.preds.length != 2) return null;
 		for (k in 0...2) {
 			var o = f.vals[p.args[k]], r = f.vals[p.args[1 - k]];
-			if (o.op != Add || r.op != Call || r.sym == null || !StringTools.startsWith(r.sym, MirBuild.ALLOC_STUB)) continue;
+			if (o.op != Add || r.op != Call || r.sym == null || !StringTools.startsWith(r.sym, MemLower.ALLOC_STUB)) continue;
 			var fast = o.block;
 			if (j.preds[k] != fast || fast.preds.length != 1 || fast.succs.length != 1) continue;
 			var ptr = f.vals[o.a];

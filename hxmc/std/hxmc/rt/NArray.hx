@@ -172,7 +172,7 @@ class NArray {
 		throw "NativeArray storage type mismatch";
 	}
 
-	// the slow paths of an access of a NativeArray seen as Dynamic (MirBuild.narrayDyn)
+	// the slow paths of an access of a NativeArray seen as Dynamic (MemLower.narrayDyn)
 	@:hxmc.export("hx_narray_get_slow") static function getSlow(a:Dynamic, i:Int):Dynamic
 		return get(a, i);
 

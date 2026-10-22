@@ -203,6 +203,7 @@ class Inline {
 					x.c = m(i.c);
 					x.imm = i.imm;
 					x.imm2 = i.imm2;
+					x.vty = i.vty;
 					// (the call's position: the copy is the caller's code, its
 					// frame the caller's, which a stack names with the call's
 					// line, as DWARF does without inlined subroutines;

@@ -539,7 +539,7 @@ class Isel implements hxmc.Target.Selector {
 			var next = bi + 1 < layout.length ? layout[bi + 1] : null;
 			var pendingBase = bi == 0 && macTls;
 			// after the last parameter (the call clobbers their registers;
-			// constants such as MirBuild.zeroAt's may come before them)
+			// constants such as MirWriter.zeroAt's may come before them)
 			var lastParam = -1;
 			if (pendingBase)
 				for (k in 0...b.ins.length)
@@ -981,6 +981,10 @@ class Isel implements hxmc.Target.Selector {
 					x.cond = o;
 					x.size = size;
 				}
+			case NullCheck | New | NewDyn | InitField | GetField | SetField | FieldAddr | EnumTag | TypeTest | Box | Unbox | VirtualCall | ClosureCall | AnonGet |
+				AnonTest | AnonStore | AnonCall | ArrayLength | ArrayGet | ArraySet | ArrayPush | NewArray | ArrayInit | NewNArray | NArrayInit | NArrayLength |
+				NArrayGet | NArraySet | NArrayDyn | RefStore:
+				throw "isel: " + MFunc.opName(i.op) + " is object-level (MemLower lowers it first)";
 			case Rotr:
 				var d = reg(i.id);
 				var size = sz(i.ty);
@@ -1040,7 +1044,7 @@ class Isel implements hxmc.Target.Selector {
 				x.cond = i.op == FNeg ? 0x57 : 0x54;
 				x.imm = i.op == FNeg ? 0 : 1;
 			case Cmp:
-				if (useCount[i.id] == 0) return; // unused (MirBuild.cmp folded it)
+				if (useCount[i.id] == 0) return; // unused (MirWriter.cmp folded it)
 				// fused into the branch that follows
 				if (fusable(i, b)) return;
 				var d = reg(i.id);
@@ -1285,7 +1289,7 @@ class Isel implements hxmc.Target.Selector {
 		jmp(def);
 	}
 
-	// the inline expansions of MirBuild.special: atomics (sequentially
+	// the inline expansions of MirWriter.special: atomics (sequentially
 	// consistent: loads are plain moves, stores xchg) and float32 conversions
 	function special(i:MIns) {
 		var name = i.sym.substr(hxmc.MirBuild.SPECIAL.length);

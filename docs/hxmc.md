@@ -6,7 +6,7 @@ hxmc turns a typed Haxe program into a native executable with its own code
 generator and linker: no C compiler, assembler or system linker at build time.
 
 ```
-typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> Mir (SSA) --(Inline, Escape, Sroa, Opt)-->
+typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> object-level Mir --(MemLower)--> Mir (SSA) --(Inline, Escape, Sroa, Fold, Opt)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
 ```
@@ -20,7 +20,8 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | `ir/RuntimeSymbols.hx` | the runtime's symbols generated code calls by name, per family of targets, checked on every build against what `hxmc.rt.Runtime` imports (Runtime in Haxe, below) |
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
 | `UpToDate.hx`, `Fingerprint.hx`, `LowerCache.hx` | rebuilds: the whole build skipped when nothing changed, each module's object reused when its fingerprint is unchanged, lowered bodies reused by the server |
-| `Mir.hx`, `MirBuild.hx`, `Cfg.hx`, `Ssa.hx`, `Opt.hx`, `Inline.hx`, `Escape.hx`, `Sroa.hx` | the SSA IR, its construction, the control-flow analyses (reverse postorder, dominator tree, loop nest; generic over the block type), SSA construction on a finished graph (Escape, Sroa), inlining, escape analysis (allocations that stay in their function replaced by their fields: [plans/codegen.md](plans/codegen.md), "Escape analysis"), scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
+| `Mir.hx`, `MirWriter.hx`, `MirBuild.hx`, `MemLower.hx` | the SSA IR at two levels: object-level Mir (objects made, their fields, arrays, structural access, type tests, boxes, closures, virtual calls as operations; values typed from the IR) that `MirBuild` makes from the IR, and the memory-level Mir every back end takes, which `MemLower` makes from it (layouts, the nursery's allocation, barriers, inline caches, null tests, the shadow stack around cold sites' slow paths); `MirWriter` writes instructions and SSA variables for both ([plans/codegen.md](plans/codegen.md), "Object-level Mir") |
+| `Cfg.hx`, `Ssa.hx`, `Opt.hx`, `Inline.hx`, `Escape.hx`, `Sroa.hx` | the control-flow analyses (reverse postorder, dominator tree, loop nest; generic over the block type), SSA construction on a finished graph (Escape, Sroa), inlining, escape analysis (allocations that stay in their function replaced by their fields: [plans/codegen.md](plans/codegen.md), "Escape analysis"), scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
 | `Lir.hx`, `Regalloc.hx`, `x64/`, `a64/` | instruction selection, linear-scan allocation, encoders (checked against llvm-mc: `EncCheck`), emission |
 | `Unwind.hx`, `Dwarf.hx` | unwind tables from the emitters' frame records (`.eh_frame`, `.pdata`/`.xdata`, `__eh_frame`), `-debug`'s DWARF lines (Debugging, below) |
 | `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (`LinkCore.hx`: resolution, dead sections, GOT and import slots, placement and relocations, shared by static ELF, `LinkDyn.hx` dynamic ELF against glibc, PE with imports written directly, Mach-O with an ad-hoc signature; `wasm/LinkWasm.hx` shares the resolution), the runtime-object builder, the program's data |
@@ -316,8 +317,8 @@ exported function, an implementation, a variable, a thread-local), whether
 or not this program calls it, and fails otherwise:
 
 ```
-hxmc: the runtime symbol rt_null_access is not defined: its module is not loaded by hxmc.rt.Runtime (for wasm32-wasi; MirBuild.nullBlock)
-hxmc: the runtime symbol rt_null_access is defined in hxmc.rt.Faults, which hxmc.rt.Runtime does not import (for wasm32-wasi; MirBuild.nullBlock)
+hxmc: the runtime symbol rt_null_access is not defined: its module is not loaded by hxmc.rt.Runtime (for wasm32-wasi; MemLower.nullBlock)
+hxmc: the runtime symbol rt_null_access is defined in hxmc.rt.Faults, which hxmc.rt.Runtime does not import (for wasm32-wasi; MemLower.nullBlock)
 ```
 
 The second where a module the program loads otherwise has it. So the rule is
@@ -331,7 +332,7 @@ statics: `rt_null_access` on WebAssembly with `-D hxmc.null-checks`,
 required only then; a module that `Runtime.hx` imports only under a define
 (`#if hxmc.census`) is seen only with it, as the imports are read with the
 build's defines, so a symbol only such a module defines gets that condition
-too. The list is kept by hand, next to the generators; `MirBuild.call` (on
+too. The list is kept by hand, next to the generators; `MirWriter.call` (on
 `FuncInfo.rtFamilies`, which Facts sets: no lookup of its own) and
 `GcModule.exportOf` fail the build when generated code calls an exported
 function of the runtime that it does not list for the family ("generated
@@ -453,7 +454,7 @@ its signature's trampolines stay: the port would grow by 66 KB (0.34%).
 with a single GC allocation: a header, a length/kind word and packed
 elements. Bool uses 1 byte, Int 4, Float and Int64 8, and reference elements
 8 bytes. Nullable numbers and Dynamic use reference storage. Concrete
-indexing lowers to direct loads/stores in `MirBuild`, without bounds,
+indexing lowers to direct loads/stores in `MemLower`, without bounds,
 growth or storage-kind checks; references keep the generational write
 barrier. The collectors skip the length/kind word in reference arrays.
 Copies preserve the runtime layout even in erased generic code; reference
@@ -621,7 +622,7 @@ header (at -4) or an index out of the memory trapped; WasmGC's
 `struct.get` and `array.len` trap on null. A trap ends the module: no
 handler sees it. So with `-D hxmc.null-checks` (`Lower.nullChecks`; on by
 default for `wasm32-wasi`, `=0` turns it off, `=1` adds the tests to the
-native targets) each dereference tests its reference: `MirBuild.nullCheck`
+native targets) each dereference tests its reference: `MirBuild.nullCheck`, `MemLower.nullTest`
 (a branch to a block calling `rt_null_access`, one per try a function's
 tests share: a try's body is the dominator subtree of its first block,
 WasmGen), `FuncGen.derefAs` (WasmGC: a call of a per-type helper, `nn_<t>`,

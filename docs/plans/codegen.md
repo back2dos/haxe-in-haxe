@@ -2,6 +2,122 @@
 
 The pipeline as built: [docs/hxmc.md](../hxmc.md), "Pipeline".
 
+## Object-level Mir
+
+[#34](https://github.com/benmerckx/hxmc/issues/34): two levels of Mir, so
+that objects are optimized as objects before they become memory, by one
+optimizer for native code, linear wasm and WasmGC. The plan's stages: 0
+WasmGC kept alive in CI (`make wasmgc-check`); 1 types on Mir values; 2
+object operations from `MirBuild`, lowered right away (byte-identical);
+3 escape analysis at the object level; 4 inlining, type-test folding and
+devirtualization up, barriers and roots placed after optimization; 5
+WasmGC from object-level Mir; 6 WasmGC's go/no-go again; 7 an
+optimization tier for #15's interpreted macros.
+
+### Built: stages 1 and 2
+
+- **Types on values** (`MIns.vty`): the IR's type of what a value holds
+  (`Ir.typeOf`: a class instance, an array and its element kind, a
+  closure's signature, an enum or a constructor, Dynamic, a struct value,
+  a scalar), given by `MirBuild` to what it makes from an expression, to
+  parameters and to the locals' phis; the inliner copies it. Nothing reads
+  it yet; dumps show it.
+- **Object operations** (`Mir.Op` from `NullCheck` on, their static part
+  `OInfo`): `New` (class instances, enum values, closures, boxes,
+  anonymous objects, empty Arrays, `Mem.alloc`'s), `NewDyn` (`Mem.alloc` of
+  a run-time size), `InitField`, `GetField`, `SetField`, `FieldAddr`,
+  `EnumTag`, `TypeTest`, `Box`, `Unbox`, `VirtualCall` (selector dispatch:
+  interfaces too), `ClosureCall`, `AnonGet`, `AnonTest`/`AnonStore`,
+  `AnonCall`, `ArrayLength`/`ArrayGet`/`ArraySet`/`ArrayPush`,
+  `NewArray`/`ArrayInit`, the NativeArray ones, `RefStore`
+  (`Mem.setRefBarrier`) and `NullCheck` (explicit null tests). `MirBuild`
+  (`MirWriter`: the instruction helpers and SSA variables, shared) makes
+  them; `MemLower` lowers them to the memory-level Mir every back end
+  takes, before any other pass: layouts, the nursery's bump allocation
+  and its stubs, write barriers with the release store (the arm64
+  publication fence, `MIns.release`), inline caches, null tests, the
+  shadow stack around cold sites' slow paths.
+- **Byte-identical**: every target's output is what it was. The lowering
+  writes what the single pass wrote: its blocks and frame slots are
+  numbered and ordered among `MirBuild`'s as that pass made them
+  (`OInfo.at`, `slots`), and the code after an operation whose lowering
+  branches goes in a continuation block (`OInfo.cont`) that gets a phi for
+  each variable read there, as the lowering's last block did: the
+  instruction helpers' rules look at their operands (a phi is not a
+  constant), and so do the null tests (a phi is not known to be fresh). A
+  cold site's references are its GC point's arguments, and their phis in
+  the continuation get, per edge, the value that path has (the reloaded
+  one on the slow path). Value numbers do not reach the output, block
+  numbers, block order, frame slots and phi order do.
+- **Cost**: the port's build by the tool, one thread, nothing cached
+  (2026-10-22, a machine shared with other work, the best of three): the
+  Mir phase (building, lowering, inlining, escape analysis, the
+  optimizer) 4.40 to 4.68 s of CPU (+6%), the whole build 18.8 to 19.4 s
+  (within the noise of the runs).
+
+### Decisions
+
+- **Anonymous structures and Dynamic: several operations, Dynamic by
+  name stays calls.** `AnonGet` (with the shape hint of an object
+  literal of the static type), a write as `AnonTest` (a branch: the inline
+  cache's entry has a slot of the field's kind) and `AnonStore` in its
+  hit block, its miss path ordinary code (the value boxed, then
+  `hx_anon_set_slow`), and `AnonCall` (a method or a closure in a field).
+  One generic operation with a shape hint would only move the switch into
+  every pass. Dynamic access by name (`hx_dyn_get`, `hx_dyn_set`,
+  `hx_dyn_call_field`, by field id when the name is a literal) stays calls
+  of the runtime: no object-level pass can do more with them than let the
+  object escape, and WasmGC calls the same runtime functions (`hxmc.rt`
+  over `Repr`). A shape hint for writes ("Structural field writes", below)
+  becomes a field of `AnonTest`.
+- **Exceptions and safe regions stay memory-level until WasmGC needs
+  them.** `try` is the handler record in a frame slot, `setjmp`, `rt_hcur`
+  and `rt_exn`; `throw` a call of `rt_throw`; a blocking C call's safe
+  region calls of `rt_blocking_enter`/`rt_blocking_leave`. No object-level
+  pass needs to see through them: a function with `try` is not inlined
+  (`Inline.candidate`) and its handler's locals live in memory. Stage 5
+  makes `Throw` and a try region operations (WasmGC's `try_table`), whose
+  native lowering is today's code.
+- **`@:hxmc.struct` values and the by-value C ABI: memory-level only.** A
+  struct value is the address of its memory (typed `TStruct` in
+  `MIns.vty`); `MirBuild` builds C calls and entries from C with structs
+  by value (`cCall`, `cEntry`, `CAbi`) as memory code, and `Sroa` replaces
+  frame slots after the lowering. Struct values as objects (scalar
+  replacement of the value itself, methods on structs:
+  [lowlevel.md](lowlevel.md)) are a later step none of #34's stages need.
+- **`Facts.checkRawAddresses` stays on the IR.** It checks
+  `hxmc.unsafe`'s raw heap addresses against the GC points, which are the
+  IR's (`Roots`, cold sites) as long as `MirBuild` places the roots; it
+  moves when root placement moves after optimization (stage 4), where GC
+  points are object-level calls and allocations.
+- **What stays memory-level in `MirBuild`**: the shadow-stack frame and
+  the rooted locals' slots (stage 4 moves them), globals, `hxmc.unsafe`'s
+  intrinsics (opaque memory operations inside object-level functions, as
+  the plan has it), C calls, and strings' inline helpers (`String.length`,
+  `charCodeAt`, `hx_str_eq`, `StringBuf.addChar`): no object-level pass
+  needs them before WasmGC, where they become operations or runtime calls.
+  The IR's casts are unchecked: no operation (a value keeps the type of its
+  first definition).
+
+### Next: stage 3
+
+Escape analysis needs the inlined constructors, so stage 3 moves `Inline`
+to the object level with it (part of stage 4 brought forward): templates
+become object-level (their size still counted on their lowering, so that
+inlining decides as before), `MemLower` runs after `Escape`, and an
+inlined copy's operations are lowered in the caller (its inline caches the
+caller's; its null tests a null block of their own, as a copy has today).
+`Escape` then finds allocations as `New`, fields as
+`InitField`/`GetField`/`SetField` (no offsets, no barriers to see past),
+type tests as `TypeTest`/`EnumTag`, a cold site's references as its GC
+point's arguments and continuation phis; what stays memory-level until
+stage 4 is the rooted locals' slots ("cells"). Then its shape matching goes
+(the allocation's phi of fast and slow paths, constant offsets, the write
+barrier, the spill areas). The lowering's reproduction of the single
+pass's numbering (`OInfo.at`, `slots`) is only needed while the output must
+not change; after stage 3 the blocks it makes simply follow their
+operation's block.
+
 ## Escape analysis
 
 Allocate objects that never escape their function on the stack, or
@@ -19,7 +135,7 @@ another thread can see them.
 (`HXMC_ESCAPE=0` turns it off; `HXMC_ESCAPE_LOG=1` says, per allocation
 analyzed, whether it is replaced and else why not). What it replaces:
 
-- objects MirBuild allocates inline (`MirBuild.alloc`: class instances,
+- objects allocated inline (`New`, `MemLower.alloc`: class instances,
   anonymous objects, enum values, closures, the boxes of captured
   variables), recognized by the allocation's shape (the phi of the fast
   path's address and the slow path's stub call), and the runtime's boxing of
