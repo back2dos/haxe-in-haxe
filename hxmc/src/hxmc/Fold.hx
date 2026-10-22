@@ -37,6 +37,7 @@ class Fold {
 	}
 
 	public function run() {
+		f.edited();
 		var i = 0;
 		while (i < f.blocks.length) {
 			var b = f.blocks[i];

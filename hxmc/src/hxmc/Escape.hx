@@ -121,6 +121,7 @@ class Escape {
 
 	public function run() {
 		if (f.allocs == 0 || !allowed(f.name)) return;
+		f.edited();
 		for (b in f.blocks)
 			for (i in b.ins)
 				if (i.op == Call && i.returnsTwice) return;

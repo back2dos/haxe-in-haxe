@@ -112,45 +112,15 @@ class Inline {
 		if (!all) f.blocks = [for (b in f.blocks) if (b.mark == reach) b];
 	}
 
-	// the blocks of f in loops (a back edge in reverse postorder closes a
-	// loop over the blocks between): marked with the mark returned
+	// the blocks of f in loops (an edge back in reverse postorder closes a
+	// loop over the blocks between: Cfg.retreatSpans): marked with the mark
+	// returned
 	public static function loopBlocks(f:MFunc):Int {
-		var seen = f.newMark();
-		var stack = [f.entry], idx = [0];
-		f.entry.mark = seen;
-		var post = [];
-		while (stack.length > 0) {
-			var top = stack.length - 1;
-			var b = stack[top];
-			if (idx[top] < b.succs.length) {
-				var s = b.succs[idx[top]++];
-				if (s.mark != seen) {
-					s.mark = seen;
-					stack.push(s);
-					idx.push(0);
-				}
-			} else {
-				stack.pop();
-				idx.pop();
-				post.push(b);
-			}
-		}
-		post.reverse();
-		var n = post.length;
-		for (k in 0...n)
-			post[k].tmp = k;
-		var inLoop = MFunc.ints(n, 0);
-		for (k in 0...n)
-			for (p in post[k].preds) {
-				if (p.mark != seen) continue;
-				var pk = p.tmp;
-				if (pk >= k)
-					for (q in k...pk + 1)
-						inLoop[q] = 1;
-			}
+		var cfg = f.cfg();
+		var inLoop = cfg.retreatSpans();
 		var m = f.newMark();
-		for (k in 0...n)
-			if (inLoop[k] != 0) post[k].mark = m;
+		for (k in 0...cfg.size)
+			if (inLoop[k]) cfg.rpo[k].mark = m;
 		return m;
 	}
 
@@ -159,6 +129,7 @@ class Inline {
 	public static function run(f:MFunc, sites:Array<{call:MIns, callee:Template}>, ic:IcAlloc):Array<{call:MIns, fn:FuncInfo}> {
 		var more = [];
 		if (sites.length == 0) return more;
+		f.edited();
 		var nextBlock = 0;
 		for (b in f.blocks)
 			if (b.id >= nextBlock) nextBlock = b.id + 1;
