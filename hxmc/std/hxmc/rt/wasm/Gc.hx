@@ -2,6 +2,7 @@ package hxmc.rt.wasm;
 
 import hxmc.I64;
 import hxmc.rt.Types.*;
+import hxmc.rt.GcCore.*;
 import hxmc.unsafe.Mem;
 import hxmc.unsafe.Ptr;
 
@@ -82,25 +83,7 @@ class Gc {
 	static var lowFor:Int; // collections in a row that promoted little
 	static var growthOff:Bool; // memory cannot grow so far
 
-	// (the header: Types, as the native Gc.hx reads it)
-	static inline function nslotsOf(p:Ptr):Int
-		return Types.wordsAt(p, Mem.getI32(p, -8));
-
-	static inline function kindOf(p:Ptr):Int
-		return Types.kindOfWord(Mem.getI32(p, -8));
-
-	static inline function tindexOf(p:Ptr):Int
-		return Mem.getU16(p, -8);
-
-	static inline function isFwd(p:Ptr):Bool
-		return tindexOf(p) == T_FWD;
-
-	static inline function fwdAddr(p:Ptr):Ptr
-		return Mem.getPtr(p, 0);
-
-	static inline function objBytes(p:Ptr):Int
-		return 8 * (nslotsOf(p) + 1);
-
+	// (the header: read through GcCore, as the native Gc.hx reads it)
 	static inline function inYoung(p:Ptr):Bool
 		return !p.ult(youngStart) && p.ult(youngEnd);
 
@@ -401,14 +384,12 @@ class Gc {
 		return dst.add(8);
 	}
 
-	@:hxmc.noGc static function forwardTo(p:Ptr, n:Ptr) {
-		Mem.setI16(p, -8, T_FWD);
-		Mem.setPtr(p, 0, n);
-	}
+	@:hxmc.noGc static function forwardTo(p:Ptr, n:Ptr)
+		setFwd(p, n);
 
 	@:hxmc.noGc static function fwd(p:Ptr):Ptr {
 		if (!inYoung(p) && !(major && inFrom(p))) return p;
-		if (isFwd(p)) return fwdAddr(p);
+		if (isFwdAt(p)) return fwdAddr(p);
 		var bytes = objBytes(p);
 		var d = oldAlloc(bytes);
 		if (d.isNull()) Heap.outOfMemory();
@@ -434,7 +415,7 @@ class Gc {
 			var f = gcStack.add(16 * (gcTop - 1));
 			var o = Mem.getPtr(f, 0);
 			var n = nslotsOf(o), k = kindOf(o);
-			var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * tindexOf(o) + 24) : Ptr.nil();
+			var pm = k == K_OBJ ? ptrmapAt(tindexOf(o)) : Ptr.nil();
 			if (k == K_RAW || (k == K_OBJ && pm.isNull())) {
 				gcTop--;
 				continue;
@@ -486,7 +467,7 @@ class Gc {
 		var n = nslotsOf(o);
 		switch kindOf(o) {
 			case K_OBJ:
-				var pm = Mem.getPtr(Mem.sym("rt_types"), 112 * tindexOf(o) + 24);
+				var pm = ptrmapAt(tindexOf(o));
 				if (pm.isNull()) return;
 				for (i in 0...n)
 					if (((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) != 0) rootAt(o.add(8 * i));
@@ -678,14 +659,14 @@ class Gc {
 				var o = p.add(8);
 				var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
 				if (t >= nt || end.diff(o) < ((8 * n) : I64)) bad("gc: verify: bad header (minor, chunk, offset) ", minors, c, o.diff(Mem.getPtr(chunks, 24 * c)).toInt());
-				var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
+				var pm = k == K_OBJ ? ptrmapAt(t) : Ptr.nil();
 				if (k == K_PARR || !pm.isNull())
 					for (i in 0...n) {
 						if (k == K_OBJ && ((Mem.getI32(pm, 4 * (i >> 5)) >>> (i & 31)) & 1) == 0) continue;
 						var v = Mem.getPtr(o, 8 * i);
 						if (v.isNull()) continue;
 						if (after && inYoung(v)) bad("gc: verify: young reference after a collection (object, slot, type) ", count, i, t);
-						if (isOld(v) && isFwd(v)) bad("gc: verify: reference to a bad header (object, slot, type) ", count, i, t);
+						if (isOld(v) && isFwdAt(v)) bad("gc: verify: reference to a bad header (object, slot, type) ", count, i, t);
 					}
 				p = p.add(8 * (n + 1));
 				count++;
@@ -730,7 +711,7 @@ class Gc {
 			while (p.ult(end)) {
 				var o = p.add(8);
 				var n = nslotsOf(o), k = kindOf(o), t = tindexOf(o);
-				var pm = k == K_OBJ ? Mem.getPtr(Mem.sym("rt_types"), 112 * t + 24) : Ptr.nil();
+				var pm = k == K_OBJ ? ptrmapAt(t) : Ptr.nil();
 				if (k == K_PARR || !pm.isNull()) {
 					if (!has(o))
 						for (i in 0...n) {
