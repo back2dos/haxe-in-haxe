@@ -5,21 +5,17 @@ import hxmc.ir.Ir;
 import hxmc.wasm.Enc;
 
 private enum Frame {
-	FBreak; // a loop's exit
-	FLoop; // a loop's head
-	FPlain; // if, switch blocks, try
+	FPlain; // the blocks of an expression's code (if, block)
 }
 
-// One function of the IR as a WasmGC function body (GcModule). The IR's
-// statements are structured, so they map onto wasm's blocks: a loop is a
-// block (its exit) around a loop (its head), a switch nested blocks and a
-// br_table. Locals are the function's (references as eqref unless their IR
-// type proves one: keyOf), plus temporaries taken and given back around the
-// code that needs them. A local or parameter of no such type that the code
-// only ever casts to one type (Dynamic and closure parameters read as a
-// class, a runtime function's Dynamic as Bytes) gets that type: the function
-// is emitted again with the local of that type, cast where it is set (a
-// parameter: once, on entry) instead of where it is read (refine).
+// The IR's expressions and leaf statements as WasmGC code (GcModule), for
+// MirGen, which writes each object-level Mir operation it does not write
+// itself as the IR's expression or statement over locals standing for its
+// operands: WasmGC's representation (struct and array types, casts, the
+// inline array and structural paths, the runtime's intrinsics, the frame
+// areas of the linear memory) in one place. Locals are MirGen's (references
+// as eqref unless their type proves one: keyOf), plus temporaries taken and
+// given back around the code that needs them.
 class FuncGen {
 	final m:GcModule;
 	final f:FuncInfo;
@@ -30,44 +26,16 @@ class FuncGen {
 	final free = new Map<String, Array<Int>>();
 	final frames:Array<Frame> = [];
 	var nparams = 0;
-	// the locals given a type (a second emission), by id
-	final refined:Map<Int, Int>;
-	// the types each untyped local is cast to where read, and those read otherwise
-	final castUses = new Map<Int, Map<Int, Bool>>();
-	final otherUses = new Map<Int, Bool>();
-	var castUse = false;
 	// the frame areas (Mem.stack, struct slots) in the linear memory: their
 	// size, the frame's base and the stack pointer on entry (restored on return)
-	// the locals set from a Dynamic cast to their type (Haxe's unchecked
-	// casts, `t = any` for a String t): of no wasm type (a value of another
-	// type may be held, as in linear memory, cast only where used as one)
-	final loose = new Map<Int, Bool>();
 	var hasFrame = false;
 	var frameSize = 0;
 	var fp = -1;
 	var spEntry = -1;
 
-	public function new(m:GcModule, f:FuncInfo, ?refined:Map<Int, Int>) {
+	public function new(m:GcModule, f:FuncInfo) {
 		this.m = m;
 		this.f = f;
-		this.refined = refined != null ? refined : new Map();
-	}
-
-	// the locals the code only casts to one type (for a second emission), or null
-	public function refine():Null<Map<Int, Int>> {
-		var r = null;
-		for (id => ts in castUses) {
-			if (otherUses.exists(id) || loose.exists(id)) continue;
-			var t = -1, n = 0;
-			for (k in ts.keys()) {
-				t = k;
-				n++;
-			}
-			if (n != 1) continue;
-			if (r == null) r = new Map();
-			r.set(id, t);
-		}
-		return r;
 	}
 
 	static function repr(t:Ty):String
@@ -78,96 +46,6 @@ class FuncGen {
 	function keyOf(t:Ty):String
 		return m.keyOf(t);
 
-	public function emit():Buf {
-		var shadows = [];
-		for (i in 0...f.args.length) {
-			var a = f.args[i];
-			local.set(a.id, nparams++);
-			localKey.set(a.id, m.paramKey(f, i));
-			// (a parameter of a class type, or this, or refined: cast once into a local of its type)
-			var k = refined.exists(a.id) ? "t" + refined.get(a.id) : m.precise(f) ? "" : i == 0 && f.selfClass != null ? "t" + m.classType(f.selfClass) : keyOf(a.ty);
-			if (k.charAt(0) == "t") shadows.push({param: nparams - 1, id: a.id, key: k});
-		}
-		for (s in shadows) {
-			var i = nparams + extra.length;
-			extra.push(s.key);
-			localGet(s.param);
-			castTo(Std.parseInt(s.key.substr(1)));
-			localSet(i);
-			local.set(s.id, i);
-			localKey.set(s.id, s.key);
-		}
-		var code = {body: IrOpt.live(f.body), locals: f.locals};
-		function setSt(s:Stmt) {
-			switch s {
-				case SSet(l, ECast(TRef(_), x) | x) if (!l.ty.match(TRef(RAny)) && dynamicTyped(x)): loose.set(l.id, true);
-				case _:
-			}
-			hxmc.ir.Facts.iterStmt(setSt, _ -> {}, s);
-		}
-		for (s in code.body)
-			setSt(s);
-		function frameEx(e:Ex) {
-			switch e {
-				case ECallHost("hxmc_unsafe_Mem_stack" | "hxmc_unsafe_Mem_structSlot", _, _): hasFrame = true;
-				case _:
-			}
-			hxmc.ir.Facts.iterEx(frameEx, e);
-		}
-		function frameSt(s:Stmt)
-			hxmc.ir.Facts.iterStmt(frameSt, frameEx, s);
-		for (s in code.body)
-			frameSt(s);
-		if (hasFrame) {
-			fp = nparams + extra.length;
-			extra.push("i");
-			spEntry = nparams + extra.length;
-			extra.push("i");
-		}
-		for (l in code.locals)
-			if (!local.exists(l.id) && repr(l.ty) != "v") {
-				local.set(l.id, nparams + extra.length);
-				var k = refined.exists(l.id) ? "t" + refined.get(l.id) : loose.exists(l.id) ? repr(l.ty) : keyOf(l.ty);
-				extra.push(k);
-				localKey.set(l.id, k);
-			}
-		for (s in code.body)
-			stmt(s);
-		if (repr(f.ret) != "v") b.u8(0x00) else leave(); // (a value-returning function ends with a return)
-		b.u8(0x0B);
-		// the locals' declarations in front
-		var out = new Buf();
-		Enc.uleb(out, extra.length);
-		for (r in extra) {
-			out.u8(1);
-			switch r {
-				case "i": out.u8(Enc.I32);
-				case "f": out.u8(Enc.F64);
-				case "l": out.u8(Enc.I64);
-				case "p": out.u8(0x6D);
-				case _:
-					out.u8(0x63);
-					Enc.sleb(out, Std.parseInt(r.substr(1)));
-			}
-		}
-		if (hasFrame) {
-			// (the frame: below the caller's)
-			out.u8(0x23);
-			Enc.uleb(out, m.spGlobal);
-			out.u8(0x22);
-			Enc.uleb(out, spEntry);
-			out.u8(0x41);
-			Enc.sleb(out, (frameSize + 15) & ~15);
-			out.u8(0x6B);
-			out.u8(0x22);
-			Enc.uleb(out, fp);
-			out.u8(0x24);
-			Enc.uleb(out, m.spGlobal);
-		}
-		out.buf(b);
-		return out;
-	}
-
 	// (before a return: the frame given back)
 	function leave() {
 		if (!hasFrame) return;
@@ -175,17 +53,6 @@ class FuncGen {
 		op(0x24);
 		Enc.uleb(b, m.spGlobal);
 	}
-
-	// an expression of the IR's Dynamic (Any, type parameters)
-	static function dynamicTyped(e:Ex):Bool
-		return switch e {
-			case ELocal(l): l.ty.match(TRef(RAny));
-			case ECall(fn, _): fn.ret.match(TRef(RAny));
-			case ECallHost(_, _, t) | EAnonGet(_, t, _, _) | EArrGet(t, _, _) | EArrGetU(t, _, _) | EBoxGet(t, _): t.match(TRef(RAny));
-			case ECallClos(s, _, _) | ECallDispatch(_, s, _) | ECallAnon(_, s, _, _): s.ret.match(TRef(RAny));
-			case EField(c, idx, _): c.fields[idx].ty.match(TRef(RAny));
-			case _: false;
-		}
 
 	function unsupported(what:String):Dynamic
 		throw 'hxmc: -D hxmc.wasm-gc: ${f.display != null ? f.display : f.name}: $what is not supported yet';
@@ -274,16 +141,7 @@ class FuncGen {
 
 	// the value of e on the stack as a (ref null t): cast unless its type already is one
 	function exprAs(e:Ex, t:Int) {
-		// (an untyped local cast: noted for refine)
-		var l = castBase(e);
-		if (l != null) {
-			var ts = castUses.get(l.id);
-			if (ts == null) castUses.set(l.id, ts = new Map());
-			ts.set(t, true);
-			castUse = true;
-		}
 		expr(e);
-		castUse = false;
 		var k = wtype(e);
 		if (k == "n") return;
 		if (k.charAt(0) == "t" && m.isSubtype(Std.parseInt(k.substr(1)), t)) return;
@@ -328,27 +186,6 @@ class FuncGen {
 			case _: null;
 		}
 
-	function scoped(ss:haxe.ds.Vector<Stmt>) {
-		var saved = checked;
-		checked = saved.copy();
-		stmts(ss);
-		checked = saved;
-		forgetAssigned(ss);
-	}
-
-	function forgetAssigned(ss:haxe.ds.Vector<Stmt>) {
-		if (!checked.keys().hasNext()) return;
-		function st(s:Stmt) {
-			switch s {
-				case SSet(l, _): checked.remove(l.id);
-				case _:
-			}
-			hxmc.ir.Facts.iterStmt(st, _ -> {}, s);
-		}
-		for (s in ss)
-			st(s);
-	}
-
 	// a value never null: made here, a literal, a constructor's object
 	// (new), a closure's own (its call tests it: ECallClos); not a method's
 	// receiver (as MirBuild.nonNull)
@@ -358,13 +195,6 @@ class FuncGen {
 			case EStr(_) | EType(_) | ENewObj(_) | ENewEnum(_) | ENewArr(_) | ENewClos(_) | ENewBox(_) | ENewAnon(_): true;
 			case ECast(_, x): nonNull(x);
 			case _: false;
-		}
-
-	function castBase(e:Ex):Null<Local>
-		return switch e {
-			case ELocal(l) if (localKey.get(l.id) == "p"): l;
-			case ECast(_, x): castBase(x);
-			case _: null;
 		}
 
 	// ---- statements
@@ -379,19 +209,6 @@ class FuncGen {
 		op(0x0B);
 		frames.pop();
 	}
-
-	function depthOf(kind:Frame):Int {
-		var i = frames.length - 1;
-		while (i >= 0) {
-			if (frames[i] == kind) return frames.length - 1 - i;
-			i--;
-		}
-		throw "no enclosing loop";
-	}
-
-	function stmts(ss:haxe.ds.Vector<Stmt>)
-		for (s in ss)
-			stmt(s);
 
 	function stmt(s:Stmt) {
 		switch s {
@@ -449,115 +266,14 @@ class FuncGen {
 				exprKey(v, m.globalKey(g));
 				op(0x24);
 				Enc.uleb(b, m.globalOf(g));
-			case SIf(c, a, e):
-				expr(c);
-				block(FPlain, 0x04);
-				scoped(a);
-				if (e.length > 0) {
-					op(0x05);
-					scoped(e);
-				}
-				end();
-			case SLoop(body):
-				block(FBreak, 0x02);
-				block(FLoop, 0x03);
-				forgetAssigned(body);
-				scoped(body);
-				op(0x0C);
-				Enc.uleb(b, 0);
-				end();
-				end();
-			case SBreak:
-				op(0x0C);
-				Enc.uleb(b, depthOf(FBreak));
-			case SContinue:
-				op(0x0C);
-				Enc.uleb(b, depthOf(FLoop));
-			case SSwitch(e, cases, def):
-				switchStmt(e, cases, def);
-			case SReturn(e):
-				if (e != null) {
-					var rk = m.retKey(f);
-					if (rk.charAt(0) == "t") exprAs(e, Std.parseInt(rk.substr(1))) else expr(e);
-				}
-				leave();
-				op(0x0F);
 			case SThrow(e):
 				expr(e);
 				op(0x08);
 				op(0);
-			case STry(body, catches):
-				tryStmt(body, catches);
-			case SCold(_, x):
-				stmt(x);
-			case SPos(_, _):
+			case _:
+				// (control flow: MirGen's blocks)
+				unsupported("the statement " + s.getName());
 		}
-	}
-
-	function switchStmt(e:Ex, cases:haxe.ds.Vector<IrCase>, def:haxe.ds.Vector<Stmt>) {
-		var t = temp("i");
-		expr(e);
-		localSet(t);
-		var lo = 0x7fffffff, hi = -0x7fffffff, count = 0;
-		for (c in cases)
-			for (v in c.values) {
-				if (v < lo) lo = v;
-				if (v > hi) hi = v;
-				count++;
-			}
-		// (the span in Float: string switches are on 32-bit hashes, whose difference overflows)
-		if (count == 0 || (hi : Float) - lo > 4.0 * count + 16) {
-			// sparse: tests one after the other
-			var opened = 0;
-			for (c in cases) {
-				for (k in 0...c.values.length) {
-					localGet(t);
-					i32(c.values[k]);
-					op(0x46);
-					if (k > 0) op(0x72);
-				}
-				block(FPlain, 0x04);
-				scoped(c.body);
-				op(0x05);
-				opened++;
-			}
-			scoped(def);
-			for (_ in 0...opened)
-				end();
-			release("i", t);
-			return;
-		}
-		// dense: blocks, the innermost holding the br_table; case k's body follows block k
-		var n = cases.length;
-		block(FPlain, 0x02); // the end
-		block(FPlain, 0x02); // the default
-		for (_ in 0...n)
-			block(FPlain, 0x02);
-		var targets = new haxe.ds.Vector<Int>(hi - lo + 1, n);
-		for (k in 0...n)
-			for (v in cases[k].values)
-				targets[v - lo] = k;
-		localGet(t);
-		if (lo != 0) {
-			i32(lo);
-			op(0x6B);
-		}
-		op(0x0E);
-		Enc.uleb(b, targets.length);
-		for (x in targets)
-			Enc.uleb(b, x);
-		Enc.uleb(b, n);
-		for (k in 0...n) {
-			end();
-			scoped(cases[k].body);
-			// (to the end: past the remaining case blocks and the default)
-			op(0x0C);
-			Enc.uleb(b, n - k);
-		}
-		end();
-		scoped(def);
-		end();
-		release("i", t);
 	}
 
 	// ---- arrays: the fast path inline (an array of the kind expected, in range),
@@ -718,60 +434,6 @@ class FuncGen {
 	function castShape(s:ShapeInfo)
 		brOnCastFail(m.shapeType(s));
 
-	var excCount = 0;
-
-	function tryStmt(body:haxe.ds.Vector<Stmt>, catches:haxe.ds.Vector<IrCatch>) {
-		// (with a linear memory: the stack pointer as here again where an
-		// exception is caught, the frames it left without returning given back)
-		var sp = -1;
-		if (m.memory) {
-			sp = temp("i");
-			op(0x23);
-			Enc.uleb(b, m.spGlobal);
-			localSet(sp);
-		}
-		block(FPlain, 0x06);
-		scoped(body);
-		op(0x07);
-		op(0);
-		var t = temp("p");
-		localSet(t);
-		if (sp >= 0) {
-			localGet(sp);
-			op(0x24);
-			Enc.uleb(b, m.spGlobal);
-			release("i", sp);
-		}
-		var exc = new Local(-1000 - excCount++, "exc", TRef(RAny));
-		local.set(exc.id, t);
-		var opened = 0, all = false;
-		for (c in catches) {
-			if (c.test != null) {
-				expr(c.test(ELocal(exc)));
-				block(FPlain, 0x04);
-				opened++;
-			}
-			localGet(t);
-			// (set from the exception, any value: never refined)
-			otherUses.set(c.l.id, true);
-			if (local.exists(c.l.id)) localSet(local.get(c.l.id)) else op(0x1A);
-			checked.remove(c.l.id);
-			scoped(c.body);
-			if (c.test == null) {
-				all = true;
-				break;
-			}
-			op(0x05);
-		}
-		if (!all) {
-			op(0x09);
-			Enc.uleb(b, opened);
-		}
-		for (_ in 0...opened)
-			end();
-		end();
-		release("p", t);
-	}
 
 	// ---- expressions
 
@@ -836,7 +498,6 @@ class FuncGen {
 			case ELocal(l):
 				var i = local.get(l.id);
 				if (i == null) unsupported("the local " + l.name + " (not declared)");
-				if (!castUse) otherUses.set(l.id, true);
 				localGet(i);
 			case EGlobal(g, _):
 				op(0x23);

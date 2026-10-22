@@ -535,15 +535,12 @@ class GcModule {
 		return lib == null ? null : importIndex.get(lib + "." + sym);
 	}
 
-	// a function's code: emitted again when locals can be given a type (FuncGen.refine)
+	// a function's code: its object-level Mir (Uses.mirs) written by MirGen
 	function emitFunc(f:FuncInfo):Buf {
+		var name = f.display != null ? f.display : f.name;
 		var mf = uses.mirs.get(f);
-		if (mf != null && Sys.getEnv("HXMC_GC_MIR") != "0")
-			return try new MirGen(this, f, mf).emit() catch (e:String) throw e + " (in " + f.name + ")";
-		var g = new FuncGen(this, f);
-		var code = g.emit();
-		var r = g.refine();
-		return r == null ? code : new FuncGen(this, f, r).emit();
+		if (mf == null) throw 'hxmc: -D hxmc.wasm-gc: $name: ${uses.unbuilt.get(f)} is not supported yet';
+		return try new MirGen(this, f, mf).emit() catch (e:String) throw e.indexOf(name) >= 0 ? e : e + " (in " + name + ")";
 	}
 
 	// a function written here (its body without the final end), after the program's;

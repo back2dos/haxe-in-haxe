@@ -59,7 +59,7 @@ class MirGen extends FuncGen {
 		this.mf = mf;
 	}
 
-	override public function emit():Buf {
+	public function emit():Buf {
 		vals = mf.vals;
 		var n = vals.length;
 		keys = new Vector(n);

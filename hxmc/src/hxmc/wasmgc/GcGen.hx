@@ -16,7 +16,7 @@ class GcGen {
 	// unsupported construct, the functions with it); =2: also the module
 	// written, those functions trapping (to measure the rest)
 	public static function run(prog:Program, out:String, o:Options) {
-		// (twice: then over the bodies as emitted, without what IrOpt inlined everywhere)
+		// (twice: then over the bodies as optimized, without what was inlined everywhere: Uses.summary)
 		var calls:hxmc.ir.Reach.RuntimeCalls = {
 			ex: runtimeCalls,
 			stmt: s -> switch s {
