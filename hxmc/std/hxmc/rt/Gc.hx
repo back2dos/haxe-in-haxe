@@ -5,6 +5,7 @@ import hxmc.rt.Layouts as L;
 import hxmc.rt.Threads.Mutator;
 import hxmc.rt.Os.Report;
 import hxmc.rt.C;
+import hxmc.rt.GcCore.*;
 import hxmc.unsafe.*;
 
 // The collector and allocator of the native targets (once hxmc/c/rt.c;
@@ -209,45 +210,9 @@ class Gc {
 	// what the rest is (a record's slots, an array's words and length, a
 	// string's hash and length) and how to scan; forwarded: T_FWD, the copy's
 	// address in slot 0 (every object on the heap has one: an empty string or
-	// NativeArray is the static one)
-
-	// the header's first word: the type index, then a record's slots or an array's words
-	static inline function hdrW0(p:Ptr):Int
-		return Mem.getI32(p, -8);
-
-	static inline function isFwd(w0:Int):Bool
-		return w0 & 0xFFFF == T_FWD;
-
-	// a forwarded object's copy
-	static inline function fwdAddr(p:Ptr):Ptr
-		return Mem.getPtr(p, 0);
-
-	static inline function setFwd(p:Ptr, n:Ptr) {
-		Mem.setI16(p, -8, T_FWD);
-		Mem.setPtr(p, 0, n);
-	}
-
-	// p's payload words, the header's first word w0 (Types.wordsAt: the
-	// length read only for a large array)
-	static inline function wordsOf(p:Ptr, w0:Int):Int
-		return Types.wordsAt(p, w0);
-
-	static inline function nslotsOf(p:Ptr):Int
-		return wordsOf(p, hdrW0(p));
-
-	// how p is scanned: K_OBJ by its pointer map, K_PARR every slot, K_RAW not at all
-	static inline function kindOf(p:Ptr):Int
-		return Types.kindOfWord(hdrW0(p));
-
-	static inline function objBytes(p:Ptr):Int
-		return 8 * (nslotsOf(p) + 1);
-
-	// the type's pointer map (a bit per slot), or null
-	static inline function ptrmapOf(p:Ptr):Ptr
-		return Types.ptrmap(Types.ty(Mem.getU16(p, -8)));
-
-	static inline function isPtrSlot(pm:Ptr, i:Int):Bool
-		return ((Mem.getI32At(pm, 0, i >> 5) >>> (i & 31)) & 1) != 0;
+	// NativeArray is the static one). Read through GcCore (hdrW0, isFwd,
+	// fwdAddr, setFwd, wordsOf, nslotsOf, kindOf, objBytes, ptrmapOf,
+	// isPtrSlot), which wasm/Gc.hx shares.
 
 	static inline function inYoung(p:Ptr):Bool
 		return !p.ult(youngStart) && p.ult(youngEnd);
