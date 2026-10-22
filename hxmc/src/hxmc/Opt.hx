@@ -513,6 +513,21 @@ class Opt {
 			b.succs = [keep];
 		}
 		knownPhiArgs();
+		// (the blocks that may be threaded: a phi first, a branch last)
+		var any = false;
+		for (b in f.blocks) {
+			var n = b.ins.length;
+			if (n >= 2 && n <= 4 && b.ins[0].op == Phi && b.ins[n - 1].op == Br) {
+				any = true;
+				break;
+			}
+		}
+		if (!any) {
+			f.edited();
+			pruneBlocks();
+			mergeBlocks();
+			return;
+		}
 		var uses = MFunc.ints(f.vals.length, 0);
 		for (b in f.blocks)
 			for (i in b.ins) {

@@ -536,7 +536,8 @@ class MirBuild extends MirWriter {
 			changed = false;
 			for (b in f.blocks)
 				for (i in b.ins) {
-					if (i.op != Phi || i.dead || i.imm > 0) continue;
+					if (i.op != Phi) break; // (phis first)
+					if (i.dead || i.imm > 0) continue;
 					var same = -1;
 					var trivial = true;
 					for (a in i.args) {
