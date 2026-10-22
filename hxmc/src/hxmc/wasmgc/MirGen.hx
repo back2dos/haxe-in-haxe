@@ -49,6 +49,7 @@ class MirGen extends FuncGen {
 	var isLoop:Vector<Bool>;
 	var isMerge:Vector<Bool>;
 	var tryHandler:Vector<MBlock>; // a try body's first block -> the handler's
+	var loopOf:hxmc.Cfg<MBlock>; // (the loops: Cfg.inLoop)
 	// the objects made by their last field's initialization (enum values,
 	// closures, boxes, anonymous structures, Array literals: their fields are
 	// given to struct.new), by the New's value: their fields' values so far
@@ -172,12 +173,7 @@ class MirGen extends FuncGen {
 		if (stackifyOn)
 			for (x in rpo)
 				stackify(x);
-		for (x in rpo)
-			for (i in x.ins) {
-				if (i.dead || i.op == Param || keys[i.id] == null || isConst(i) || stacked[i.id]) continue;
-				locs[i.id] = nparams + extra.length;
-				extra.push(keys[i.id]);
-			}
+		assignLocals();
 		doTree(mf.entry);
 		if (repr(f.ret) != "v") op(0x00) else leave();
 		op(0x0B);
@@ -446,6 +442,75 @@ class MirGen extends FuncGen {
 		if (locs[i.id] >= 0) localSet(locs[i.id]) else if (keys[i.id] != null) op(0x1A);
 	}
 
+	// ---- locals
+
+	static final shareOn = Sys.getEnv("HXMC_GC_SHARE") != "0";
+
+	// Each value that needs one its local; a value made and used in one block
+	// only (not by a phi, nor by an object's field initialization, which reads
+	// it where the object is made) shares its local, of its key, with the
+	// values of that kind that block-local before it and are dead by then.
+	// (An engine's baseline compiler keeps the locals' state at every merge:
+	// a large function's thousands of values cost it time and memory.)
+	function assignLocals() {
+		var n = vals.length;
+		var useBlock = new Vector<MBlock>(n);
+		var shared = new Vector<Bool>(n); // (a block-local value)
+		var last = MFunc.ints(n, -1); // (its last use: an instruction's index in its block)
+		// (not a phi, set on the edges into its block; nor the handler's
+		// exception, nor an object its last field's initialization makes)
+		for (x in rpo)
+			for (i in x.ins)
+				if (!i.dead) shared[i.id] = shareOn && i.op != Phi && i.op != Catch && i.op != New && i.op != NewArray;
+		for (x in rpo) {
+			var k = 0;
+			for (i in x.ins) {
+				if (i.dead) continue;
+				var fieldInit = i.op == InitField || i.op == ArrayInit;
+				operands(i, v -> {
+					if (i.op == Phi || fieldInit || vals[v].block != x || useBlock[v] != null && useBlock[v] != x) shared[v] = false;
+					useBlock[v] = x;
+					last[v] = k;
+				});
+				if (i.op != Phi) k++;
+			}
+		}
+		var free = new Map<String, Array<Int>>();
+		for (x in rpo) {
+			var k = 0;
+			for (i in x.ins) {
+				if (i.dead) continue;
+				if (i.op != Phi) {
+					// (what dies here gives its local back first: an operation reads
+					// its operands before it writes its result)
+					operands(i, v -> {
+						if (shared[v] && locs[v] >= 0 && last[v] == k) {
+							var key = keys[v];
+							var l = free.get(key);
+							if (l == null) free.set(key, l = []);
+							if (l.indexOf(locs[v]) < 0) l.push(locs[v]);
+						}
+					});
+				}
+				if (!(i.op == Param || keys[i.id] == null || isConst(i) || stacked[i.id])) {
+					var key = keys[i.id];
+					var l = shared[i.id] ? free.get(key) : null;
+					if (l != null && l.length > 0) locs[i.id] = l.pop() else {
+						locs[i.id] = nparams + extra.length;
+						extra.push(key);
+					}
+					// (never read: free again)
+					if (shared[i.id] && last[i.id] < 0) {
+						var fl = free.get(key);
+						if (fl == null) free.set(key, fl = []);
+						fl.push(locs[i.id]);
+					}
+				}
+				if (i.op != Phi) k++;
+			}
+		}
+	}
+
 	// ---- stackify
 
 	static final stackifyOn = Sys.getEnv("HXMC_GC_STACKIFY") != "0";
@@ -575,6 +640,7 @@ class MirGen extends FuncGen {
 		var g = mf.cfg();
 		g.loops();
 		if (g.irreducible) unsupported("an irreducible loop");
+		loopOf = g;
 		rpo = g.rpo;
 		rpoNum = MFunc.ints(nblk, -1);
 		for (k in 0...rpo.length)
@@ -601,6 +667,13 @@ class MirGen extends FuncGen {
 			}
 			if (fwd >= 2) isMerge[x.id] = true;
 			if (x.handler) isMerge[x.id] = true;
+			// (a loop's exit: after the loop, not inside it at its branch, so that
+			// loops one after another do not nest, which an engine's baseline
+			// compiler pays for at every level)
+			for (p in x.preds) {
+				var pk = rpoNum[p.id];
+				if (pk >= 0 && pk < k && g.loopHead[pk] >= 0 && g.idom[k] == g.loopHead[pk] && !g.inLoop(k, g.loopHead[pk]) && p.term().op != Try) isMerge[x.id] = true;
+			}
 			var t = x.term();
 			if (t != null && t.op == Try) {
 				var tb = t.targets[0], hb = t.targets[1];
@@ -616,7 +689,7 @@ class MirGen extends FuncGen {
 		var k = ctx.length;
 		while (k-- > 0)
 			if (Type.enumEq(ctx[k], c)) return ctx.length - 1 - k;
-		return unsupported("a branch without its label");
+		return unsupported("a branch without its label (" + c + " in " + ctx + ")");
 	}
 
 	function brTo(c:Ctx) {
@@ -669,15 +742,33 @@ class MirGen extends FuncGen {
 		var ys = [for (c in kids[x.id]) if (isMerge[c.id]) c];
 		ys.sort((p, q) -> rpoNum[q.id] - rpoNum[p.id]);
 		if (isLoop[x.id]) {
+			// (the merge children outside the loop: in blocks around it)
+			var k = rpoNum[x.id];
+			var outs = [for (y in ys) if (!loopOf.inLoop(rpoNum[y.id], k)) y];
+			var ins = [for (y in ys) if (loopOf.inLoop(rpoNum[y.id], k)) y];
+			loopWithin(x, outs, ins, 0);
+		} else
+			nodeWithin(x, ys, 0);
+	}
+
+	function loopWithin(x:MBlock, outs:Array<MBlock>, ins:Array<MBlock>, k:Int) {
+		if (k == outs.length) {
 			op(0x03);
 			op(0x40);
 			ctx.push(CLoop(x.id));
-			nodeWithin(x, ys, 0);
+			nodeWithin(x, ins, 0);
 			ctx.pop();
 			op(0x0B);
 			op(0x00);
-		} else
-			nodeWithin(x, ys, 0);
+			return;
+		}
+		op(0x02);
+		op(0x40);
+		ctx.push(CBlock(outs[k].id));
+		loopWithin(x, outs, ins, k + 1);
+		ctx.pop();
+		op(0x0B);
+		doTree(outs[k]);
 	}
 
 	function nodeWithin(x:MBlock, ys:Array<MBlock>, k:Int) {
@@ -698,7 +789,7 @@ class MirGen extends FuncGen {
 		return rpoNum[dst.id] <= rpoNum[src.id] || isMerge[dst.id];
 
 	function labelOf(src:MBlock, dst:MBlock):Ctx
-		return rpoNum[dst.id] <= rpoNum[src.id] ? CLoop(dst.id) : CBlock(dst.id);
+		return isLoop[dst.id] && rpoNum[dst.id] <= rpoNum[src.id] ? CLoop(dst.id) : CBlock(dst.id); // (a loop's exit may come before a block of its loop)
 
 	function doBranch(src:MBlock, dst:MBlock) {
 		moves(src, dst);
