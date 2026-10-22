@@ -80,6 +80,9 @@ class LinkMachO extends LinkCore {
 		dso.define("__dso_handle", header, 0, 0);
 		objs.push(dso);
 		resolve();
+		// (the sections nothing reaches left out: LinkCore.gc; a dylib's exports are roots)
+		if (dylib) roots = [for (n in abi.exports) if (globals.exists(n)) n];
+		gc(entry);
 		// imports: what stays undefined (by name), and whether each is weak
 		var importWeak = new Map<String, Bool>();
 		var importOrder:Array<String> = [];
@@ -93,7 +96,7 @@ class LinkMachO extends LinkCore {
 		}
 		// the template-start descriptor (hxmc_tls_start), and the first
 		// thread-local section it points at
-		var tls = [for (o in objs) for (s in o.sections) if (s.kind == Tdata) s].concat([for (o in objs) for (s in o.sections) if (s.kind == Tbss) s]);
+		var tls = [for (o in objs) for (s in o.sections) if (s.kind == Tdata && isLive(s)) s].concat([for (o in objs) for (s in o.sections) if (s.kind == Tbss && isLive(s)) s]);
 		var extra = new Obj();
 		var tlv0 = new Section("__DATA,__thread_vars", Data, 8);
 		if (tls.length > 0) {
@@ -130,7 +133,7 @@ class LinkMachO extends LinkCore {
 		got = new Section("__DATA,__got", Data, 8);
 		extra.sections.push(stubs);
 		extra.sections.push(got);
-		objs.push(extra);
+		keep(extra);
 		if (tls.length > 0) {
 			globals.set("hxmc_tls_start", extra.sym("hxmc_tls_start"));
 			globals.set("hxmc_tls_base", extra.sym("hxmc_tls_base"));
@@ -157,19 +160,21 @@ class LinkMachO extends LinkCore {
 		var stubSlot = new Map<String, Int>();
 		for (o in objs)
 			for (s in o.sections)
-				for (r in s.relocs) {
-					var imp = imported(r.sym);
-					if (LinkCore.isGotRel(r.kind)) slot(r.sym);
-					else if (imp && r.kind != RAbs64) {
-						// code (a call, or an address taken pc-relatively): the stub
-						stub(r.sym.name);
-						if (!stubSlot.exists(r.sym.name)) stubSlot.set(r.sym.name, slot(r.sym));
+				if (isLive(s))
+					for (r in s.relocs) {
+						var imp = imported(r.sym);
+						if (LinkCore.isGotRel(r.kind)) slot(r.sym);
+						else if (imp && r.kind != RAbs64) {
+							// code (a call, or an address taken pc-relatively): the stub
+							stub(r.sym.name);
+							if (!stubSlot.exists(r.sym.name)) stubSlot.set(r.sym.name, slot(r.sym));
+						}
 					}
-				}
 		// ---- layout
 		var text = [], ro = [], roData = [], data = [], init = [], fini = [], tlv = [], tdata = [], tbss = [], bss = [];
 		for (o in objs)
 			for (s in o.sections) {
+				if (!isLive(s)) continue;
 				switch s.kind {
 					case Text: if (s != stubs) text.push(s);
 					case RoData:
@@ -191,7 +196,7 @@ class LinkMachO extends LinkCore {
 			}
 		text.push(stubs);
 		// the unwind tables (the system's unwinder and lldb find __eh_frame by name)
-		var recs = [for (o in objs) for (r in o.funcs) if (r.sym.section != null) r];
+		var recs = [for (o in objs) for (r in o.funcs) if (r.sym.section != null && isLive(r.sym.section)) r];
 		var eh = recs.length > 0 ? Unwind.ehFrame(recs, arm, "__TEXT,__eh_frame").sec : null;
 		addr.set(header, 0);
 		var pos = HEADER_RESERVE;

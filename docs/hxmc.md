@@ -147,9 +147,9 @@ an uncaught exception uses too:
   disagree with `.debug_line`): 16 bytes per function (its address as a
   PC-relative offset, no load-time fixup; its size; its class and the rest:
   the field and the rows, LEB128 deltas, a row only where the file or line
-  changes), the strings once each. The static ELF linker's dead code
-  elimination does not count the table's references (it is rebuilt with the
-  functions it keeps). Where `.debug_line` is 1.1 MB for the tool, the
+  changes), the strings once each. The linkers' dead-section removal
+  (LinkCore, on every native target) does not count the table's references
+  (it is rebuilt with the functions it keeps). Where `.debug_line` is 1.1 MB for the tool, the
   table is 0.64 MB (3.6% of the tool, the port 0.78 MB: 3.8%).
 - The walk: up the frame records (x86-64 by default, arm64 always:
   above), while a frame's return address is in a function of the table

@@ -80,11 +80,18 @@ class LinkPE extends LinkCore {
 		if (dll && !arm) BASE = dllBase;
 		readImports();
 		resolve();
+		// (the sections nothing reaches left out: LinkCore.gc, with the
+		// exception directory's entries of the functions kept)
+		roots = [for (n in (dll ? exports : []).concat(["_tls_used"])) if (globals.exists(n)) n];
+		unwindOf = pdataLinks();
+		gc(entry);
+		if (live != null) keepPdata();
 		// the imports the objects use: IAT slots (and thunks for code)
 		var used = new Map<String, Bool>(); // imported name keys (the symbol names of the list)
 		for (o in objs)
 			for (s in o.sections)
-				for (r in s.relocs)
+				if (isLive(s))
+					for (r in s.relocs)
 					if (target(r.sym) == null && imports.exists(r.sym.name)) used.set(r.sym.name, true);
 		// one IAT slot per (dll, name)
 		var dlls:Array<String> = [];
@@ -193,7 +200,7 @@ class LinkPE extends LinkCore {
 						sec.kind = Data;
 					}
 		unwindInfo(extra);
-		objs.push(extra);
+		keep(extra);
 		// output sections
 		var groups:Array<{name:String, chars:Int, secs:Array<Section>}> = [
 			{name: ".text", chars: 0x60000020, secs: []},
@@ -207,6 +214,7 @@ class LinkPE extends LinkCore {
 		];
 		for (o in objs)
 			for (s in o.sections) {
+				if (!isLive(s)) continue;
 				// (.CRT$X?A ... .CRT$X?Z: arrays of pointers, read-only or not,
 				// kept together in .data in name order)
 				var g = StringTools.startsWith(s.name, ".CRT$") ? 3 : switch s.kind {
@@ -507,6 +515,95 @@ class LinkPE extends LinkCore {
 		return symAddr(sym) - BASE - (sec >= 0 ? starts[sec] : 0);
 	}
 
+	// ---- dead sections (LinkCore.gc)
+
+	// roots besides the entry, the other objects and the exports: the C
+	// runtime's initializer, terminator and TLS callback lists (.CRT$X??,
+	// .ctors, .dtors); the exception directory is no root (keepPdata)
+	override function gcRoot(o:Obj, s:Section):Bool {
+		if (isPdata(s)) return false;
+		var n = s.name;
+		return super.gcRoot(o, s) || StringTools.startsWith(n, ".CRT$") || n == ".ctors" || n == ".dtors" || StringTools.startsWith(n, ".ctors.")
+			|| StringTools.startsWith(n, ".dtors.");
+	}
+
+	override function gcOpaque(s:Section):Bool
+		return super.gcOpaque(s) || isPdata(s);
+
+	// a kept function keeps its unwind information (.xdata, and the handlers it names)
+	override function gcAlso(s:Section, mark:Section->Void) {
+		var u = unwindOf.get(s);
+		if (u != null)
+			for (x in u)
+				mark(x);
+	}
+
+	static inline function isPdata(s:Section):Bool
+		return StringTools.startsWith(s.name, ".pdata");
+
+	var unwindOf = new Map<Section, Array<Section>>();
+
+	// the size of an exception directory entry: x86-64 begin, end, unwind
+	// information; arm64 begin, unwind information (or packed)
+	inline function pdataEntry():Int
+		return arm ? 8 : 12;
+
+	// what the objects' exception directory entries name for each function's
+	// section: the sections of its unwind information
+	function pdataLinks():Map<Section, Array<Section>> {
+		var m = new Map<Section, Array<Section>>();
+		var n = pdataEntry();
+		for (o in objs)
+			for (s in o.sections)
+				if (isPdata(s)) {
+					var fn = new Map<Int, Section>();
+					for (r in s.relocs)
+						if (r.offset % n == 0) {
+							var t = target(r.sym);
+							if (t != null && t.section != null) fn.set(Std.int(r.offset / n), t.section);
+						}
+					for (r in s.relocs) {
+						var f = fn.get(Std.int(r.offset / n));
+						var t = target(r.sym);
+						if (f == null || t == null || t.section == null || t.section == f) continue;
+						var l = m.get(f);
+						if (l == null) m.set(f, l = []);
+						if (l.indexOf(t.section) < 0) l.push(t.section);
+					}
+				}
+		return m;
+	}
+
+	// the objects' exception directory entries of the functions kept (the
+	// others' left out), their sections kept when any are
+	function keepPdata() {
+		var n = pdataEntry();
+		for (o in objs)
+			for (s in o.sections)
+				if (isPdata(s)) {
+					var byEntry = new Map<Int, Array<Reloc>>();
+					for (r in s.relocs) {
+						var k = Std.int(r.offset / n);
+						var l = byEntry.get(k);
+						if (l == null) byEntry.set(k, l = []);
+						l.push(r);
+					}
+					var buf = new Buf(s.buf.len), relocs = [];
+					for (k in 0...Std.int(s.buf.len / n)) {
+						var l = byEntry.get(k);
+						var first = l == null ? null : Lambda.find(l, r -> r.offset == k * n);
+						var t = first == null ? null : target(first.sym);
+						if (t == null || t.section == null || !live.exists(t.section)) continue;
+						for (r in l)
+							relocs.push(new Reloc(buf.len + r.offset - k * n, r.kind, r.sym, r.addend));
+						buf.bytes(s.buf.b, k * n, n);
+					}
+					s.buf = buf;
+					s.relocs = relocs;
+					if (buf.len > 0) live.set(s, true);
+				}
+	}
+
 	// the .pdata entries and .xdata of the generated functions (Unwind):
 	// x86-64 (begin, end, unwind info), arm64 (begin, .xdata); a function
 	// whose frame needs no description (a leaf leaving the stack alone) has
@@ -520,6 +617,7 @@ class LinkPE extends LinkCore {
 		var shared = new Map<String, Int>();
 		for (o in objs)
 			for (r in o.funcs) {
+				if (r.sym.section == null || !isLive(r.sym.section)) continue;
 				var u = arm ? Unwind.winA64(r.ops, r.sym.size) : Unwind.winX64(r.ops);
 				if (u == null) continue;
 				var key = u.toBytes().toHex();

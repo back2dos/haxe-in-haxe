@@ -576,6 +576,10 @@ class Driver {
 			if (imp != null) all.push(imp);
 		}
 		var bundle = abi.ios() && hxmc.ios.Bundle.isBundle(out) ? new hxmc.ios.Bundle(out, abi, o.ios) : null;
+		// the runtime objects' sections and the runtime's Haxe functions that
+		// nothing reaches are left out (LinkCore.gc; -D hxmc.jit: every runtime
+		// function stays, for the native macros it loads)
+		var collect = Sys.getEnv("HXMC_NOGC") != "1" && !o.jit ? rts : null;
 		var exe = abi.os == "windows" ? {
 			var l = new LinkPE(all, abi.arm);
 			if (abi.output == SharedLibrary) {
@@ -586,10 +590,12 @@ class Driver {
 				if (o.dllBase != null) l.dllBase = Std.parseInt(o.dllBase);
 			}
 			l.symbols = !o.strip;
+			l.collect = collect;
 			l.link("mainCRTStartup");
 		} : abi.os == "macos" ? {
 			var l = new LinkMachO(all, abi);
 			l.symbols = !o.strip;
+			l.collect = collect;
 			if (abi.output == SharedLibrary) l.installName = "@rpath/" + haxe.io.Path.withoutDirectory(out);
 			l.dylibs = dylibs;
 			if (bundle != null) {
@@ -610,8 +616,7 @@ class Driver {
 				d;
 			} else new Link(all, abi);
 			l.symbols = !o.strip;
-			// (-D hxmc.jit: every runtime function stays, for the native macros it loads)
-			if (Sys.getEnv("HXMC_NOGC") != "1" && !o.jit) l.collect = rts;
+			l.collect = collect;
 			if (o.jit) l.hostSyms = new StringBuf();
 			var exe = l.link("_start");
 			if (o.jit) sys.io.File.saveContent(out + ".syms", l.hostSyms.toString());
