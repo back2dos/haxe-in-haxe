@@ -91,6 +91,13 @@ enum abstract Cond(Int) to Int from Int {
 class MIns {
 	public var op:Op;
 	public var ty:MTy;
+	// the Haxe-level type of the value, carried from the IR (MirBuild: a
+	// class instance, an array and its element kind, a closure's signature,
+	// an enum or one of its constructors, Dynamic, a struct value, a plain
+	// scalar); null: a machine value without one (an address, a header word,
+	// what a lowering computes). Object-level passes read it (docs/plans/codegen.md,
+	// "Object-level Mir"); the back ends never do
+	public var vty:Null<hxmc.ir.Ir.Ty>;
 	public var id:Int = -1; // value number (every instruction gets one)
 	public var a:Int = -1;
 	public var b:Int = -1;
@@ -271,7 +278,7 @@ class MFunc {
 	}
 
 	public static function insString(i:MIns):String {
-		var s = (i.ty != Void ? 'v${i.id}:${tyName(i.ty)} = ' : '') + opName(i.op);
+		var s = (i.ty != Void ? 'v${i.id}:${tyName(i.ty)}${i.vty != null ? "<" + vtyName(i.vty) + ">" : ""} = ' : '') + opName(i.op);
 		var parts = [];
 		if (i.op == Const) parts.push(Std.string(i.imm) + (i.ty == I64 && i.imm2 != (i.imm < 0 ? -1 : 0) ? ' hi ${i.imm2}' : ""));
 		if (i.op == ConstF) parts.push(Std.string(i.f));
@@ -293,6 +300,29 @@ class MFunc {
 			case I64: "i64";
 			case F64: "f64";
 			case Void: "void";
+		};
+
+	// a Haxe-level type, short (dumps)
+	public static function vtyName(t:hxmc.ir.Ir.Ty):String
+		return switch t {
+			case TRef(r):
+				switch r {
+					case RObj(c): c.name;
+					case REnum(e): e == null ? "EnumValue" : e.name;
+					case RCtor(c): c.en.name + "." + c.name;
+					case RArr(t): "Array<" + vtyName(t) + ">";
+					case RNativeArr(t): "NativeArray<" + vtyName(t) + ">";
+					case RClos(s): "fn " + s.key;
+					case RBox(t): "box " + vtyName(t);
+					case RNull(t): "Null<" + vtyName(t) + ">";
+					case RStr: "String";
+					case RAnon: "anon";
+					case RAny: "Dynamic";
+					case RType: "type";
+					case RNative(p): p;
+				}
+			case TStruct(n, _): "struct " + n;
+			case _: hxmc.ir.Ir.repr(t);
 		};
 
 	static final CONDS:Vector<String> = vector("eq", "ne", "lt", "le", "gt", "ge", "ult", "ule", "ugt", "uge", "feq", "fne", "flt", "fle", "fgt", "fge");

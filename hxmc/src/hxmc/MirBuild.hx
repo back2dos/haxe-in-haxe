@@ -519,8 +519,13 @@ class MirBuild {
 			val = phi.id;
 		}
 		writeVar(v, b, val);
+		var x = f.vals[val];
+		if (x.vty == null) x.vty = localTy.get(v);
 		return val;
 	}
+
+	// the locals' types (MIns.vty of the phis and zeros made for them)
+	var localTy = new Map<Int, Ty>();
 
 	// a zero constant at the start of b (after its phis)
 	function zeroAt(b:MBlock, t:MTy):Int {
@@ -725,6 +730,7 @@ class MirBuild {
 		for (l in fn.args.concat(fn.locals)) {
 			if (l.id >= maxId) maxId = l.id + 1;
 			varTy.set(l.id, mty(l.ty) == Void ? I32 : mty(l.ty));
+			localTy.set(l.id, l.ty);
 		}
 		nextVar = maxId;
 		roots = Roots.analyze(fn);
@@ -770,6 +776,7 @@ class MirBuild {
 			for (i in 0...fn.args.length) {
 				var pi = mk(Param, f.params[i]);
 				pi.imm = i;
+				pi.vty = fn.args[i].ty;
 				params.push(add(pi));
 			}
 		if (nslots > 0) {
@@ -1815,7 +1822,15 @@ class MirBuild {
 		return xs;
 	}
 
+	// an expression's value, typed (MIns.vty: its first definition's type)
 	function ex(e:Ex):Int {
+		var v = exValue(e);
+		var i = f.vals[v];
+		if (i.vty == null) i.vty = Ir.typeOf(e);
+		return v;
+	}
+
+	function exValue(e:Ex):Int {
 		return switch e {
 			case EInt(v): iconst(v);
 			case EF64(v): fconst(v);
