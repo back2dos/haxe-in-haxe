@@ -118,15 +118,28 @@ class MirGen extends FuncGen {
 			varKey.push(null);
 			varLocal.push(-1);
 		}
-		var phis = [];
+		var phis = [], copies = [];
 		for (x in rpo)
 			for (i in x.ins)
 				if (!i.dead && i.op != Param) {
 					if (i.op == Phi) phis.push(i) else keys[i.id] = keyOfIns(i);
+					if (i.op == Copy) copies.push(i);
 				}
+		// (a copy has its operand's key: a phi's or a local's, known only here)
+		function copyKeys():Bool {
+			var changed = false;
+			for (c in copies) {
+				var k = valueKey(c.a);
+				if (k != keys[c.id]) {
+					keys[c.id] = k;
+					changed = true;
+				}
+			}
+			return changed;
+		}
 		var changed = true;
 		while (changed) {
-			changed = false;
+			changed = copyKeys();
 			for (p in phis) {
 				var k:Null<String> = null;
 				for (a in p.args)
@@ -165,6 +178,7 @@ class MirGen extends FuncGen {
 		for (x in rpo)
 			for (i in x.ins)
 				if (!i.dead && i.op == VarGet) keys[i.id] = varKey[i.info.n];
+		while (copyKeys()) {}
 		// locals (none for a value left on the stack)
 		for (x in rpo)
 			for (i in x.ins)
@@ -406,6 +420,9 @@ class MirGen extends FuncGen {
 				var bs = haxe.io.Bytes.alloc(8);
 				bs.setDouble(0, i.f);
 				b.bytes(bs);
+			case Const if (i.ty == I32 && k == "l"): // (a rotation's count: MirWriter.rotation)
+				op(0x42);
+				Enc.sleb64(b, i.imm, i.imm < 0 ? -1 : 0);
 			case Const if (i.ty == I32):
 				i32(i.imm);
 			case Const if (isRefKey(k)):

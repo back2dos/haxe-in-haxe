@@ -307,6 +307,25 @@ the first frame of large modules (item 1) and WebKit (item 2: not
 measurable here, no browser in this environment) are where they were.
 Revisit with items 1, 2 and 4.
 
+#### A large program: tsc-haxe (2026-10-22)
+
+tsc-haxe (the TypeScript compiler's Haxe port) builds and runs as a WasmGC
+module (two MirGen fixes, and WASI's path calls under the WasmGC runner:
+docs/hxmc.md, "WasmGC"), its output and emitted files identical to
+linear memory's and to the other ports'. On the TS6 compiler's sources
+under node 22, medians of 5 (wall s, peak RSS MB):
+
+| | check | decl | full | module MB (gzip -9) |
+| --- | --- | --- | --- | --- |
+| linear memory | 6.79, 481 | 7.18, 481 | 9.24, 584 | 12.9 (3.48) |
+| WasmGC | 7.78, 567 | 8.54, 579 | 11.27, 729 | 10.6 (3.29) |
+
+WasmGC is 15-22% slower and takes 18-25% more memory here, the module 5%
+smaller gzipped: a compiler is the allocation-heavy case where V8's
+collector costs more than hxmc's nursery (about 10% of the time in GC,
+casts and null checks a few percent each), as alloc and formatter_noio
+showed. It does not change the call above; a WASI program stays linear.
+
 #### One runtime
 
 The natives of strings, StringBuf, arrays, Bytes, BytesBuffer and Date
