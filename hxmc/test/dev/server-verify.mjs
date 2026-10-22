@@ -41,6 +41,18 @@ const cases = {
 		},
 		{ 'Main.hx': 'class Main {\n\tstatic function main() {\n\t\tvar f:Int->Int = x -> x * 2;\n\t\tvar g:Int->Null<Int> = f;\n\t\ttrace(Lib.call(x -> x + 1) + g(3));\n\t}\n}\n' },
 	],
+	// a dispatched call leaving out an argument gets the default of the
+	// override the receiver runs (FnLower.receiverDefault): Lib's body,
+	// replayed (Lib does not depend on Sub, so it is not typed again), has
+	// Sub's default value, which the edit of Sub changes (LowerQueries.fieldDefaults)
+	"an override's default value, in a replayed dispatched call": [
+		{
+			'Lib.hx': 'class Base {\n\tpublic function new() {}\n\tpublic function f(x:Int = 1):Int\n\t\treturn x;\n}\n\nclass Lib {\n\tpublic static function call(b:Base):Int\n\t\treturn b.f();\n}\n',
+			'Sub.hx': 'class Sub extends Lib.Base {\n\tpublic function new() {\n\t\tsuper();\n\t}\n\n\toverride public function f(x:Int = 2):Int\n\t\treturn x * 10;\n}\n',
+			'Main.hx': 'class Main {\n\tstatic function main() {\n\t\ttrace(Lib.call(new Sub()) + Lib.call(new Lib.Base()));\n\t}\n}\n',
+		},
+		{ 'Sub.hx': 'class Sub extends Lib.Base {\n\tpublic function new() {\n\t\tsuper();\n\t}\n\n\toverride public function f(x:Int = 3):Int\n\t\treturn x * 10;\n}\n' },
+	],
 };
 
 const out = web ? 'out/app.wasm' : process.platform === 'win32' ? 'out/app.exe' : 'out/app';
