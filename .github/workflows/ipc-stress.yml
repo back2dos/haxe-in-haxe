@@ -32,7 +32,7 @@ jobs:
           make release TARGET=linux-arm64
           mkdir -p ab/fix
           cp bin/release/linux-arm64/haxe ab/fix/haxe
-          bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Bench --setup -t hxmc
+          HAXE_IN_HAXE_PORT=bin/hxmc/hxmc bin/hxmc/hxmc -cp hxmc/test -cp haxe/test --run Bench --setup -t hxmc
           bash .github/ipc-stress/benchbuild.sh . bin/hxmc/hxmc ab/fix
           cp -r bin/bench/runner ab/runner
       - name: nofix (the same source without the dmb ishst)
