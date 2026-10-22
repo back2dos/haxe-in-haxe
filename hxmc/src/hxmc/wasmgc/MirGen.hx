@@ -36,6 +36,7 @@ class MirGen extends FuncGen {
 	var keys:Vector<String>; // a value's key (null: none: void, or a constant written where it is used)
 	var locs:Vector<Int>; // a value's local (-1: none)
 	var synth:Vector<Local>; // a value's synthetic local (made when an operation reads it)
+	var stacked:Vector<Bool>; // a value left on the stack for its one use (stackify)
 	var uses:Vector<Int>;
 	var varLocal:Array<Int> = [];
 	var varKey:Array<String> = [];
@@ -163,11 +164,17 @@ class MirGen extends FuncGen {
 		for (x in rpo)
 			for (i in x.ins)
 				if (!i.dead && i.op == VarGet) keys[i.id] = varKey[i.info.n];
-		// locals
+		// locals (none for a value left on the stack)
+		for (x in rpo)
+			for (i in x.ins)
+				if (!i.dead && keys[i.id] == "n" && i.op != Param && !isConst(i)) keys[i.id] = "p";
+		stacked = new Vector(n);
+		if (stackifyOn)
+			for (x in rpo)
+				stackify(x);
 		for (x in rpo)
 			for (i in x.ins) {
-				if (i.dead || i.op == Param || keys[i.id] == null || isConst(i)) continue;
-				if (keys[i.id] == "n") keys[i.id] = "p";
+				if (i.dead || i.op == Param || keys[i.id] == null || isConst(i) || stacked[i.id]) continue;
 				locs[i.id] = nparams + extra.length;
 				extra.push(keys[i.id]);
 			}
@@ -422,8 +429,10 @@ class MirGen extends FuncGen {
 			constant(i, k);
 			return;
 		}
-		if (locs[v] < 0) unsupported("a value without a local (" + MFunc.insString(i) + ")");
-		localGet(locs[v]);
+		if (!stacked[v]) { // (else on the stack already: stackify)
+			if (locs[v] < 0) unsupported("a value without a local (" + MFunc.insString(i) + ")");
+			localGet(locs[v]);
+		}
 		var vk = keys[v];
 		if (k.charAt(0) == "t") {
 			var t = Std.parseInt(k.substr(1));
@@ -431,9 +440,113 @@ class MirGen extends FuncGen {
 		}
 	}
 
-	// the value on the stack into i's local (or dropped)
+	// the value on the stack into i's local (or dropped; or left there: stackify)
 	function result(i:MIns) {
+		if (stacked[i.id]) return;
 		if (locs[i.id] >= 0) localSet(locs[i.id]) else if (keys[i.id] != null) op(0x1A);
+	}
+
+	// ---- stackify
+
+	static final stackifyOn = Sys.getEnv("HXMC_GC_STACKIFY") != "0";
+
+	// Values left on the wasm stack for their one use instead of in a local
+	// (the code around them unchanged: a use pushes its operands in order, so
+	// the leading ones may be there already). The use: an operation that
+	// pushes its operands itself (rawOps); its leading operands made in its
+	// block, used once, in that order, each by an operation that ends with its
+	// result (producer); between the first and the use, what is left on the
+	// stack for another use is used there too (the spans nest).
+	function stackify(x:MBlock) {
+		var pos = new Map<Int, Int>();
+		var spans:Array<Int> = []; // (start, end) of each use's span
+		var k = 0;
+		for (u in x.ins) {
+			if (u.dead || u.op == Phi || u.op == Param || isConst(u)) continue;
+			pos.set(u.id, k);
+			var ops = rawOps(u);
+			if (ops != null) {
+				var take = [];
+				var last = -1;
+				for (j in 0...ops.length) {
+					var v = ops[j];
+					var d = vals[v];
+					if (isConst(d) || uses[v] != 1 || d.block != x || !pos.exists(v) || pos.get(v) <= last || !producer(d)) break;
+					last = pos.get(v);
+					take.push(v);
+					// (a cast where it is pushed: only on top of the stack)
+					if (needsCast(v, pushKey(u, j))) break;
+				}
+				// (none inside another use's span: that use would find it on top)
+				for (j in 0...take.length) {
+					var s = pos.get(take[j]);
+					var inside = false;
+					var q = 0;
+					while (q < spans.length) {
+						if (spans[q] < s && spans[q + 1] > s) inside = true;
+						q += 2;
+					}
+					if (inside) {
+						take.resize(j);
+						break;
+					}
+				}
+				if (take.length > 0) {
+					spans.push(pos.get(take[0]));
+					spans.push(k);
+					for (v in take)
+						stacked[v] = true;
+				}
+			}
+			k++;
+		}
+	}
+
+	// the values an operation pushes first, in order, when it pushes them
+	// itself (null: none, or FuncGen writes it from locals)
+	function rawOps(i:MIns):Null<Array<Int>> {
+		return switch i.op {
+			case Add | Sub | Mul | And | Or | Xor | Shl | Sar | Shr | Rotr | Div | Rem | FAdd | FSub | FMul | FDiv: [i.a, i.b];
+			case Not | FNeg | FSqrt | FAbs | SExt | ZExt | Trunc | I2F | F2I | BitsToF | FToBits | NullCheck | VarSet: [i.a];
+			case Cmp:
+				var ka = valueKey(i.a), kb = valueKey(i.b);
+				if (ka != null && kb != null && (isRefKey(ka) || isRefKey(kb)) && (ka == "n" || kb == "n")) [ka == "n" ? i.b : i.a] else [i.a, i.b];
+			case Select: [i.b, i.c, i.a];
+			case Call: i.args.toArray();
+			case Ret if (i.a >= 0): [i.a];
+			case Br if (i.targets[0] != i.targets[1]): [i.a];
+			case _: null;
+		}
+	}
+
+	// the key the j-th of rawOps(u) is pushed as
+	function pushKey(u:MIns, j:Int):String {
+		return switch u.op {
+			case Call: m.paramKey(funcOf(u), j);
+			case Select: j < 2 ? keys[u.id] : "i";
+			case Ret: m.retKey(f);
+			case VarSet: varKey[u.info.n];
+			case _: "i"; // (scalars, conditions, references as eqref: never cast)
+		}
+	}
+
+	// whether push casts v to k
+	function needsCast(v:Int, k:String):Bool {
+		if (k.charAt(0) != "t") return false;
+		var vk = keys[v];
+		return !(vk.charAt(0) == "t" && m.isSubtype(Std.parseInt(vk.substr(1)), Std.parseInt(k.substr(1))));
+	}
+
+	// an operation that ends with its result (result, exResult), nothing after
+	function producer(i:MIns):Bool {
+		if (keys[i.id] == null) return false;
+		return switch i.op {
+			case Add | Sub | Mul | And | Or | Xor | Shl | Sar | Shr | Rotr | Div | Rem | FAdd | FSub | FMul | FDiv | Neg | Not | FNeg | FSqrt | FAbs | SExt | ZExt
+				| Trunc | I2F | F2I | BitsToF | FToBits | Cmp | Select | Call | GetField | EnumTag | TypeTest | Box | Unbox | VirtualCall | ClosureCall | AnonGet
+				| AnonCall | ArrayLength | ArrayGet: true;
+			case IrNode: i.info.ex != null;
+			case _: false;
+		}
 	}
 
 	// an IR expression's value into i's local (of its key: cast when typed)
@@ -791,8 +904,12 @@ class MirGen extends FuncGen {
 				} else op(0x1B);
 				result(i);
 			case Call:
+				// (as FuncGen's ECall: each argument as its parameter's key, the result the callee's)
 				var g = funcOf(i);
-				exResult(i, ECall(g, Vector.fromArrayCopy([for (k in 0...i.args.length) operand(i.args[k], g.args[k].ty)])));
+				for (k in 0...i.args.length)
+					push(i.args[k], m.paramKey(g, k));
+				call(m.funcOf(g));
+				if (repr(g.ret) != "v") result(i);
 			case NullCheck:
 				// (explicit null tests: the operations after it read the value unchecked)
 				push(i.a, "p");

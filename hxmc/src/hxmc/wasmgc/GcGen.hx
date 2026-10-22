@@ -191,9 +191,9 @@ class Uses {
 				}
 			}
 			inl[k] = into;
-			if (dump != null && (dump == fn.name || dump == "#" + k)) Sys.println(fn.name + " before Opt:\n" + mf.dump());
+			if (dump != null && (dump == fn.name || dump == "#" + k || fn.display != null && fn.display == dump)) Sys.println(fn.name + " before Opt:\n" + mf.dump());
 			if (k >= bisect[0] && k < bisect[1]) new Opt(mf).run();
-			if (dump != null && (dump == fn.name || dump == "#" + k)) Sys.println(mf.dump());
+			if (dump != null && (dump == fn.name || dump == "#" + k || fn.display != null && fn.display == dump)) Sys.println(mf.dump());
 			return mf;
 		}
 		var fs = prog.funcs;
