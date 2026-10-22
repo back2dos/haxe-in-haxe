@@ -227,7 +227,15 @@ live across a GC point outside `@:hxmc.noGc` code, `Facts.checkRawAddresses`). T
 handshake, startup and `rt_throw` are Haxe too (`Gc.hx`, `Threads.hx`,
 `Start.hx`; the heap census with `-D hxmc.census`): no C of hxmc's own is
 linked, only the C library, mbedtls and libuv ([plans/lowlevel.md](plans/lowlevel.md),
-"The runtime without C of our own"). The nursery's size adapts (unless
+"The runtime without C of our own"). What is the same across targets is
+written once, inline so that each target compiles to what its own copy
+did: the object model both collectors read (`GcCore.hx`: the header, the
+size and kind of an object, forwarding, pointer maps; the native `Gc.hx`
+and `wasm/Gc.hx` keep their own spaces, copies and remembered sets), and
+what the system layers do the same way over the calls that differ
+(`SysCore.hx` for PosixSys, WinSys and WasiSys; `NetCore.hx` for PosixNet
+and WinNet: the resolver, select's wait with other threads, Boolean
+options), the system chosen by `Mem.os`, which folds while lowering. The nursery's size adapts (unless
 `RT_MINOR_KB` fixes it, to 4 KB at least: generated code stores into an
 object of up to 1 KB allocated since the last collection point without a
 write barrier, which needs it young; Gc.hx): it starts at 4 MB, doubles after a minor
