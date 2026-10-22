@@ -100,6 +100,7 @@ class Driver {
 	var rootStores = 0; // (Frames)
 	var freshStores = 0; // (Opt.freshTargets)
 	var framesRemoved = 0;
+	var devirtualized = 0; // (Inline.devirtualize)
 	var foldWhy = new Map<String, Int>(); // (Fold.whyOn)
 	var escTime = 0.0;
 	var escSlow:Array<{name:String, t:Float}> = [];
@@ -161,6 +162,16 @@ class Driver {
 					for (c in Escape.closureCalls(mf, g -> g.module == fn.module && MirBuild.inlineCands.exists(g), prep.funcSym))
 						todo.push(c);
 					rounds(todo);
+				}
+				// virtual calls on objects made here: direct, then inlined where they may be
+				if (Inline.devirtOn && mf.allocs > 0) {
+					var d = Inline.devirtualize(mf, fn.module, prep.p.selectors, prep.funcSym);
+					if (d.length > 0) {
+						lock.acquire();
+						devirtualized += d.length;
+						lock.release();
+						rounds([for (s in d) if (MirBuild.inlineCands.exists(s.fn)) s]);
+					}
 				}
 			}
 			if (o.opt && Escape.on) {
@@ -282,7 +293,7 @@ class Driver {
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded (cpu ${ms(escTime)})');
 		Sys.println('hxmc: $allocsFolded allocations folded into the one before them (Fold)');
-		Sys.println('hxmc: frames: $rootStores root stores and $framesRemoved frames removed; $freshStores write barriers of objects just allocated left out');
+		Sys.println('hxmc: frames: $rootStores root stores and $framesRemoved frames removed; $freshStores write barriers of objects just allocated left out; $devirtualized virtual calls made direct');
 		var ks = [for (k in foldWhy.keys()) k];
 		ks.sort((a, b) -> foldWhy.get(b) - foldWhy.get(a));
 		for (k in ks)

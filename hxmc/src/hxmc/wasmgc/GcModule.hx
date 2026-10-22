@@ -535,12 +535,12 @@ class GcModule {
 		return lib == null ? null : importIndex.get(lib + "." + sym);
 	}
 
-	// a function's code: emitted again when locals can be given a type (FuncGen.refine)
+	// a function's code: its object-level Mir (Uses.mirs) written by MirGen
 	function emitFunc(f:FuncInfo):Buf {
-		var g = new FuncGen(this, f);
-		var code = g.emit();
-		var r = g.refine();
-		return r == null ? code : new FuncGen(this, f, r).emit();
+		var name = f.display != null ? f.display : f.name;
+		var mf = uses.mirs.get(f);
+		if (mf == null) throw 'hxmc: -D hxmc.wasm-gc: $name: ${uses.unbuilt.get(f)} is not supported yet';
+		return try new MirGen(this, f, mf).emit() catch (e:String) throw e.indexOf(name) >= 0 ? e : e + " (in " + name + ")";
 	}
 
 	// a function written here (its body without the final end), after the program's;
@@ -580,6 +580,23 @@ class GcModule {
 		helpers.push({name: name, type: funcTypeTokens(["t" + t], "n" + t), body: b, locals: []});
 		helperIndex.set(name, i);
 		return i;
+	}
+
+	// rt_null_access called when the eqref is null (MirGen's NullCheck)
+	public function nonNullAny():Int {
+		var i = helperIndex.get("nn_any");
+		if (i != null) return i;
+		var b = new Buf();
+		b.u8(0x20); // local.get 0
+		b.u8(0);
+		b.u8(0xD1); // ref.is_null
+		b.u8(0x04); // if
+		b.u8(0x40);
+		b.u8(0x10);
+		Enc.uleb(b, exportOf("rt_null_access"));
+		b.u8(0x00);
+		b.u8(0x0B);
+		return addHelper("nn_any", "p_v", b, []);
 	}
 
 	// what JavaScript reads a string with. The string or Bytes comes in as an

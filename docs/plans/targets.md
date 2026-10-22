@@ -267,6 +267,46 @@ first frame and WebKit hold; keep linear memory for
 WASI, the compiler modules and threads, and as the fallback (one define,
 `-D hxmc.wasm-gc`, chooses).
 
+#### Object-level Mir and the call again (2026-10-22)
+
+WasmGC is now generated from the native pipeline's object-level Mir
+([#34](https://github.com/benmerckx/hxmc/issues/34) stage 5:
+docs/plans/codegen.md, "Built: stage 5"): one optimizer (inlining, escape
+analysis, value numbering, loop-invariant code motion, condition
+propagation) for native code, linear wasm and WasmGC; `wasmgc/IrOpt` and
+the IR walker are gone. Measured against main's IrOpt path (node 22, a
+machine shared with other work, medians of 5):
+
+| | IrOpt | object-level Mir | linear memory |
+| --- | --- | --- | --- |
+| the port's module (gzip -9) | 10.8 MB (3.80) | 9.8 MB (3.19) | |
+| its self-compile s, peak RSS | 19.35, 1026 MB | 17.94, 951 MB | |
+| a small compile s, peak RSS | 2.38, 639 MB | 2.49, 407 MB | |
+| `--version` s | 0.30 | 0.31 | |
+| HaxeBenchmarks s: alloc | 2.74 | 2.78 | 1.82 |
+| bcrypt | 7.93 | 3.05 | 3.14 |
+| binarytrees | 1.07 | 1.10 | 1.23 |
+| json | 0.92 | 0.94 | 0.91 |
+| mandelbrot | 0.76 | 0.73 | 0.71 |
+| mandelbrot_anon | 1.00 | 0.72 | 1.48 |
+| nbody | 1.16 | 1.23 | 1.11 |
+| sha256 | 0.44 | 0.28 | 0.37 |
+| sha512 | 0.09 | 0.10 | 0.10 |
+| formatter_noio | 11.23 | 11.13 | 8.42 |
+
+(The linear column from the same run as the Mir one; main's bcrypt took
+7.9 s in every run here, 3.1 s in the tables above, and the Mir path does
+not have that.) Smaller modules where gzip counts (item 3 above: the port
+16% smaller gzipped), the same speed elsewhere, and the separate optimizer
+gone: the second compiler the "not yet" partly rested on is now a lowering.
+
+**The call: still not yet**, for the same reasons as before, which the
+optimizer was not one of: formatter_noio is 1.3 times linear memory's time
+and alloc 1.5 (the engine's collector and the casts of untyped values),
+the first frame of large modules (item 1) and WebKit (item 2: not
+measurable here, no browser in this environment) are where they were.
+Revisit with items 1, 2 and 4.
+
 #### One runtime
 
 The natives of strings, StringBuf, arrays, Bytes, BytesBuffer and Date

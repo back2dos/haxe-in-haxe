@@ -61,7 +61,9 @@ class Opt {
 	// one slot leaves the loads of the others alone (MFrame's own version:
 	// accesses at dynamic offsets)
 	static inline var MFrameAt = 22;
-	static inline var NCLS = 30;
+	// WasmGC's locals out of SSA (VarGet, VarSet: written by their stores only)
+	static inline var MVar = 30;
+	static inline var NCLS = 31;
 	static inline var TLS_BITS = (1 << MTls) | (1 << MTlsSp) | (1 << MTlsHw) | (1 << MTlsYp) | (1 << MTlsYl);
 
 	static function tlsClass(sym:String):Int
@@ -89,7 +91,7 @@ class Opt {
 	}
 
 	public function run() {
-		operands();
+		if (!f.gc) operands();
 		simplifyCfg();
 		var cfg = f.cfg();
 		if (cfg.size == 0) return;
@@ -995,12 +997,21 @@ class Opt {
 			case NArrayLength: MConst;
 			case NArrayGet: MElem;
 			case ArrayGet if (!ptrElem(i.info.t)): MElem;
+			case VarGet: MVar;
 			case _: -1;
 		};
 
-	// a field write a later read of the field may take the value of
+	// a field write a later read of the field may take the value of (a local's)
 	static inline function objStore(i:MIns):Bool
-		return (i.op == SetField || i.op == InitField) && !i.info.t.match(TVoid);
+		return (i.op == SetField || i.op == InitField) && !i.info.t.match(TVoid) || i.op == VarSet;
+
+	// the class an object-level store writes (objStore)
+	static inline function storeCls(i:MIns):Int
+		return i.op == VarSet ? MVar : fieldCls(i.info);
+
+	// the value an object-level store writes
+	static inline function storedValue(i:MIns):Int
+		return i.op == VarSet ? i.a : i.b;
 
 	// object-level operations whose value depends on their operands alone
 	static inline function objPure(op:Op):Bool
@@ -1008,7 +1019,7 @@ class Opt {
 
 	// object-level operations whose lowering calls on the fast path (LICM: a call)
 	static inline function objCall(op:Op):Bool
-		return op == VirtualCall || op == ClosureCall || op == AnonCall || op == NewArray || op == NArrayDyn || op == Box || op == Unbox;
+		return op == VirtualCall || op == ClosureCall || op == AnonCall || op == NewArray || op == NArrayDyn || op == Box || op == Unbox || op == IrNode;
 
 	// object-level operations that dereference their first operand (LICM: not null after)
 	static inline function objDeref(op:Op):Bool
@@ -1021,6 +1032,7 @@ class Opt {
 	static function okey(i:MIns):Int
 		return switch i.op {
 			case GetField | SetField | InitField: fieldOff(i.info);
+			case VarGet | VarSet: i.info.n;
 			case ArrayGet: i.info.flag ? 1 : 0;
 			case NArrayGet: i.info.n;
 			case TypeTest: i.info.cls.tindex;
@@ -1031,7 +1043,8 @@ class Opt {
 	// the classes an object-level operation writes
 	function objKill(i:MIns):Int
 		return switch i.op {
-			case NullCheck | GetField | FieldAddr | EnumTag | TypeTest | ArrayLength | NArrayLength | NArrayGet | InitField: 0;
+			case NullCheck | GetField | FieldAddr | EnumTag | TypeTest | ArrayLength | NArrayLength | NArrayGet | InitField | VarGet | Catch: 0;
+			case VarSet: 1 << MVar;
 			case ArrayGet: ptrElem(i.info.t) ? ALL : 0;
 			case SetField: i.info.t.match(TVoid) ? 0 : (1 << fieldCls(i.info)) | (1 << MField) | (1 << MOther);
 			case AnonStore: FIELD_BITS | (1 << MField) | (1 << MOther);
@@ -1347,7 +1360,7 @@ class Opt {
 					for (c in 0...NCLS)
 						if (m & (1 << c) != 0) v[c] = next++;
 				// (a store: the version it leaves its memory in, that of the loads it can answer)
-				if (i.op == Store) ver[i.id] = v[memClass(i)] else if (objStore(i)) ver[i.id] = v[fieldCls(i.info)];
+				if (i.op == Store) ver[i.id] = v[memClass(i)] else if (objStore(i)) ver[i.id] = v[storeCls(i)];
 			}
 			outs[k] = v;
 		}
@@ -1393,6 +1406,7 @@ class Opt {
 
 	function same(x:MIns, y:MIns):Bool
 		return x.isObj() ? x.op == y.op && x.ty == y.ty && cres(x.a) == cres(y.a) && cres(x.b) == cres(y.b) && cres(x.c) == cres(y.c) && okey(x) == okey(y)
+			&& (x.op != TypeTest || x.info.cls == y.info.cls) // (WasmGC: no type indices)
 			&& ver[x.id] == ver[y.id] : x.op == y.op && x.ty == y.ty && cres(x.a) == cres(y.a) && cres(x.b) == cres(y.b) && cres(x.c) == cres(y.c) && x.imm == y.imm && x.imm2 == y.imm2
 			&& x.size == y.size && x.signed == y.signed && x.sym == y.sym && x.mem == y.mem && ver[x.id] == ver[y.id];
 
@@ -1426,7 +1440,8 @@ class Opt {
 	// a field read that takes the value of a field write st (an object's
 	// initialization too: the same object, field and memory version)
 	function answersObj(st:MIns, l:MIns):Bool
-		return cres(st.a) == cres(l.a) && fieldOff(st.info) == fieldOff(l.info) && ver[st.id] == ver[l.id] && f.vals[res(st.b)].ty == l.ty;
+		return if (st.op == VarSet) l.op == VarGet && st.info.n == l.info.n && ver[st.id] == ver[l.id] && f.vals[res(st.a)].ty == l.ty;
+		else l.op == GetField && cres(st.a) == cres(l.a) && fieldOff(st.info) == fieldOff(l.info) && ver[st.id] == ver[l.id] && f.vals[res(st.b)].ty == l.ty;
 
 	// value numbering in a preorder walk of the dominator tree, with a
 	// scoped table (entries made in a subtree are undone after it); a store
@@ -1461,7 +1476,8 @@ class Opt {
 					var op = i.op;
 					if (op == Store || objStore(i)) {
 						if (op == Store && !forwards(i)) continue;
-						var h = op == Store ? hashOf(Load, i.a, i.b, -1, i.imm, i.imm2, ver[i.id]) : hashOf(GetField, i.a, -1, -1, fieldOff(i.info), 0, ver[i.id]);
+						var h = op == Store ? hashOf(Load, i.a, i.b, -1, i.imm, i.imm2, ver[i.id]) : op == VarSet ? hashOf(VarGet, -1, -1, -1, i.info.n, 0,
+							ver[i.id]) : hashOf(GetField, i.a, -1, -1, fieldOff(i.info), 0, ver[i.id]);
 						h = (h ^ (h >>> 15)) * 0x2c1b3c6d;
 						var bk = (h ^ (h >>> 12)) & mask;
 						chain[i.id] = head[bk];
@@ -1485,9 +1501,9 @@ class Opt {
 								hit = res(y.c);
 								break;
 							}
-						} else if (y.op == SetField || y.op == InitField) {
-							if (op == GetField && answersObj(y, i)) {
-								hit = res(y.b);
+						} else if (y.op == SetField || y.op == InitField || y.op == VarSet) {
+							if ((op == GetField || op == VarGet) && answersObj(y, i)) {
+								hit = res(storedValue(y));
 								break;
 							}
 						} else if (same(i, y)) {
@@ -1638,5 +1654,6 @@ class Opt {
 	}
 
 	static inline function removable(i:MIns):Bool
-		return pure(i.op) || objPure(i.op) || objLoadClass(i) >= 0 || i.op == ArrayGet || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy || i.op == Phi;
+		return pure(i.op) || objPure(i.op) || objLoadClass(i) >= 0 || i.op == ArrayGet || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy || i.op == Phi
+			|| i.op == IrNode && i.info.ex != null && i.info.ex.match(EStr(_) | EType(_) | EGlobal(_, _)); // (a literal, a type value or a global read: WasmGC)
 }

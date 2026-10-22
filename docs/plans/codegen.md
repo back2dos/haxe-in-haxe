@@ -78,8 +78,10 @@ optimization tier for #15's interpreted macros.
   region calls of `rt_blocking_enter`/`rt_blocking_leave`. No object-level
   pass needs to see through them: a function with `try` is not inlined
   (`Inline.candidate`) and its handler's locals live in memory. Stage 5
-  makes `Throw` and a try region operations (WasmGC's `try_table`), whose
-  native lowering is today's code.
+  made a try region operations for WasmGC only (`MirBuild.gc`: a `Try`
+  terminator, the handler's `Catch`, the locals the handler reads
+  `VarGet`/`VarSet`; `throw` the IR's own statement in an `IrNode`):
+  natively nothing needed them, and the native code stays as it was.
 - **`@:hxmc.struct` values and the by-value C ABI: memory-level only.** A
   struct value is the address of its memory (typed `TStruct` in
   `MIns.vty`); `MirBuild` builds C calls and entries from C with structs
@@ -256,6 +258,119 @@ G; `Escape` with the closure-call pass 1.23 G 1.22 G; `Frames` is new,
 allocation 19.09 G became 17.76 G and instruction selection 5.67 G 5.58 G
 (fewer barriers and frames); `Layout.order` 0.03 G became 0.27 G (it now
 builds the CFG's analyses `Opt` used to leave it).
+
+### Built: stage 5, WasmGC from object-level Mir
+
+The pipeline (`wasmgc.GcGen`): `Reach`, then per function (in parallel)
+`MirBuild` in its WasmGC mode, `Inline`, the closures called where they are
+made, `Inline.devirtualize`, `Escape`, `Opt`; `Reach` again over what the
+Mir still calls; then `MirGen` writes each function into `GcModule`'s
+module. `wasmgc/IrOpt` (646 lines) and the IR walker's statements and
+second emission (`FuncGen.emit`, `refine`, the control flow, 340 lines)
+are gone; `FuncGen` keeps the IR's expressions and leaf statements, which
+`MirGen` writes the operations it does not write itself with.
+
+- **`MirBuild.gc`**: no `Prep`, no roots or frame slots; a field is at
+  its index (`at`: an Int's or Bool's twice it, as an enum's arguments);
+  sites keyed by name in `Escape` (no type indices). What is memory-level
+  natively (globals, strings, type values, the runtime's intrinsics and
+  host calls, `Mod`/`FMod`/`LDiv`/`LMod`, float to int conversions, field
+  addresses, `throw`, `SSetGlobal`, structural writes) is an `IrNode`: the
+  IR's expression or statement, its non-literal operands evaluated first
+  and standing in it as placeholder locals (`OInfo.ph`), so that WasmGC's
+  representation of them stays `FuncGen`'s. A `try` is a `Try` terminator
+  (the body and the handler as its targets) and the handler's `Catch`; the
+  locals `memLocals` finds the handler reads are `VarGet`/`VarSet`, which
+  `Opt` treats as loads and stores of their own class. An if on a
+  constant builds only the branch taken (what `IrOpt.live` did: another
+  target's code).
+- **`Opt`** runs as natively (`operands` aside: a lowering's operands);
+  a type test's identity is its class (`Opt.same`: no type indices), and
+  an `IrNode` is pure only when it is a literal, a type value or a global
+  read.
+- **`MirGen`** (extends `FuncGen`): the control flow structured as
+  `wasm/WasmGen` structures linear memory's (the dominator tree, merge
+  children in blocks, loop headers in loops), a loop's exits after the
+  loop rather than inside it at their branch (loops one after another
+  nested otherwise, which V8's baseline compiler pays for at every level:
+  the port's `--version` took 0.47 s instead of 0.29), a `try` a legacy try
+  around its body's dominator subtree whose catch branches to the
+  handler's block. Each value a local of the wasm type its operation gives
+  it (a phi's: what its operands share; a value used once by the next
+  operations that push it, left on the stack instead, `stackify`; values
+  made and used in one block share locals by kind); an object made with
+  fields (an enum value, a closure, a box, an anonymous object, an Array
+  literal) at its last field's initialization (`struct.new`,
+  `array.new_fixed`); a field read or write of an untyped value used so
+  more than once in a block cast once (`classOperand`); explicit null tests
+  (`NullCheck`, `nn_any`) and the operations after them unchecked.
+- **Reachability over the Mir** (`Uses.summary`): `Reach`'s second pass
+  reads each function's IR with every callee inlined into it (to any
+  depth, a closure called where made, a method devirtualized) followed into
+  its body, the parameters replaced by the arguments (`findSinks` still
+  sees the names passed on), and the calls the Mir no longer makes
+  dropped.
+- **Inlining**: the native templates and limits (WasmGC's flat 4, loop
+  16); in a loop, a callee that an object made here meets (passed one, or
+  returning one it makes) up to the native loop limit of 48, judged on
+  what `MirGen` makes of it (`Inline.size(f, true)`: no barriers or nursery),
+  and looked at again in the next round when an inlined callee made the
+  object (`Inline.objectsMeet`). That is IrOpt's rule ("calls inlined where
+  that lets scalar replacement happen") on Mir: mandelbrot with anonymous
+  objects 1.00 s to 0.72 s.
+- **Devirtualization** (`Inline.devirtualize`, both pipelines): a virtual
+  call on an object made in the function calls the class's implementation
+  of the selector directly (the dispatch row's function), when it is of
+  the function's module (its key covers it), then inlined where it may be.
+  It finds little: in the port natively none (its binary the size of stage 4's,
+  20,427,552 bytes), in the port as WasmGC one.
+- **Measured** (2026-10-22, against main's IrOpt path, 143c42b's source;
+  node 22, a machine shared with other work; the port's runs medians of 5
+  interleaved, HaxeBenchmarks medians of 5):
+
+| | main (IrOpt) | stage 5 |
+| --- | --- | --- |
+| the port as a WasmGC module | 10,849,453 B (gzip -9 3,804,540) | 9,759,687 B (-10.0%; gzip 3,187,237, -16.2%) |
+| its self-compile to HXB (`--interp --no-output`) | 19.35 s, 1026 MB | 17.94 s (-7%), 951 MB; the same archive (HxbCmp, 518 modules) |
+| a small compile (`moduleload.TryCatch` to `--interp`), `--version` | 2.38 s, 639 MB; 0.30 s, 116 MB | 2.49 s, 407 MB; 0.31 s, 151 MB |
+| the port's WasmGC build by the tool (typing cold) | 10.9 s user, 1,046 MB | 12.3 s user, 1,578 MB (every function's Mir kept until the module is written) |
+| allocation sites replaced in the port | (IrOpt's) | 1,019 |
+| HaxeBenchmarks, WasmGC s: alloc, bcrypt, binarytrees, json | 2.74, 7.93, 1.07, 0.92 | 2.78, 3.05, 1.10, 0.94 |
+| mandelbrot, mandelbrot_anon, nbody | 0.76, 1.00, 1.16 | 0.73, 0.72, 1.23 |
+| sha256, sha512, formatter_noio | 0.44, 0.09, 11.23 | 0.28, 0.10, 11.13 |
+| their modules, KB | 14, 135, 12, 64, 14, 13, 15, 124, 124, 539 | 14, 135, 12, 65, 14, 14, 15, 125, 125, 558 |
+
+(nbody's runs spread 1.0-1.35 s in both; main's bcrypt was 3.1 s in the
+table of docs/plans/targets.md, and 7.9 s here in every run: what IrOpt
+did to it on today's main was not looked into, the Mir path does not have
+it.) `make wasmgc-check` passes (31 programs); the port as a WasmGC module
+compiles itself to the native port's archive.
+
+### Stage 6: WasmGC's go/no-go again
+
+Recorded in [targets.md](targets.md) ("WasmGC", "Object-level Mir and the
+call again"): **still not yet** for browser builds. One optimizer now
+serves both paths and WasmGC's modules got smaller (the port 10% raw, 16%
+gzipped), but what kept the call at "not yet" is unchanged by it: the
+benchmarks where WasmGC is behind linear memory (formatter_noio 11.1 s
+against 8.4, alloc 2.8 against 1.8: the engine's collector and casts, not
+the optimizer), the first frame of large modules, WebKit (not measurable
+here: no browser in this environment).
+
+### Stage 7 and what else #34 lists
+
+- **#15's optimization tier for interpreted macros: not built, decided
+  against for now.** #15 is an open draft; the tier needs its interpreter.
+  The split is there for it: a function's object-level Mir goes through
+  `MirBuild.lower` without the optimizer when `o.opt` is off, which is the
+  tier's cold path (`HXMC_OPT=0` today, per build); a per-function switch
+  is a few lines in `Driver.compileFunc` once #15 lands.
+- **Type-test folding**: at the object level since stage 3 (`Escape`: a
+  type test or enum tag on an object made here; the port 561).
+- **Devirtualization**: built (above), little to find.
+- **Exceptions at the object level**: for WasmGC (above); natively
+  decided to stay memory-level ("Decisions").
+- **`Facts.checkRawAddresses`**: stays on the IR ("Decisions").
 
 ## Escape analysis
 
