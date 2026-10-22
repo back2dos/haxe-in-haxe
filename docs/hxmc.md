@@ -1242,7 +1242,14 @@ it as in linear memory. It is exported as `memory`, with the
 `@:hxmc.callback` functions in `__indirect_function_table`, so the
 packages' imports (`imports.mjs`) and `browser.mjs` treat the module as
 a linear one: `@:hxmc.lib` externs are imports with wasm32's C ABI
-(pointers as i32 into that memory, floats as f32). A Bytes stays an array
+(pointers as i32 into that memory, floats as f32). So are
+`hxmc.rt.wasm.WasiApi`'s functions, from `wasi_snapshot_preview1`
+(`GcModule.libOf`), which `wasmgc.mjs` gives with node's WASI (the file
+system preopened as `/`); `hxmc.rt.wasm.Wasi` reads the preopened
+directories on the first path it resolves and takes the host's working
+directory for relative ones, so a program that makes WASI's path calls
+itself (tsc-haxe's `go.OsWasi`) runs as either kind of module
+(`hxmc/test/wasmgc/WasiPaths.hx`). A Bytes stays an array
 of the collector; where it crosses to C, `hxmc.unsafe.BytesPtr` copies
 it through the linear memory (in linear memory: its own address, no
 copy); strings cross as UTF-8 through it (`Repr.utf8To`,

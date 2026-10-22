@@ -418,7 +418,7 @@ class GcModule {
 		foreign.sort(Reflect.compare);
 		for (n in foreign) {
 			var key = foreignKey(n);
-			if (key != null) importFunc(hxmc.ir.CInterop.LIBS.get(n), n, key);
+			if (key != null) importFunc(libOf(n), n, key);
 		}
 		var tagType = funcType("p_v");
 		for (f in uses.funcs) {
@@ -507,7 +507,7 @@ class GcModule {
 	// memory's: pointers into the linear memory as i32, floats as f32, structs
 	// by CAbi.wasmSig), or null
 	static function foreignKey(sym:String):Null<String> {
-		var lib = hxmc.ir.CInterop.LIBS.get(sym), sig = hxmc.ir.CInterop.SIGS.get(sym);
+		var lib = libOf(sym), sig = hxmc.ir.CInterop.SIGS.get(sym);
 		if (lib == null || sig == null) return null;
 		sig = hxmc.CAbi.wasmSig(sig);
 		function r(t:hxmc.ir.CInterop.CTy):Null<String>
@@ -529,9 +529,17 @@ class GcModule {
 		return ret == null ? null : ps + "_" + ret;
 	}
 
+	// the module an extern is imported from: its @:hxmc.lib, else WASI's for
+	// hxmc.rt.wasm.WasiApi's functions (as LinkWasm imports them; the host
+	// gives them over the linear memory: hxmc/bootstrap/wasmgc.mjs)
+	static function libOf(sym:String):Null<String> {
+		var lib = hxmc.ir.CInterop.LIBS.get(sym);
+		return lib != null ? lib : hxmc.wasm.LinkWasm.WASI.exists(sym) ? "wasi_snapshot_preview1" : null;
+	}
+
 	// the import of a @:hxmc.lib extern (foreignKey), or null
 	public function foreignOf(sym:String):Null<Int> {
-		var lib = hxmc.ir.CInterop.LIBS.get(sym);
+		var lib = libOf(sym);
 		return lib == null ? null : importIndex.get(lib + "." + sym);
 	}
 
