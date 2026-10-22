@@ -1180,6 +1180,40 @@ class GcModule {
 		}
 	}
 
+	// hxmc.NativeResource.bytes(i): a new array of resource i's bytes, each
+	// resource's a passive data segment (Lower.resources, as linear memory's
+	// DataGen.resources), read only by this (br_table on i, then array.new_data)
+	public function resourceBytes():Int {
+		var h = hasHelper("resource_bytes");
+		if (h != null) return h;
+		var rs = hxmc.ir.Lower.resources;
+		var b = new Buf();
+		// (a block per resource and one for an index out of range, innermost first)
+		for (_ in 0...rs.length + 1) {
+			b.u8(0x02);
+			b.u8(0x40);
+		}
+		b.u8(0x20);
+		b.u8(0);
+		b.u8(0x0E);
+		Enc.uleb(b, rs.length);
+		for (k in 0...rs.length + 1)
+			Enc.uleb(b, k);
+		b.u8(0x0B);
+		for (k in 0...rs.length) {
+			b.u8(0x41);
+			b.u8(0);
+			b.u8(0x41);
+			Enc.sleb(b, rs[k].data.length);
+			gc(b, 0x09, tBytes, dataSegs.length);
+			dataSegs.push(rs[k].data);
+			b.u8(0x0F);
+			b.u8(0x0B);
+		}
+		b.u8(0x00);
+		return addHelper("resource_bytes", "i_p", b, []);
+	}
+
 	// a string of the bytes (Latin-1)
 	function latin1Helper():Int {
 		var b = new Buf();

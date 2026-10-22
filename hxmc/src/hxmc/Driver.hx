@@ -491,6 +491,7 @@ class Driver {
 		dg.stubs(objs, demit);
 		dg.cstrLiterals(objs);
 		dg.emptyArrays(objs);
+		dg.resources(objs);
 		// (the functions and their lines for the runtime's stacks: StackTable)
 		Dwarf.enabled = o.debugLines;
 		StackTable.add(data, objs, prep.p.stacks && !abi.wasm);

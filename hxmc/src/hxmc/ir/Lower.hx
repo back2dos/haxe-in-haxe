@@ -216,9 +216,10 @@ class Lower implements LowerQueries {
 	public static var targetPlatform = -1; // (Mem.platform: Abi.platformCode)
 	// -D hxmc.wasm-gc (hxmc.wasmgc): the runtime's Haxe implementations are those of @:hxmc.wasmgc classes
 	public static var wasmGc = false;
-	// the program's resources (--resource), haxe.Resource's content: each
-	// one's name and data in base64, in genjs's order (Main.generate)
-	public static var resources:Array<{name:String, data:String}> = [];
+	// the program's resources (--resource, Context.addResource), haxe.Resource's
+	// content: each one's name and bytes, in genjs's order (Main.generate); the
+	// names are literals of the code (FnLower), the bytes DataGen's data
+	public static var resources:Array<{name:String, data:haxe.io.Bytes}> = [];
 	// -D hxmc.native-array-outofbounds: what an access of a NativeArray
 	// (haxe.ds.Vector) at an index out of bounds does (FnLower.nativeRead)
 	public static var bounds = BOUNDS_UNCHECKED;

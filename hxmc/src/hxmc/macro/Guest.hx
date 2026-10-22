@@ -95,6 +95,7 @@ class Guest {
 		dg.stubs([], emit);
 		dg.cstrLiterals([]);
 		dg.emptyArrays([]);
+		dg.resources([]);
 		sys.io.File.saveBytes(out + ".o", ElfWriter.write(obj, abi.arm));
 		sys.io.File.saveContent(out + ".json", haxe.Json.stringify(facts(com, prog, e, l, main)));
 	}

@@ -2167,13 +2167,12 @@ class FnLower {
 				return a;
 			case TField(_, FStatic(_, cf)) if (cf.cfKind.match(Var(_))):
 				return callValue(f, cargs, e);
-			case TIdent("__resources__") if (cargs.length == 0):
-				// haxe.Resource's content: an object per resource with its name
-				// and its data in base64 (Lower.resources), as genjs writes it
-				var sh = l.shape([{name: "name", ty: TRef(RStr)}, {name: "data", ty: TRef(RStr)}]);
-				var objs = Lower.resources.mapToVector(r -> temp(TRef(RAnon), ENewAnon(sh, sh.fields.map(f -> EStr(f.name == "name" ? r.name : r.data)))));
-				var at = TRef(RArr(TRef(RAnon)));
-				return coerce(temp(at, ENewArr(TRef(RAnon), objs)), at, rt);
+			case TField(_, FStatic(c, cf)) if (cf.cfName == "names" && c.clPath.name == "NativeResource" && c.clPath.pack.join(".") == "hxmc"):
+				// haxe.Resource's names (hxmc.NativeResource): a new array of
+				// them as literals, in Lower.resources' order (their bytes are
+				// DataGen's, read by the runtime: hxmc.rt.Bytes)
+				var at = TRef(RArr(TRef(RStr)));
+				return coerce(temp(at, ENewArr(TRef(RStr), Lower.resources.mapToVector(r -> EStr(r.name)))), at, rt);
 			case TField(_, FStatic(c, cf)) if (c.hasClassFlag(CExtern) || cf.cfExpr == null):
 				var s = switch TFunctions.follow(cf.cfType) {
 					case TFun(s): s;
