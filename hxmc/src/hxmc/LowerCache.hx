@@ -2,6 +2,7 @@ package hxmc;
 
 import hxmc.ir.Ir;
 import hxmc.ir.Lower;
+import hxmc.ir.LowerQueries;
 import core.TType;
 
 // Function bodies lowered once, reused by the next builds of the resident
@@ -169,6 +170,11 @@ enum LCall {
 	CRoot(r:ClassInfo);
 	CSig(args:Array<Ty>, ret:Ty, r:SigInfo);
 	CShape(fields:Array<{name:String, ty:Ty}>, r:ShapeInfo);
+	CGlobalTy(g:Int, r:Ty);
+	CSelectorName(s:Int, r:String);
+	CDefaults(f:FuncInfo, key:String); // (key: CachedLower.defaultsKey)
+	CFieldDefaults(c:TClass, cf:TClassField, key:String);
+	CExtern(sym:String, c:TClass, cf:TClassField);
 }
 
 // The program's signatures and shapes asked by a body: logged
@@ -628,6 +634,77 @@ class CachedLower extends Lower {
 		return r;
 	}
 
+	override public function globalTy(g:Int):Ty {
+		var r = super.globalTy(g);
+		log(CGlobalTy(g, r));
+		return r;
+	}
+
+	override public function selectorName(s:Int):String {
+		var r = super.selectorName(s);
+		log(CSelectorName(s, r));
+		return r;
+	}
+
+	// (default values by their text: a module typed again makes new objects
+	// of the same values, and the body reads only what the text says)
+	override public function argDefaults(f:FuncInfo):Null<ArgDefaults> {
+		var r = super.argDefaults(f);
+		if (depth == 0 && cur != null) log(CDefaults(f, defaultsKey(r)));
+		return r;
+	}
+
+	override public function fieldDefaults(c:TClass, cf:TClassField):Null<ArgDefaults> {
+		var r = super.fieldDefaults(c, cf);
+		if (depth == 0 && cur != null) log(CFieldDefaults(c, cf, defaultsKey(r)));
+		return r;
+	}
+
+	override public function cExtern(sym:String, c:TClass, cf:TClassField):hxmc.ir.CInterop.CSig {
+		depth++;
+		var r = super.cExtern(sym, c, cf);
+		depth--;
+		log(CExtern(sym, c, cf));
+		return r;
+	}
+
+	// the default values of a function's arguments as text (their typed
+	// expressions printed, with the position of one not a constant, and the
+	// names of the arguments), per ArgDefaults (argDefaults gives the same
+	// object for a function: the text once per build)
+	var keys = new haxe.ds.ObjectMap<ArgDefaults, String>();
+
+	function defaultsKey(d:Null<ArgDefaults>):String {
+		if (d == null) return "-";
+		var k = keys.get(d);
+		if (k != null) return k;
+		var b = new StringBuf();
+		var any = false;
+		for (v in d.values) {
+			if (v == null) {
+				b.add("_;");
+				continue;
+			}
+			any = true;
+			b.add(core.TPrinting.TPrinting.sExprAst(false, "", core.TPrinting.Printer.sType, v));
+			if (!constant(v)) b.add("@" + v.epos.pfile + ":" + v.epos.pmin + "-" + v.epos.pmax);
+			b.add(";");
+		}
+		if (any)
+			for (v in d.vars)
+				b.add(v == null ? "|" : "|" + v.vName);
+		k = b.toString();
+		keys.set(d, k);
+		return k;
+	}
+
+	static function constant(e:TExpr):Bool
+		return switch e.eexpr {
+			case TConst(_): true;
+			case TUnop(_, _, x) | TParenthesis(x) | TMeta(_, x) | TCast(x, null): constant(x);
+			case _: false;
+		}
+
 	// ---- replay
 
 	static function mismatch(why:String):Dynamic
@@ -711,6 +788,19 @@ class CachedLower extends Lower {
 				if (!map.exists(r)) bindSig(r, prog.sig([for (a in args) mapTy(a)], mapTy(ret)));
 			case CShape(fields, r):
 				if (!map.exists(r)) bindShape(r, prog.shape([for (f in fields) {name: f.name, ty: mapTy(f.ty)}]));
+			case CGlobalTy(g, r):
+				bindTy(r, globalTy(glob(g)));
+			case CSelectorName(s, r):
+				if (selectorName(sel(s)) != r) mismatch("selector " + r + " changed");
+			case CDefaults(f, key):
+				var n = obj(f);
+				if (defaultsKey(argDefaults(n)) != key) mismatch("default values of " + n.name + " changed");
+			case CFieldDefaults(k, cf, key):
+				var n = tc(k);
+				if (defaultsKey(fieldDefaults(n, tcf(k, n, cf))) != key) mismatch("default values of " + cf.cfName + " changed");
+			case CExtern(sym, k, cf):
+				var n = tc(k);
+				cExtern(sym, n, tcf(k, n, cf));
 		}
 	}
 

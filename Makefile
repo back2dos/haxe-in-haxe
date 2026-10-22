@@ -151,7 +151,8 @@ help:
 ##
 ## Test (docs/testing.md)
 ##   quick       after every edit of hxmc: the tool, the x64 corpus, again with RT_VERIFY=1, the wasm
-##               corpus under node, the module cache's store (CASES restricts the corpus)
+##               corpus under node, the module cache's store, the lowering's queries (CASES restricts
+##               the corpus)
 ##   check       before a commit: quick + arm64 (qemu), wine, a 16 KB nursery, legacy exception handling,
 ##               the glibc mode, ThreadNatives x30, crosshost on three cases, debug info, Android's APKs,
 ##               iOS's apps, shared libraries; PORT=1 adds the native port's self-compile

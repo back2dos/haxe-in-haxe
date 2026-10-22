@@ -15,7 +15,7 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | --- | --- |
 | `Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, compiles every module (in parallel, cached) and links; `--server` keeps the compilation server resident |
 | `HaxeMain.hx` | `haxe` with hxmc built in (the npm package): `--custom-target hxmc=<out>` |
-| `ir/Ir.hx`, `Lower.hx`, `FnLower.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST |
+| `ir/Ir.hx`, `Lower.hx`, `FnLower.hx`, `LowerQueries.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST; a function body asks the program's lowering only what `LowerQueries` lists, each query tagged with how the server's reuse of bodies covers it |
 | `ir/Reach.hx` | the functions the program can run (Reachability, below): the others are not compiled |
 | `ir/RuntimeSymbols.hx` | the runtime's symbols generated code calls by name, per family of targets, checked on every build against what `hxmc.rt.Runtime` imports (Runtime in Haxe, below) |
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
