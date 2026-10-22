@@ -2,7 +2,6 @@ package hxmc;
 
 import haxe.ds.Vector;
 import hxmc.Mir;
-import core.ds.VectorTools;
 import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
@@ -80,8 +79,8 @@ class Opt {
 
 	public function run() {
 		simplifyCfg();
-		var order = rpo();
-		if (order.length == 0) return;
+		var cfg = f.cfg();
+		if (cfg.size == 0) return;
 		repl = MFunc.iota(f.vals.length);
 		// copies are their operand
 		for (bb in f.blocks)
@@ -96,9 +95,9 @@ class Opt {
 		// is reused there; values computed before setjmp are immutable and
 		// live across it in memory or callee-saved registers)
 		{
-			versions(order);
+			versions(cfg);
 			canonicalize();
-			gvn(order);
+			gvn(cfg);
 			forwardStores();
 		}
 		rewrite();
@@ -135,12 +134,14 @@ class Opt {
 	// split when that block has other successors); what moves keeps its
 	// order at the end of that block. Returns whether anything moved.
 	function licm():Bool {
-		var order = rpo();
+		var cfg = f.cfg();
+		var order = cfg.rpo;
 		var n = order.length;
 		if (n < 2) return false;
-		var dom = dominators(order);
-		var idom = dom.idom;
-		var inOrder = order[0].mark; // (set by dominators: tmp is the reverse postorder index)
+		cfg.loops();
+		var idom = cfg.idom;
+		var bodies = cfg.loopBodies();
+		var inOrder = number(order);
 		var vals = f.vals;
 		var body = new Vector<Bool>(n); // (the blocks of the loop, by rpo index)
 		// the blocks each object is dereferenced in (a load or store through
@@ -185,44 +186,22 @@ class Opt {
 		var nextBlock = 0;
 		for (b in f.blocks)
 			if (b.id >= nextBlock) nextBlock = b.id + 1;
+		var made = false;
 		var k = n;
 		while (k-- > 1) { // inner loops first: their headers come later
 			var h = order[k];
 			if (h.handler) continue;
-			var latches = [];
-			for (p in h.preds)
-				if (p.mark == inOrder && p.tmp >= k) {
-					var x = p.tmp;
-					while (x > k)
-						x = idom[x];
-					if (x == k) latches.push(p);
-				}
-			if (latches.length == 0) continue;
-			// the loop: the blocks reaching a latch without passing the header
+			// the loop (Cfg), its blocks in reverse postorder
+			var ks = bodies[k];
+			if (ks == null) continue;
 			body.fill(false);
-			body[k] = true;
-			var members = [h];
-			var stack = [];
+			var members = [for (x in ks) order[x]];
 			var ok = true;
-			for (l in latches)
-				if (!body[l.tmp]) {
-					body[l.tmp] = true;
-					members.push(l);
-					stack.push(l);
-				}
-			while (stack.length > 0 && ok) {
-				var b = stack.pop();
-				for (p in b.preds) {
-					if (p.mark != inOrder) {
-						ok = false; // a block made this round (a loop inside already moved from)
-						break;
-					}
-					if (!body[p.tmp]) {
-						body[p.tmp] = true;
-						members.push(p);
-						stack.push(p);
-					}
-				}
+			for (b in members) {
+				body[b.tmp] = true;
+				if (b != h)
+					for (p in b.preds)
+						if (p.mark != inOrder) ok = false; // a block made this round (a loop inside already moved from)
 			}
 			if (!ok) continue;
 			// the single way in
@@ -246,7 +225,6 @@ class Opt {
 					}
 			if (calls) continue;
 			// the movable instructions, in reverse postorder of their blocks
-			members.sort((x, y) -> x.tmp - y.tmp);
 			var hoist:Array<MIns> = [];
 			if (inv.length < vals.length) inv.resize(vals.length);
 			inline function invariant(v:Int):Bool
@@ -308,6 +286,7 @@ class Opt {
 				for (q in 0...h.preds.length)
 					if (h.preds[q] == outside) h.preds[q] = pre;
 				f.blocks.push(pre);
+				made = true;
 			}
 			// move
 			var term = pre.ins.pop();
@@ -319,6 +298,7 @@ class Opt {
 			pre.ins.push(term);
 			moved = true;
 		}
+		if (made) f.edited();
 		return moved;
 	}
 
@@ -352,11 +332,12 @@ class Opt {
 	// negation, dominates it) is a jump: the repeated tests of an array's
 	// element kind, of a value against null. Returns whether a branch changed.
 	function condProp():Bool {
-		var order = rpo();
+		var cfg = f.cfg();
+		var order = cfg.rpo;
 		var n = order.length;
 		if (n < 3) return false;
-		var dom = dominators(order);
-		var childHead = dom.childHead, childNext = dom.childNext;
+		cfg.dom();
+		var childHead = cfg.childHead, childNext = cfg.childNext;
 		var vals = f.vals;
 		// the facts in force: comparison (cond, a, b) is `val`
 		var fc:Array<Int> = [], fa:Array<Int> = [], fb:Array<Int> = [], fv:Array<Bool> = [];
@@ -440,71 +421,21 @@ class Opt {
 				fv.resize(m);
 			}
 		}
+		if (changed) f.edited();
 		return changed;
 	}
 
 	static inline function isEqNe(c:Int):Bool
 		return c == (CEq : Int) || c == (CNe : Int);
 
-	// immediate dominators (Cooper, Harvey and Kennedy) as reverse postorder
-	// indices, and the dominator tree's children lists
-	function dominators(order:Vector<MBlock>):{idom:Vector<Int>, childHead:Vector<Int>, childNext:Vector<Int>} {
-		var n = order.length;
+	// the blocks in the order marked with the mark returned, tmp their index
+	function number(order:Vector<MBlock>):Int {
 		var inOrder = f.newMark();
-		for (k in 0...n) {
+		for (k in 0...order.length) {
 			order[k].mark = inOrder;
 			order[k].tmp = k;
 		}
-		var idom = MFunc.ints(n, -1);
-		idom[0] = 0;
-		// the predecessors in the order, by index: predIdx[predAt[k]...predAt[k + 1]]
-		var predAt = new Vector<Int>(n + 1);
-		var m = 0;
-		for (k in 0...n) {
-			predAt[k] = m;
-			for (p in order[k].preds)
-				if (p.mark == inOrder) m++;
-		}
-		predAt[n] = m;
-		var predIdx = new Vector<Int>(m);
-		m = 0;
-		for (b in order)
-			for (p in b.preds)
-				if (p.mark == inOrder) predIdx[m++] = p.tmp;
-		var changed = true;
-		while (changed) {
-			changed = false;
-			for (k in 1...n) {
-				var d = -1;
-				for (q in predAt[k]...predAt[k + 1]) {
-					var p = predIdx[q];
-					if (idom[p] < 0) continue;
-					if (d < 0) d = p else {
-						var x = p, y = d;
-						while (x != y) {
-							while (x > y)
-								x = idom[x];
-							while (y > x)
-								y = idom[y];
-						}
-						d = x;
-					}
-				}
-				if (d >= 0 && idom[k] != d) {
-					idom[k] = d;
-					changed = true;
-				}
-			}
-		}
-		var childHead = MFunc.ints(n, -1), childNext = MFunc.ints(n, -1);
-		var k = n - 1;
-		while (k >= 1) {
-			var d = idom[k];
-			childNext[k] = childHead[d];
-			childHead[d] = k;
-			k--;
-		}
-		return {idom: idom, childHead: childHead, childNext: childNext};
+		return inOrder;
 	}
 
 	// ---- control flow
@@ -626,6 +557,7 @@ class Opt {
 			}
 		}
 		}
+		f.edited();
 		pruneBlocks();
 		mergeBlocks();
 	}
@@ -728,6 +660,7 @@ class Opt {
 				s.preds = [];
 				s.succs = [];
 				s.mark = gone;
+				f.edited();
 			}
 		}
 		f.blocks = [for (b in f.blocks) if (b.mark != gone) b];
@@ -780,7 +713,10 @@ class Opt {
 				}
 			}
 		}
-		if (!all) f.blocks = [for (b in f.blocks) if (b.mark == reach) b];
+		if (!all) {
+			f.blocks = [for (b in f.blocks) if (b.mark == reach) b];
+			f.edited();
+		}
 	}
 
 	// ---- stores
@@ -917,33 +853,6 @@ class Opt {
 		}
 	}
 
-	function rpo():Vector<MBlock> {
-		var seen = f.newMark();
-		var post = [];
-		var stack:Array<MBlock> = [f.entry];
-		var idx:Array<Int> = [0];
-		f.entry.mark = seen;
-		while (stack.length > 0) {
-			var top = stack.length - 1;
-			var b = stack[top];
-			var k = idx[top];
-			if (k < b.succs.length) {
-				idx[top] = k + 1;
-				var s = b.succs[k];
-				if (s.mark != seen) {
-					s.mark = seen;
-					stack.push(s);
-					idx.push(0);
-				}
-			} else {
-				stack.pop();
-				idx.pop();
-				post.push(b);
-			}
-		}
-		return VectorTools.ofArrayReversed(post);
-	}
-
 	inline function res(x:Int):Int {
 		if (x < 0) return x;
 		while (repl[x] != x)
@@ -995,13 +904,11 @@ class Opt {
 	// the memory versions: per block in reverse postorder, from its
 	// predecessors' (a loop header: new versions of what the loop writes),
 	// through its instructions; recorded per load
-	function versions(order:Vector<MBlock>) {
+	function versions(cfg:Cfg<MBlock>) {
+		var order = cfg.rpo;
 		var n = order.length;
-		var inOrder = f.newMark();
-		for (k in 0...n) {
-			order[k].mark = inOrder;
-			order[k].tmp = k;
-		}
+		cfg.loops();
+		var inOrder = number(order);
 		// per block: the classes it writes
 		var kill = new Vector<Int>(n);
 		for (k in 0...n) {
@@ -1010,29 +917,33 @@ class Opt {
 				if (!i.dead) m |= killMask(i);
 			kill[k] = m;
 		}
+		// per loop header: the classes its loop writes (Cfg's loops: the
+		// blocks that reach a back edge without passing the header, the inner
+		// loops' with them; not the blocks between the header and its last
+		// back edge in reverse postorder, which can leave out an inner loop's
+		// latch and the calls in it)
+		var head = cfg.loopHead, parent = cfg.loopParent;
+		var loopKill = MFunc.ints(n, 0);
+		for (k in 0...n)
+			if (head[k] >= 0) loopKill[head[k]] |= kill[k];
+		var h = n;
+		while (h-- > 0)
+			if (head[h] == h && parent[h] >= 0) loopKill[parent[h]] |= loopKill[h];
 		var outs = new Vector<Vector<Int>>(n);
-		// (a loop's blocks: those that reach a back edge without passing its
-		// header, walked back from the back edges; not the blocks between the
-		// header and its last back edge in reverse postorder, which can leave
-		// out an inner loop's latch and the calls in it. walked: k + 1 for
-		// the blocks reached for header k)
-		var walked = new Vector<Int>(n);
-		var stack:Array<MBlock> = [];
 		for (k in 0...n) {
 			var b = order[k];
 			var v:Vector<Int> = null;
 			var loop = false;
+			var entered = false;
 			var mixed = 0; // classes the forward predecessors disagree on, or the loop writes
-			walked[k] = k + 1;
 			for (p in b.preds) {
 				if (p.mark != inOrder) continue;
 				var pk = p.tmp;
 				if (pk >= k) {
 					loop = true;
-					if (walked[pk] != k + 1) {
-						walked[pk] = k + 1;
-						stack.push(p);
-					}
+					// (an edge back from a block the header does not dominate: a
+					// way into the cycle other than this block)
+					if (!cfg.dominates(k, pk)) entered = true;
 					continue;
 				}
 				var o = outs[pk];
@@ -1040,22 +951,8 @@ class Opt {
 					for (c in 0...NCLS)
 						if (v[c] != o[c]) mixed |= 1 << c;
 			}
-			if (loop) mixed |= kill[k];
-			while (stack.length > 0) {
-				var q = stack.pop();
-				mixed |= kill[q.tmp];
-				for (p in q.preds) {
-					if (p.mark != inOrder || walked[p.tmp] == k + 1) continue;
-					if (p.tmp < k) {
-						// (a way into the loop other than its header: every class)
-						mixed = -1;
-						stack.resize(0);
-						break;
-					}
-					walked[p.tmp] = k + 1;
-					stack.push(p);
-				}
-			}
+			// (a way into the loop other than its header: every class)
+			if (loop) mixed |= entered ? -1 : loopKill[k];
 			if (v == null || b.handler) {
 				v = new Vector<Int>(NCLS);
 				for (c in 0...NCLS)
@@ -1152,52 +1049,10 @@ class Opt {
 	// is an entry too, under the key of the load of its address, which then
 	// takes the stored value (store-to-load forwarding: a value kept in a
 	// shadow-stack slot and read back before the next call)
-	function gvn(order:Vector<MBlock>) {
-		var n = order.length;
-		var inOrder = f.newMark();
-		for (k in 0...n) {
-			order[k].mark = inOrder;
-			order[k].tmp = k;
-		}
-		// immediate dominators (Cooper, Harvey and Kennedy), as rpo indices
-		var idom = MFunc.ints(n, -1);
-		idom[0] = 0;
-		var preds = new Vector<Array<Int>>(n);
-		for (k in 0...n)
-			preds[k] = [for (p in order[k].preds) if (p.mark == inOrder) p.tmp];
-		var changed = true;
-		while (changed) {
-			changed = false;
-			for (k in 1...n) {
-				var d = -1;
-				for (p in preds[k]) {
-					if (idom[p] < 0) continue;
-					if (d < 0) d = p else {
-						var x = p, y = d;
-						while (x != y) {
-							while (x > y)
-								x = idom[x];
-							while (y > x)
-								y = idom[y];
-						}
-						d = x;
-					}
-				}
-				if (d >= 0 && idom[k] != d) {
-					idom[k] = d;
-					changed = true;
-				}
-			}
-		}
-		// children lists
-		var childHead = MFunc.ints(n, -1), childNext = MFunc.ints(n, -1);
-		var k = n - 1;
-		while (k >= 1) {
-			var d = idom[k];
-			childNext[k] = childHead[d];
-			childHead[d] = k;
-			k--;
-		}
+	function gvn(cfg:Cfg<MBlock>) {
+		var order = cfg.rpo;
+		cfg.dom();
+		var childHead = cfg.childHead, childNext = cfg.childNext;
 		// the table: chains of value ids per bucket (the newest first)
 		var nv = f.vals.length;
 		var size = 64;

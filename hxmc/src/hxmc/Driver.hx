@@ -667,43 +667,17 @@ class Driver {
 	}
 }
 
-// The order blocks are laid out in: reverse postorder, the cold blocks (slow
-// paths) at the end.
+// The order blocks are laid out in: reverse postorder (Cfg), the cold blocks
+// (slow paths) at the end.
 class Layout {
 	public static function order(f:MFunc):haxe.ds.Vector<MBlock> {
-		var seen = f.newMark();
-		var post = [];
-		// iterative DFS: the first successor is visited first
-		var stack:Array<MBlock> = [f.entry];
-		var idx:Array<Int> = [0];
-		f.entry.mark = seen;
-		while (stack.length > 0) {
-			var top = stack.length - 1;
-			var b = stack[top];
-			var k = idx[top];
-			if (k < b.succs.length) {
-				idx[top] = k + 1;
-				var s = b.succs[k];
-				if (s.mark != seen) {
-					s.mark = seen;
-					stack.push(s);
-					idx.push(0);
-				}
-			} else {
-				post.push(b);
-				stack.pop();
-				idx.pop();
-			}
-		}
-		// (reverse postorder: the hot blocks, then the cold ones)
-		var n = post.length;
-		var r = new haxe.ds.Vector<MBlock>(n);
-		var k = 0, i = n;
-		while (i-- > 0)
-			if (!post[i].cold) r[k++] = post[i];
-		i = n;
-		while (i-- > 0)
-			if (post[i].cold) r[k++] = post[i];
+		var rpo = f.cfg().rpo;
+		var r = new haxe.ds.Vector<MBlock>(rpo.length);
+		var k = 0;
+		for (b in rpo)
+			if (!b.cold) r[k++] = b;
+		for (b in rpo)
+			if (b.cold) r[k++] = b;
 		return r;
 	}
 }

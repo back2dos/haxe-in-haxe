@@ -493,7 +493,6 @@ class Isel implements hxmc.Target.Selector {
 		for (b in layout) {
 			var l = new LBlock(f.blocks.length);
 			l.cold = b.cold;
-			l.loopDepth = b.loopDepth;
 			lb[b.id] = l;
 			f.blocks.push(l);
 		}

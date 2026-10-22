@@ -177,7 +177,6 @@ class MBlock {
 	public var succs:Array<MBlock> = [];
 	public var sealed = false;
 	public var filled = false;
-	public var loopDepth = 0;
 	public var cold = false; // a slow path: laid out at the end of the function
 	public var order = -1; // position in the layout
 	public var handler = false; // reached by a second return of setjmp
@@ -211,6 +210,7 @@ class MFunc {
 	public var cRet:Vector<CAbi.CPart> = vector();
 	public var entry:MBlock;
 	var marks = 0;
+	var cfgOf:Null<Cfg<MBlock>>;
 
 	public function new(name)
 		this.name = name;
@@ -232,6 +232,21 @@ class MFunc {
 			a[i] = i;
 		return a;
 	}
+
+	// the control-flow analyses (Cfg), kept until the graph changes: a pass
+	// that changes edges (the blocks' succs or preds) calls edited
+	public function cfg():Cfg<MBlock> {
+		if (cfgOf == null) {
+			var ids = 0;
+			for (b in blocks)
+				if (b.id >= ids) ids = b.id + 1;
+			cfgOf = new Cfg<MBlock>(entry, ids);
+		}
+		return cfgOf;
+	}
+
+	public inline function edited()
+		cfgOf = null;
 
 	public function newBlock():MBlock {
 		var b = new MBlock(blocks.length);
