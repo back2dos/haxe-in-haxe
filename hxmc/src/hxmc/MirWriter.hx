@@ -310,11 +310,11 @@ class MirWriter {
 	// safe region itself (another thread may collect meanwhile). The root
 	// slots then keep their values across the call (Opt: MIns.keepsFrame).
 	function keepsFrame(sym:String):Bool
-		return p != null && fn != null && !fn.blocksHere && keepsFrameOf(sym, p.e.bySymbol.get(sym));
+		return p != null && fn != null && !f.blocksHere && keepsFrameOf(sym, p.e.bySymbol.get(sym));
 
 	// (g: the program's function of that symbol, or null)
 	function keepsFrameOf(sym:String, g:Null<FuncInfo>):Bool {
-		if (p == null || fn == null || fn.blocksHere) return false;
+		if (p == null || fn == null || f.blocksHere) return false;
 		if (g != null) return g.noGc && !g.blocks;
 		if (sym == "rt_blocking_enter" || sym == "rt_blocking_leave") return false;
 		return hxmc.ir.FnLower.noGcHost(sym) || QUIET.exists(sym) || StringTools.startsWith(sym, "hxmc$");
@@ -441,7 +441,7 @@ class MirWriter {
 		} else if (b.preds.length == 0) {
 			// never assigned (C: the local starts as 0)
 			val = zeroAt(b, t);
-		} else if (b.preds.length == 1 && !merges(b)) {
+		} else if (b.preds.length == 1 && !merges(v, b)) {
 			val = readVar(v, b.preds[0]);
 		} else {
 			var phi = newPhi(b, t);
@@ -456,10 +456,10 @@ class MirWriter {
 		return val;
 	}
 
-	// whether b, of one predecessor, gets a phi for each variable read there
-	// (MirBuild: an object-level operation's continuation, which its lowering
+	// whether variable v gets a phi in b of one predecessor (MirBuild: a
+	// reference a cold site reads back, in the continuation its lowering
 	// reaches by several edges)
-	function merges(b:MBlock):Bool
+	function merges(v:Int, b:MBlock):Bool
 		return false;
 
 	function phiMade(v:Int, b:MBlock, phi:MIns) {}

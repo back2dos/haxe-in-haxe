@@ -104,10 +104,6 @@ enum abstract Op(Int) to Int {
 
 // the static part of an object-level operation (MIns.info): what it is about
 class OInfo {
-	// the object-level blocks MirBuild made before the operation: MemLower
-	// orders the blocks it makes for it among them, as one pass would have
-	// made them (block numbers and order reach the output)
-	public var at = 0;
 	public var t:hxmc.ir.Ir.Ty = hxmc.ir.Ir.Ty.TVoid; // the field's, element's or boxed value's type
 	public var loc = 0; // a field's slot (an Int or Bool its 4-byte index: ClassInfo.locs); an element's index
 	public var cls:Null<hxmc.ir.Ir.ClassInfo>;
@@ -149,9 +145,6 @@ class OInfo {
 	public var cold = false;
 	public var nspill = 0;
 	public var relocs:Null<Map<Int, Int>>;
-	// the frame slots MirBuild made before it (MemLower numbers the slots it
-	// makes among them, as one pass would have)
-	public var slots = 0;
 	// the block the code after it is in, whose predecessors are its
 	// lowering's last edges (MirBuild.obj: MemLower.branches)
 	public var cont:Null<MBlock>;
@@ -161,6 +154,37 @@ class OInfo {
 	public var listIndex = -1;
 
 	public function new() {}
+
+	// a copy (the inliner's: its continuation the copy's)
+	public function copy(cont:Null<MBlock>):OInfo {
+		var o = new OInfo();
+		o.t = t;
+		o.loc = loc;
+		o.cls = cls;
+		o.ctor = ctor;
+		o.lambda = lambda;
+		o.shape = shape;
+		o.en = en;
+		o.sig = sig;
+		o.name = name;
+		o.n = n;
+		o.tindex = tindex;
+		o.kind = kind;
+		o.zero = zero;
+		o.flag = flag;
+		o.next = next;
+		o.sel = sel;
+		o.key = key;
+		o.cold = cold;
+		o.nspill = nspill;
+		o.relocs = relocs;
+		o.cont = cont;
+		o.spillBase = spillBase;
+		o.fr = fr;
+		o.rootSlot = rootSlot;
+		o.listIndex = listIndex;
+		return o;
+	}
 }
 
 enum abstract Cond(Int) to Int from Int {

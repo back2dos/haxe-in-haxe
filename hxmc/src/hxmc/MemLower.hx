@@ -19,14 +19,11 @@ using core.ds.VectorTools;
 // stack around the slow paths of cold sites (docs/plans/codegen.md,
 // "Object-level Mir").
 //
-// It runs on MirBuild's graph before anything else (the operations
-// lowered where they are: stage 2 of #34), and writes what one pass
-// writing memory-level Mir directly would have: each operation's
-// instructions where it is, its blocks and frame slots numbered and
-// ordered as that pass made them (OInfo.at, slots), the code after an
-// operation that branches in its continuation (OInfo.cont: the phis
-// MirBuild made there get a value per edge, a reference a cold site
-// reloads the one on each path).
+// It runs after the object-level passes (Inline, Escape), on what is left:
+// each operation's instructions where it is (its blocks after the
+// function's), the code after an operation that branches in its
+// continuation (OInfo.cont: the phis there, a reference a cold site reloads
+// after its slow path, get the value each edge's path has).
 class MemLower extends MirWriter {
 	static var noShadow = Sys.getEnv("HXMC_NOSHADOW") == "1";
 
@@ -38,12 +35,6 @@ class MemLower extends MirWriter {
 	var nullBlocks = new Map<Int, MBlock>(); // per handler (OInfo.key): the block calling rt_null_access
 	var slotOf = new Map<Int, Int>(); // AnonTest -> the slot its inline cache gave
 	var arrData = new Map<Int, Int>(); // NewArray -> its storage, read before each element's value
-	// where the blocks being made go among MirBuild's (OInfo.at), and those made
-	var at = 0;
-	var made:Array<{b:MBlock, at:Int}> = [];
-	// the frame slots made, where they go among MirBuild's (OInfo.slots);
-	// their StackAddrs are numbered -1, -2... until then
-	var newSlots:Array<{at:Int, size:Int, align:Int}> = [];
 	// the operation being lowered: its static part, its cold site's
 	// references (SSA variables of this pass), the frame's address, its
 	// spill slots
@@ -74,52 +65,20 @@ class MemLower extends MirWriter {
 	}
 
 	public function run() {
-		var n = f.blocks.length;
-		for (_ in 0...n) {
+		// (the blocks numbered from 0, as the SSA variables' tables are)
+		for (k in 0...f.blocks.length) {
+			f.blocks[k].id = k;
 			defs.push(new BlockDefs());
 			incomplete.push(null);
 		}
-		var ops = [for (i in f.vals) if (i.isObj()) i];
+		f.edited();
+		var live = f.newMark();
+		for (b in f.blocks)
+			b.mark = live;
+		var ops = [for (i in f.vals) if (i.isObj() && !i.dead && i.block != null && i.block.mark == live) i];
 		for (x in ops)
 			lowerOp(x);
-		// the blocks in the order they would have been made, numbered so
-		var order = new Array<MBlock>();
-		var k = 0;
-		for (i in 0...n) {
-			while (k < made.length && made[k].at <= i)
-				order.push(made[k++].b);
-			order.push(f.blocks[i]);
-		}
-		while (k < made.length)
-			order.push(made[k++].b);
-		f.blocks = order;
-		for (i in 0...order.length)
-			order[i].id = i;
 		f.edited();
-		// the frame slots in the order they would have been made
-		var slotMap:Null<Vector<Int>> = null, newMap:Null<Vector<Int>> = null;
-		if (newSlots.length > 0) {
-			var old = f.slots;
-			slotMap = new Vector(old.length);
-			newMap = new Vector(newSlots.length);
-			var all = [];
-			var q = 0;
-			for (i in 0...old.length) {
-				while (q < newSlots.length && newSlots[q].at <= i) {
-					newMap[q] = all.length;
-					all.push({size: newSlots[q].size, align: newSlots[q].align});
-					q++;
-				}
-				slotMap[i] = all.length;
-				all.push(old[i]);
-			}
-			while (q < newSlots.length) {
-				newMap[q] = all.length;
-				all.push({size: newSlots[q].size, align: newSlots[q].align});
-				q++;
-			}
-			f.slots = all;
-		}
 		// the operations' values replaced by their lowering's
 		for (b in f.blocks)
 			for (i in b.ins) {
@@ -128,7 +87,6 @@ class MemLower extends MirWriter {
 				if (i.c >= 0) i.c = r(i.c);
 				for (q in 0...i.args.length)
 					i.args[q] = r(i.args[q]);
-				if (i.op == StackAddr && slotMap != null) i.imm = i.imm < 0 ? newMap[-i.imm - 1] : slotMap[i.imm];
 			}
 	}
 
@@ -144,24 +102,13 @@ class MemLower extends MirWriter {
 		repl[v] = by;
 	}
 
-	override function newBlock():MBlock {
-		var b = super.newBlock();
-		made.push({b: b, at: at});
-		return b;
-	}
-
-	// the operation's continuation as its lowering's last block (the blocks
-	// made after it go after it)
-	function joinBlock():MBlock {
-		at = op.at + 1;
+	// the operation's continuation as its lowering's last block
+	inline function joinBlock():MBlock
 		return op.cont;
-	}
 
 	// a frame slot of the operation's
-	function frameSlot(size:Int, align:Int):Int {
-		newSlots.push({at: op.slots, size: size, align: align});
-		return -newSlots.length;
-	}
+	inline function frameSlot(size:Int, align:Int):Int
+		return f.slot(size, align);
 
 	function lowerOp(x:MIns) {
 		var o = op = x.info;
@@ -177,18 +124,44 @@ class MemLower extends MirWriter {
 				t.preds.remove(b);
 		// a continuation: entered by the lowering's edges; the code there,
 		// its phis first, after the lowering's
-		var c = o.cont;
+		var c = branches(x.op, o) ? o.cont : null;
 		var cphis = [], cins = [];
+		var last = rest.length > 0 ? rest[rest.length - 1] : null;
+		if (c != null && (last == null || last.op != Jmp || last.targets[0] != c)) c = null;
 		if (c != null) {
-			rest = []; // (the jump to it)
-			c.preds.remove(b);
+			// (what comes between the operation and the jump to its
+			// continuation, added by object-level passes, goes first there)
+			rest.pop();
 			for (i in c.ins)
-				(i.op == Phi ? cphis : cins).push(i);
+				if (i.op == Phi) cphis.push(i);
+			for (i in rest) {
+				i.block = c;
+				cins.push(i);
+			}
+			for (i in c.ins)
+				if (i.op != Phi) cins.push(i);
+			c.preds.remove(b);
 			c.ins = [];
+			rest = [];
+			op.cont = c;
+		} else if (branches(x.op, o)) {
+			// (none, an operation an object-level pass made: one of its own,
+			// with the rest of the block)
+			c = newBlock();
+			c.sealed = true;
+			for (i in rest) {
+				i.block = c;
+				cins.push(i);
+			}
+			c.succs = succs;
+			for (s in succs)
+				for (q in 0...s.preds.length)
+					if (s.preds[q] == b) s.preds[q] = c;
+			rest = [];
+			op = o = o.copy(c);
 		}
 		cur = b;
 		curPos = x.pos;
-		at = o.at;
 		cold = o.cold;
 		spills = [];
 		if (cold)
@@ -956,19 +929,15 @@ class MemLower extends MirWriter {
 
 	// a structural field write's test (MirBuild.anonSet made the hit, miss
 	// and join blocks after it, the hit's store and the miss's call): the
-	// inline cache's entry has a slot of the field's kind. Its blocks go where
-	// one pass made them: the cache's first, the check between miss and join,
-	// a Bool or Int kind's after join
+	// inline cache's entry has a slot of the field's kind
 	function anonTest(x:MIns, o:OInfo) {
 		var hit = x.targets[0], miss = x.targets[1];
 		var c = ic(r(x.a), r(x.b));
-		at = o.at + 2;
 		var chk = newBlock();
 		var slot = load(I32, 4, c, Abi.IC_SLOT);
 		br(cmp(CGt, slot, iconst(0)), chk, miss);
 		seal(chk);
 		cur = chk;
-		at = o.at + 3;
 		br(kindMatch(c, o.t), hit, miss);
 		slotOf.set(x.id, slot);
 	}
