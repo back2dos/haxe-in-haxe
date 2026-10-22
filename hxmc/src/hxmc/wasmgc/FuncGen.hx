@@ -1718,6 +1718,9 @@ class FuncGen {
 			case "hx_dyn_call":
 				all();
 				call(m.dynCall());
+			case "hxmc_NativeResource_bytes":
+				all();
+				call(m.resourceBytes());
 			case "hxmc_NativeBytes_getInt32":
 				all();
 				call(Helpers.bytesGet(m, false));

@@ -559,6 +559,33 @@ class DataGen {
 		}
 	}
 
+	// haxe.Resource's bytes (Lower.resources), when the program reads them
+	// (hxmc.rt.Bytes, by the symbol RESOURCES): in .rodata, a table of 8
+	// bytes per resource in Lower.resources' order, the offset of its bytes
+	// from the table and their length (32 bits each, little-endian), then
+	// each resource's bytes as they are, once. No relocations: nothing in it
+	// is an address.
+	public static inline var RESOURCES = "hxmc_resources";
+
+	public function resources(objs:Array<Obj>) {
+		var used = false;
+		for (o in objs.concat([obj]))
+			for (s in o.symbols)
+				if (s.section == null && !s.abs && s.name == RESOURCES) used = true;
+		if (!used) return;
+		var rs = hxmc.ir.Lower.resources, buf = rodata.buf;
+		var at = begin(rodata, RESOURCES, 8, true);
+		var off = 8 * rs.length;
+		for (r in rs) {
+			buf.u32(off);
+			buf.u32(r.data.length);
+			off += r.data.length;
+		}
+		for (r in rs)
+			buf.bytes(r.data);
+		at.size = buf.len - at.offset;
+	}
+
 	// the runtime's machine-code stubs the program refers to (MirBuild.STUB_*)
 	public function stubs(objs:Array<Obj>, emit:Target.Emitter) {
 		for (n in [MirBuild.STUB_CALL_ON_STACK, MirBuild.STUB_ZERO, MirBuild.STUB_FRAME]) {

@@ -147,14 +147,9 @@ class Corpus {
 		if (libc != null) cmd = cmd.concat(["-D", "hxmc.libc=" + libc]);
 		if (native.links.length > 0) cmd = cmd.concat(["-D", "hxmc.link=" + native.links.join(",")]);
 		if (wasm && wasmEh != null) cmd = cmd.concat(["-D", "hxmc.wasm-eh=" + wasmEh]);
-		// (the defines: caseDefines, as when typing)
+		// (its resources: caseResources; the defines: caseDefines, as when typing)
 		var src = c.cps[0] + "/" + c.main + ".hx";
-		if (FileSystem.exists(src))
-			for (l in File.getContent(src).split("\n"))
-				if (l.trim().startsWith("// resource: ")) {
-					var r = l.trim().substr(13).split("@");
-					cmd = cmd.concat(["--resource", FileSystem.fullPath(c.cps[0] + "/" + r[0]) + (r.length > 1 ? "@" + r[1] : "")]);
-				}
+		cmd = cmd.concat(caseResources(src));
 		var r = exec(cmd.concat(defines), {env: ["HXMC_STATS" => "1"]});
 		File.saveContent(d + "/hxmc.log", r.out + r.err);
 		if (r.code != 0) return {name: c.name, status: "hxmc-fail", detail: tail(r.out + r.err, 2000)};
@@ -205,6 +200,19 @@ class Corpus {
 			for (l in File.getContent(src).split("\n"))
 				if (l.trim().startsWith("// " + key + ": ")) return l.trim().substr(key.length + 5).trim();
 		return null;
+	}
+
+	// a case's `// resource: <file>@<name>` lines as --resource arguments (the
+	// file next to the source)
+	public static function caseResources(src:String):Array<String> {
+		var result = [];
+		if (FileSystem.exists(src))
+			for (l in File.getContent(src).split("\n"))
+				if (l.trim().startsWith("// resource: ")) {
+					var r = l.trim().substr(13).split("@");
+					result = result.concat(["--resource", FileSystem.fullPath(haxe.io.Path.directory(src) + "/" + r[0]) + (r.length > 1 ? "@" + r[1] : "")]);
+				}
+		return result;
 	}
 
 	public static function caseDefines(src:String):Array<String> {
