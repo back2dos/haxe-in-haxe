@@ -34,7 +34,7 @@ class GcGen {
 		u.scan();
 		if (o.stats) {
 			var t2 = haxe.Timer.stamp();
-			Sys.println('hxmc: wasm-gc Mir ${Std.int((t1 - t0) * 1000)} ms, reach and uses ${Std.int((t2 - t1) * 1000)} ms, ${u.sitesReplaced} allocation sites replaced, ${Lambda.count(u.unbuilt)} functions not built');
+			Sys.println('hxmc: wasm-gc Mir ${Std.int((t1 - t0) * 1000)} ms, reach and uses ${Std.int((t2 - t1) * 1000)} ms, ${u.sitesReplaced} allocation sites replaced, ${u.devirtualized} virtual calls made direct, ${Lambda.count(u.unbuilt)} functions not built');
 			for (f => why in u.unbuilt)
 				Sys.println('  ${f.name}: $why');
 		}
@@ -106,6 +106,7 @@ class Uses {
 	// the functions MirBuild does not take, with why (the IR walker writes them: FuncGen)
 	public final unbuilt = new Map<FuncInfo, String>();
 	public var sitesReplaced = 0; // (Escape)
+	public var devirtualized = 0; // (Inline.devirtualize)
 	final cands = new Map<FuncInfo, Bool>(); // (the functions that may be inlined: Inline.candidate)
 	final inlined = new Map<FuncInfo, Map<FuncInfo, Bool>>(); // (each function's: the callees inlined into it, to any depth)
 	final summaries = new Map<FuncInfo, haxe.ds.Vector<Stmt>>();
@@ -150,7 +151,13 @@ class Uses {
 			if (e != null) return e.t;
 			var cb = new MirBuild(null, abi, fn);
 			cb.gc = true;
-			var t = try Inline.template(cb, cb.objects()) catch (_:MirBuild.Unsupported) null;
+			// (judged on the size of its lowering as natively, Inline.size, but kept
+			// when what MirGen makes of it fits the loop limit: rounds' objectsMeet)
+			var t:Null<Inline.Template> = try {
+				var tm = cb.objects();
+				var n = Inline.size(tm);
+				n >= 0 && Inline.size(tm, true) <= Inline.MAX_LOOP ? {mf: tm, sites: cb.inlineSites, size: n} : null;
+			} catch (_:MirBuild.Unsupported) null;
 			tlock.acquire();
 			var e2 = templates.get(fn);
 			if (e2 == null) templates.set(fn, {t: t}) else t = e2.t;
@@ -163,24 +170,39 @@ class Uses {
 			var mf = mb.objects();
 			if (!optimize) return mf;
 			var into = new Map<FuncInfo, Bool>();
+			// (to a depth; a call left out for its size is looked at again in the
+			// next round, when what an inlined callee made may now meet it:
+			// Inline.objectsMeet)
 			function rounds(todo:Array<{call:MIns, fn:FuncInfo}>) {
 				for (_ in 0...Inline.DEPTH) {
 					if (todo.length == 0) break;
 					var sites = [];
+					var left = [];
 					var inLoop = Inline.loopBlocks(mf);
 					for (s in todo) {
 						var t = template(s.fn);
-						if (t != null && s.fn != fn && t.size <= Inline.maxSize(true, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt."))) {
+						if (t == null || s.fn == fn || s.call.dead || s.call.op != Call) continue;
+						if (t.size <= Inline.maxSize(true, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt."))
+							|| s.call.block.mark == inLoop && Inline.objectsMeet(mf, s.call, t) && Inline.size(t.mf, true) <= Inline.MAX_LOOP) {
 							sites.push({call: s.call, callee: t});
 							into.set(s.fn, true);
-						}
+						} else if (s.call.block.mark == inLoop) left.push(s);
 					}
-					todo = Inline.run(mf, sites);
+					todo = Inline.run(mf, sites).concat(left);
 				}
 			}
 			rounds(mb.inlineSites);
 			if (Escape.on && mf.allocs > 0 && Escape.part("closures"))
 				rounds(Escape.closureCalls(mf, g -> g.module == fn.module && cands.exists(g), MirBuild.gcSymOf));
+			if (Inline.devirtOn && mf.allocs > 0) {
+				var d = Inline.devirtualize(mf, fn.module, prog.selectors, MirBuild.gcSymOf);
+				if (d.length > 0) {
+					tlock.acquire();
+					devirtualized += d.length;
+					tlock.release();
+					rounds([for (s in d) if (cands.exists(s.fn)) s]);
+				}
+			}
 			if (Escape.on) {
 				var es = new Escape(mf);
 				es.run();
@@ -278,6 +300,19 @@ class Uses {
 							open.pop();
 						}
 						return called.exists(MirBuild.gcSymOf(g)) ? ECall(g, xs) : ECallHost("hxmc_gc_inlined", xs, g.ret);
+					// (a method called on an object made here, inlined: Inline.devirtualize)
+					case ECallDispatch(sel, s, args) if (into != null):
+						var xs = args.map(ex);
+						for (g in into.keys())
+							if (g.dispatchSel == sel && open.indexOf(g) < 0) {
+								var m = new Map<Local, Ex>();
+								for (k in 0...g.args.length)
+									if (k < xs.length) m.set(g.args[k], xs[k]);
+								open.push(g);
+								flatten(g.body, m);
+								open.pop();
+							}
+						return ECallDispatch(sel, s, xs);
 					// (a closure called where it is made, inlined there: Escape.closureCalls)
 					case ENewClos(l, _) if (into != null && into.exists(l.fn) && open.indexOf(l.fn) < 0):
 						open.push(l.fn);
@@ -300,6 +335,9 @@ class Uses {
 					case SBoxSet(t, o, v): out.push(SBoxSet(t, ex(o), ex(v)));
 					case SArrSet(t, a, i, v): out.push(SArrSet(t, a, ex(i), ex(v)));
 					case SArrPush(t, a, v): out.push(SArrPush(t, a, ex(v)));
+					case SIf(EInt(c), a, b): // (MirBuild builds the branch taken only)
+						for (x in (c != 0 ? a : b))
+							st(x);
 					case SIf(c, a, b):
 						out.push(SExpr(ex(c)));
 						for (x in a)

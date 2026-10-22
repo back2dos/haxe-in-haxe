@@ -731,6 +731,12 @@ class MirGen extends FuncGen {
 	}
 
 	function mblock(x:MBlock) {
+		// (the objects read or written as a class more than once here: cast once, castOperand)
+		casts.clear();
+		recv.clear();
+		for (i in x.ins)
+			if (!i.dead && (i.op == GetField || i.op == SetField) && i.info.cls != null)
+				recv.set(i.a, recv.exists(i.a) ? recv.get(i.a) + 1 : 1);
 		for (i in x.ins) {
 			if (i.dead || i.op == Phi) continue;
 			if (i.isTerm()) {
@@ -741,6 +747,44 @@ class MirGen extends FuncGen {
 		}
 		unsupported("a block without a terminator");
 	}
+
+	// The receiver of a field read or write, as an object of its class: an
+	// untyped value (eqref: from Dynamic, an array of references, a structural
+	// read) used so more than once in the block is cast once, into a local of
+	// the class's type, which its other uses there read (the cast the field
+	// access would make anyway: a value of another type traps there too)
+	final casts = new Map<Int, Int>(); // value -> the local holding it cast, in this block
+	final recv = new Map<Int, Int>(); // value -> its uses as a class's receiver in this block
+	final castLocal = new Map<String, Int>(); // "value:type" -> its local (reused across blocks)
+
+	function classOperand(v:Int, c:ClassInfo):Ex {
+		var t = m.classType(c);
+		var vk = valueKey(v);
+		if (vk == null || vk.charAt(0) == "t" || isConst(vals[v]) || stacked[v] || locs[v] < 0 || !recv.exists(v) || recv.get(v) < 2)
+			return operand(v, TRef(RObj(c)));
+		var l = casts.get(v);
+		if (l == null || localKeyOf(l) != "t" + t) {
+			var ck = v + ":" + t;
+			var cl = castLocal.get(ck);
+			if (cl == null) {
+				cl = nparams + extra.length;
+				extra.push("t" + t);
+				castLocal.set(ck, cl);
+			}
+			localGet(locs[v]);
+			castTo(t);
+			localSet(cl);
+			casts.set(v, cl);
+			l = cl;
+		}
+		var loc = new Local(-300000 - l, "c" + l, TRef(RObj(c)));
+		local.set(loc.id, l);
+		localKey.set(loc.id, "t" + t);
+		return ELocal(loc);
+	}
+
+	inline function localKeyOf(l:Int):String
+		return extra[l - nparams];
 
 	// v as a condition: not zero (a reference: not null; Opt's condProp
 	// branches on a value tested against 0 itself)
@@ -1026,7 +1070,7 @@ class MirGen extends FuncGen {
 	function getEx(i:MIns):Ex {
 		var o = i.info;
 		var x = i.a;
-		return if (o.cls != null) EField(o.cls, idxOf(o.loc, o.t), operand(x, TRef(RObj(o.cls)))) else if (o.ctor != null)
+		return if (o.cls != null) EField(o.cls, idxOf(o.loc, o.t), classOperand(x, o.cls)) else if (o.ctor != null)
 			EEnumParam(o.ctor, idxOf(o.loc, o.t), operand(x, TRef(RCtor(o.ctor)))) else if (o.lambda != null)
 			ECapture(o.lambda, idxOf(o.loc, o.t) - 1, operand(x, TRef(RAny))) else if (o.shape != null)
 			EAnonGet(o.shape.fields[idxOf(o.loc, o.t)].name, o.t, operand(x, TRef(RAnon)), o.shape) else EBoxGet(o.t, operand(x, TRef(RBox(o.t))));
@@ -1037,7 +1081,7 @@ class MirGen extends FuncGen {
 		var x = i.a;
 		if (o.cls != null) {
 			var idx = idxOf(o.loc, o.t);
-			stmt(SSetField(o.cls, idx, operand(x, TRef(RObj(o.cls))), operand(i.b, o.t)));
+			stmt(SSetField(o.cls, idx, classOperand(x, o.cls), operand(i.b, o.t)));
 		} else if (o.shape != null)
 			stmt(SAnonSet(o.shape.fields[idxOf(o.loc, o.t)].name, o.t, operand(x, TRef(RAnon)), operand(i.b, o.t)));
 		else if (o.ctor == null && o.lambda == null)

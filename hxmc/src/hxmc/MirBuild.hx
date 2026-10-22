@@ -641,6 +641,11 @@ class MirBuild extends MirWriter {
 				case STry(body, catches):
 					gcTry(body, catches);
 					return;
+				// (the branch an if on a constant does not take is not built: another
+				// target's code, `if (Mem.os() == 3)`, which this one may not take)
+				case SIf(EInt(c), x, y):
+					scoped(c != 0 ? x : y);
+					return;
 				case _:
 			}
 		switch s {
