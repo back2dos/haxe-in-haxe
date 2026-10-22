@@ -6,7 +6,7 @@ hxmc turns a typed Haxe program into a native executable with its own code
 generator and linker: no C compiler, assembler or system linker at build time.
 
 ```
-typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> object-level Mir --(MemLower)--> Mir (SSA) --(Inline, Escape, Sroa, Fold, Opt)-->
+typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> object-level Mir --(Inline, Escape)--> --(MemLower)--> Mir (SSA) --(Sroa, Fold, Opt)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
 ```
