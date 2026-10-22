@@ -139,7 +139,8 @@ called where they are made, `Escape`, then `MemLower` (`lower`), `Sroa`,
 | the tool: sites replaced | 222 | 253 (no function replaces fewer) |
 | `EscapeObjects`, `EscapeEnums`, `EscapeClosures` | 14, 10, 7 | 15, 14, 8 |
 | the port's binary | 20,620,064 B | 20,611,872 B |
-| the tool's binary | 18,171,280 B | 18,163,088 B |
+| the tool's binary | 18,174,704 B | 18,166,512 B |
+| type tests folded (`HXMC_STATS`; stage 2 counted each type index load and null comparison of the lowering, stage 3 each object-level test) | port 576, tool 272 | port 561, tool 209 |
 | mandelbrot, mandelbrot (anonymous objects), binarytrees | 2.671 G, 2.868 G, 8.889 G instructions | the same |
 | the port's self-compile (instructions, callgrind) | 36.955 G | 36.930 G (-0.07%), its HXB the same |
 | compile time: the port's build by the tool (one thread, nothing cached; seven runs interleaved, best and median) | Mir phase 3.90 s (median 4.17 s), whole build 17.84 s user | Mir phase 3.67 s (median 4.14 s), whole build 17.54 s user; `Escape` itself 525 to 261 ms |
