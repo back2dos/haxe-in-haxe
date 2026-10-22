@@ -582,6 +582,23 @@ class GcModule {
 		return i;
 	}
 
+	// rt_null_access called when the eqref is null (MirGen's NullCheck)
+	public function nonNullAny():Int {
+		var i = helperIndex.get("nn_any");
+		if (i != null) return i;
+		var b = new Buf();
+		b.u8(0x20); // local.get 0
+		b.u8(0);
+		b.u8(0xD1); // ref.is_null
+		b.u8(0x04); // if
+		b.u8(0x40);
+		b.u8(0x10);
+		Enc.uleb(b, exportOf("rt_null_access"));
+		b.u8(0x00);
+		b.u8(0x0B);
+		return addHelper("nn_any", "p_v", b, []);
+	}
+
 	// what JavaScript reads a string with. The string or Bytes comes in as an
 	// externref, cast here: a parameter of another reference type costs V8 a
 	// call to its runtime for each call from JavaScript (its type checked

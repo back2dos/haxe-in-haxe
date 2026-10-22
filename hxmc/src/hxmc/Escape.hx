@@ -310,6 +310,15 @@ class Escape {
 
 	// ---- allocation sites
 
+	// an anonymous structure's field's slot (WasmGC: by its index, as MirBuild's)
+	function shapeLoc(s:hxmc.ir.Ir.ShapeInfo, at:Int):Int
+		return f.gc ? (s.fields[at].ty.match(TI32 | TBool) ? 2 * at : at) : s.locs[at];
+
+	// what an allocation makes, by name (WasmGC's sites: no type indices)
+	static function gcKey(o:OInfo):String
+		return o.cls != null ? o.cls.name : o.ctor != null ? o.ctor.en.name + "." + o.ctor.name : o.lambda != null ? "lambda" + o.lambda.id : o.shape != null ? "shape"
+			+ [for (x in o.shape.fields) x.name].join(",") : hxmc.ir.Ir.repr(o.t);
+
 	// the site an instruction makes (null: none)
 	function siteAt(i:MIns):Null<Site> {
 		switch i.op {
@@ -338,7 +347,8 @@ class Escape {
 					}
 				}
 				if (s.defAt == null) return null;
-				s.key = o.name + ":" + o.tindex + ":" + o.n;
+				// (WasmGC: no type indices, the class, constructor, closure or shape by name)
+				s.key = o.name + ":" + (f.gc ? gcKey(o) : "" + o.tindex) + ":" + o.n;
 				return s;
 			case Box if (part("boxes")):
 				var k = switch i.info.t {
@@ -576,7 +586,7 @@ class Escape {
 				var t = o.shape.fields[at].ty;
 				var i = new OInfo();
 				i.t = t;
-				i.loc = o.shape.locs[at];
+				i.loc = shapeLoc(o.shape, at);
 				i.shape = o.shape;
 				u.op = GetField;
 				u.info = i;
@@ -590,7 +600,7 @@ class Escape {
 						if (st.op == AnonStore && st.c == u.id) {
 							var i = new OInfo();
 							i.t = o.shape.fields[at].ty;
-							i.loc = o.shape.locs[at];
+							i.loc = shapeLoc(o.shape, at);
 							i.shape = o.shape;
 							i.cont = st.info.cont;
 							st.op = SetField;
@@ -1582,8 +1592,9 @@ class Escape {
 		// would leave them pointing at the object's old place)
 		var slotOf = MFunc.ints(vars.length, -1);
 		var nrooted = 0;
+		// (WasmGC: the engine's collector sees SSA values)
 		for (j in 0...vars.length)
-			if (vars[j].ref) {
+			if (vars[j].ref && !f.gc) {
 				slotOf[j] = 0;
 				nrooted++;
 			}
