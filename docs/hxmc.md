@@ -682,7 +682,10 @@ entries added young since the last one (after a minor collection) or all
 of them (after a major one, which copied all of them anyway). The header's
 16-bit identity hash (`hxmc.Native.objHash`, set when first asked) stays
 for other uses; WasmGC, which has no addresses, hashes ObjectMap's keys
-with it (the engine object's, which never moves). `Map<SomeEnum, V>` is
+with it (the engine object's, which never moves), times 2^32/φ: the slot
+is hash & mask, and the bare 16 bits would leave every slot past 65,536
+home to no key (a map of the TypeScript compiler's emit, 200,000 keys
+in one probe run: 67 s instead of 6). `Map<SomeEnum, V>` is
 upstream's `EnumValueMap` (a balanced tree ordered by the constructors'
 indices and parameters), not an identity map.
 

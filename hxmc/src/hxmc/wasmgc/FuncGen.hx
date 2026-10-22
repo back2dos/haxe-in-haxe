@@ -192,6 +192,9 @@ class FuncGen {
 
 	// ---- temporaries
 
+	// the most operands of array.new_fixed engines take (V8: 10000; the spec's JS API limit)
+	static inline var NEW_FIXED_MAX = 10000;
+
 	function temp(r:String):Int {
 		var l = free.get(r);
 		if (l != null && l.length > 0) return l.pop();
@@ -1031,10 +1034,36 @@ class FuncGen {
 				}
 			case ENewArr(t, values):
 				var k = GcModule.elemKind(t);
+				var d = m.dataType(k);
 				i32(values.length);
-				for (v in values)
-					expr(v);
-				gc(0x08, m.dataType(k), values.length);
+				if (values.length <= NEW_FIXED_MAX) {
+					for (v in values)
+						expr(v);
+					gc(0x08, d, values.length);
+				} else {
+					// (more operands than engines take for array.new_fixed: the data array made at
+					// its length, the elements copied in from fixed arrays of at most that many)
+					var a = temp("t" + d);
+					i32(values.length);
+					gc(0x07, d);
+					localSet(a);
+					var at = 0;
+					while (at < values.length) {
+						var n = values.length - at < NEW_FIXED_MAX ? values.length - at : NEW_FIXED_MAX;
+						localGet(a);
+						i32(at);
+						for (j in at...at + n)
+							expr(values[j]);
+						gc(0x08, d, n);
+						i32(0);
+						i32(n);
+						gc(0x11, d, d);
+						at += n;
+					}
+					localGet(a);
+					op(0xD4); // ref.as_non_null (the local is nullable, the field is not)
+					release("t" + d, a);
+				}
 				gc(0x00, m.arrType(k));
 			case ENewClos(l, captures):
 				var fi = m.funcOf(l.fn);
