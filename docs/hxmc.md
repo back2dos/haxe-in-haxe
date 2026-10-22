@@ -730,7 +730,10 @@ billion, the header hash's 0.22 billion gone; bringing indexes up to date
 ## Module cache
 
 The compilation server's HXB module cache, made durable
-(`hxmc/src/hxmc/ModuleCache.hx`, `ModuleStore.hx`; on by default,
+(`hxmc/src/hxmc/ModuleCache.hx` with a build's state in
+`ModuleCacheState.hx`, the callbacks it watches in `WatchedCallbacks.hx`,
+the writer that checks what it encodes in `CheckingHxbWriter.hx` and the
+type sort's walks in `Skeletons.hx`; `ModuleStore.hx`; on by default,
 `HXMC_MODULE_CACHE=0` or `-D hxmc.no-module-cache` off; through `haxe` and
 the tool, for every target): a successful build writes its typed modules
 (HXB chunks, dependencies, file and check policy) into a store in the user
