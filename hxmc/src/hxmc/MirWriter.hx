@@ -413,8 +413,19 @@ class MirWriter {
 
 	function readVar(v:Int, b:MBlock):Int {
 		var d = defs[b.id].get(v);
-		if (d != null) return d;
+		if (d != null) return d == VISITING ? cyclePhi(v, b) : d;
 		return readVarRec(v, b);
+	}
+
+	// (readVarRec: the predecessors of a block being read)
+	static inline var VISITING = -2;
+
+	// a read that came back to a block whose predecessors are being read:
+	// the phi there (its operands are those reads)
+	function cyclePhi(v:Int, b:MBlock):Int {
+		var phi = newPhi(b, varTy.get(v));
+		defs[b.id].set(v, phi.id);
+		return phi.id;
 	}
 
 	function newPhi(b:MBlock, t:MTy):MIns {
@@ -443,6 +454,29 @@ class MirWriter {
 			val = zeroAt(b, t);
 		} else if (b.preds.length == 1 && !merges(v, b)) {
 			val = readVar(v, b.preds[0]);
+		} else if (!merges(v, b)) {
+			// the predecessors' values: a phi only where they differ, or where
+			// a read came back here (Braun et al.'s marker: no trivial phi
+			// made at a join the variable reaches unchanged)
+			defs[b.id].set(v, VISITING);
+			var args = readVars(v, b);
+			var d = defs[b.id].get(v);
+			if (d != VISITING) {
+				f.vals[d].args = args;
+				val = d;
+			} else {
+				val = args[0];
+				for (x in args)
+					if (x != val) {
+						val = -1;
+						break;
+					}
+				if (val < 0) {
+					var phi = newPhi(b, t);
+					phi.args = args;
+					val = phi.id;
+				}
+			}
 		} else {
 			var phi = newPhi(b, t);
 			phiMade(v, b, phi);

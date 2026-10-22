@@ -23,6 +23,17 @@ using core.ds.VectorTools;
 //  - loop-invariant code motion: pure operations, and loads that cannot
 //    fault of memory the loop does not write, move to a block before the
 //    loop.
+// It runs on object-level Mir, before MemLower (docs/plans/codegen.md,
+// "Object-level Mir"): a field read (GetField) is a load of its field's
+// class, a field write (SetField, InitField) a store that answers it, an
+// array's length and elements loads of theirs; type tests and enum tags are
+// pure; an operation that may collect or call writes every class (a call's
+// effect); null tests dominated by one of the same value, or by a branch on
+// it, go. What the lowering of an operation reads that others read too
+// becomes its operands first (operands: shared and hoisted as any value),
+// and a reference stored into an object allocated since the last point
+// where a collection may happen loses its write barrier (freshTargets).
+// After MemLower only the CFG's cleanup, copies and dead code (lowered).
 class Opt {
 	// memory classes (MIns.mem)
 	public static inline var MOther = 0; // anything: written by any store or call
@@ -78,6 +89,7 @@ class Opt {
 	}
 
 	public function run() {
+		operands();
 		simplifyCfg();
 		var cfg = f.cfg();
 		if (cfg.size == 0) return;
@@ -111,9 +123,14 @@ class Opt {
 			simplifyCfg();
 			dce();
 		}
+		if (nullsDropped) dce();
 		if (licmOn)
 			for (_ in 0...3)
 				if (!licm()) break;
+		if (barriers > 0) {
+			freshTargets();
+			loneBarrierOperands();
+		}
 	}
 
 	static var licmOn = Sys.getEnv("HXMC_LICM") != "0";
@@ -149,7 +166,7 @@ class Opt {
 		var derefs = new Map<Int, Array<MBlock>>();
 		for (b in order)
 			for (i in b.ins)
-				if (!i.dead && (i.op == Load || i.op == Store) && i.a >= 0) {
+				if (!i.dead && (i.op == Load || i.op == Store || objDeref(i.op)) && i.a >= 0) {
 					var o = baseOf(i.a);
 					var l = derefs.get(o);
 					if (l == null) derefs.set(o, l = []);
@@ -221,7 +238,7 @@ class Opt {
 				for (i in b.ins)
 					if (!i.dead) {
 						kills |= killMask(i);
-						if (i.op == Call && !b.cold) calls = true;
+						if ((i.op == Call || objCall(i.op)) && !b.cold) calls = true;
 					}
 			if (calls) continue;
 			// the movable instructions, in reverse postorder of their blocks
@@ -238,6 +255,13 @@ class Opt {
 					var can = switch i.op {
 						case Const | ConstF | SymAddr | StackAddr: true;
 						case Cmp: false; // (fused with its branch)
+						// (object-level: as the loads of fields, headers and immutable memory below)
+						case GetField | ArrayLength | NArrayLength:
+							var c = objLoadClass(i);
+							c >= 0 && kills & (1 << c) == 0 && nonNull(baseOf(i.a), outside, 0);
+						case EnumTag: nonNull(baseOf(i.a), outside, 0);
+						case TypeTest | FieldAddr: true;
+						case _ if (i.isObj()): false;
 						case Load | TlsLoad:
 							safeLoad(i, vals) && kills & (1 << (i.op == TlsLoad ? tlsClass(i.sym) : i.mem)) == 0
 							// (a field, an array's header or immutable memory of an object the
@@ -267,7 +291,7 @@ class Opt {
 				var count = 0;
 				for (x in t.targets)
 					if (x == h) count++;
-				if (count != 1 || t.op == Switch) continue;
+				if (count != 1 || t.op == Switch || t.op == AnonTest) continue;
 				pre = new MBlock(nextBlock++);
 				pre.cold = h.cold && outside.cold;
 				pre.sealed = pre.filled = true;
@@ -311,6 +335,8 @@ class Opt {
 		switch x.op {
 			case Copy:
 				return fresh(x.a, depth + 1);
+			case New | NewDyn | NewArray | NewNArray:
+				return true;
 			case Add:
 				var p = f.vals[x.a], c = f.vals[x.b];
 				return p.op == TlsLoad && p.sym == "rt_young_ptr" && c.op == Const && c.sym == null && c.imm == 8;
@@ -369,6 +395,19 @@ class Opt {
 						}
 					}
 				}
+				// (object-level: null tests already made or decided)
+				for (i in b.ins)
+					if (i.op == NullCheck && !i.dead) {
+						if (knownNonNull(i.a, fc, fa, fb, fv)) {
+							i.dead = true;
+							nullsDropped = true;
+						} else {
+							fc.push(NONNULL);
+							fa.push(i.a);
+							fb.push(-1);
+							fv.push(true);
+						}
+					}
 				var t = b.term();
 				if (t != null && t.op == Br && t.targets[0] != t.targets[1] && fc.length > 0) {
 					var c = vals[t.a];
@@ -376,6 +415,12 @@ class Opt {
 						var known = 0; // 1 true, 2 false
 						var k = fc.length;
 						while (k-- > 0 && known == 0) {
+							if (fc[k] == NONNULL) {
+								// (a comparison of that value with null)
+								if (c.op == Cmp && isEqNe(c.imm) && (c.a == fa[k] && isZero(c.b) || c.b == fa[k] && isZero(c.a)))
+									known = c.imm == (CNe : Int) ? 1 : 2;
+								continue;
+							}
 							if (fc[k] == -1 || c.op != Cmp) {
 								if (fc[k] == -1 && fa[k] == t.a) known = fv[k] ? 1 : 2;
 								continue;
@@ -425,6 +470,8 @@ class Opt {
 		return changed;
 	}
 
+	var nullsDropped = false;
+
 	static inline function isEqNe(c:Int):Bool
 		return c == (CEq : Int) || c == (CNe : Int);
 
@@ -470,6 +517,21 @@ class Opt {
 			b.succs = [keep];
 		}
 		knownPhiArgs();
+		// (the blocks that may be threaded: a phi first, a branch last)
+		var any = false;
+		for (b in f.blocks) {
+			var n = b.ins.length;
+			if (n >= 2 && n <= 4 && b.ins[0].op == Phi && b.ins[n - 1].op == Br) {
+				any = true;
+				break;
+			}
+		}
+		if (!any) {
+			f.edited();
+			pruneBlocks();
+			mergeBlocks();
+			return;
+		}
 		var uses = MFunc.ints(f.vals.length, 0);
 		for (b in f.blocks)
 			for (i in b.ins) {
@@ -486,7 +548,7 @@ class Opt {
 		while (threaded && rounds++ < 64) { // (a chain of n terms takes about n rounds)
 		threaded = false;
 		for (b in f.blocks.copy()) {
-			if (b == f.entry || b.handler || b.preds.length == 0) continue;
+			if (b == f.entry || b.handler || b.preds.length == 0 || b.preds.length == 1 && contOf(b.preds[0]) == b) continue;
 			var ins = b.ins;
 			var n = ins.length;
 			if (n < 2 || n > 4) continue;
@@ -635,7 +697,7 @@ class Opt {
 				var t = b.term();
 				if (t == null || t.op != Jmp) break;
 				var s = t.targets[0];
-				if (s == b || s == f.entry || s.preds.length != 1 || s.handler || s.cold != b.cold) break;
+				if (s == b || s == f.entry || s.preds.length != 1 || s.handler || s.cold != b.cold || contOf(b) == s) break;
 				// phis of a single predecessor are their operand
 				var rest = [];
 				for (i in s.ins)
@@ -779,6 +841,15 @@ class Opt {
 			for (i in b.ins) {
 				if (i.dead) continue;
 				switch i.op {
+					case _ if (i.isObj()):
+						// (object-level: one that writes ends what is known, one
+						// that reads sees the stores before it)
+						if (objKill(i) != 0 || i.op == InitField || i.op == ArrayInit || i.op == NArrayInit) {
+							clear();
+							tlsVal.clear();
+						} else
+							for (k in 0...keySeen.length)
+								keySeen[k] = true;
 					case Store if ((i.mem == MInit || i.mem == MField) && i.b < 0):
 						var base = baseOf(i.a), d = i.imm + dispOf(i.a), sz = i.size;
 						if (i.mem == MField) access(base);
@@ -880,6 +951,7 @@ class Opt {
 
 	// the classes an instruction writes, as a bit set (0: none)
 	function killMask(i:MIns):Int {
+		if (i.isObj()) return objKill(i);
 		return switch i.op {
 			case Store:
 				switch i.mem {
@@ -897,6 +969,309 @@ class Opt {
 				((1 << NCLS) - 1) & ~(1 << MConst) & (i.keepsFrame && !i.returnsTwice ? ~((1 << MFrame) | FRAME_BITS) : -1);
 			case _: 0;
 		};
+	}
+
+	// ---- object-level operations
+
+	// every class but immutable memory (what a call may write)
+	static inline var ALL = ((1 << NCLS) - 1) & ~(1 << MConst);
+
+	// a field's byte offset (OInfo.loc: an Int's or Bool's is a 4-byte index; MemLower.access)
+	static inline function fieldOff(o:OInfo):Int
+		return o.t.match(TRef(_) | TF64 | TI64) ? 8 * o.loc : 4 * o.loc;
+
+	static inline function fieldCls(o:OInfo):Int
+		return MFieldAt + ((fieldOff(o) >> 3) & 7);
+
+	// an array element of this type is a reference (its slow path may box: a call)
+	static inline function ptrElem(t:hxmc.ir.Ir.Ty):Bool
+		return !t.match(TI32 | TBool | TF64 | TI64);
+
+	// the class an object-level read loads from (-1: not one)
+	static function objLoadClass(i:MIns):Int
+		return switch i.op {
+			case GetField if (!i.info.t.match(TVoid)): fieldCls(i.info);
+			case ArrayLength: MHdr;
+			case NArrayLength: MConst;
+			case NArrayGet: MElem;
+			case ArrayGet if (!ptrElem(i.info.t)): MElem;
+			case _: -1;
+		};
+
+	// a field write a later read of the field may take the value of
+	static inline function objStore(i:MIns):Bool
+		return (i.op == SetField || i.op == InitField) && !i.info.t.match(TVoid);
+
+	// object-level operations whose value depends on their operands alone
+	static inline function objPure(op:Op):Bool
+		return op == EnumTag || op == TypeTest || op == FieldAddr;
+
+	// object-level operations whose lowering calls on the fast path (LICM: a call)
+	static inline function objCall(op:Op):Bool
+		return op == VirtualCall || op == ClosureCall || op == AnonCall || op == NewArray || op == NArrayDyn || op == Box || op == Unbox;
+
+	// object-level operations that dereference their first operand (LICM: not null after)
+	static inline function objDeref(op:Op):Bool
+		return switch op {
+			case NullCheck | GetField | SetField | InitField | ArrayLength | ArrayGet | ArraySet | ArrayPush | NArrayLength | NArrayGet | NArraySet | EnumTag: true;
+			case _: false;
+		};
+
+	// what tells apart two operations of one kind on the same operands
+	static function okey(i:MIns):Int
+		return switch i.op {
+			case GetField | SetField | InitField: fieldOff(i.info);
+			case ArrayGet: i.info.flag ? 1 : 0;
+			case NArrayGet: i.info.n;
+			case TypeTest: i.info.cls.tindex;
+			case FieldAddr: i.info.loc;
+			case _: 0;
+		};
+
+	// the classes an object-level operation writes
+	function objKill(i:MIns):Int
+		return switch i.op {
+			case NullCheck | GetField | FieldAddr | EnumTag | TypeTest | ArrayLength | NArrayLength | NArrayGet | InitField: 0;
+			case ArrayGet: ptrElem(i.info.t) ? ALL : 0;
+			case SetField: i.info.t.match(TVoid) ? 0 : (1 << fieldCls(i.info)) | (1 << MField) | (1 << MOther);
+			case AnonStore: FIELD_BITS | (1 << MField) | (1 << MOther);
+			case NArraySet | ArrayInit | NArrayInit: (1 << MElem) | (1 << MOther);
+			case RefStore: ((1 << NCLS) - 1) & ~(1 << MConst) & ~(1 << MCallOnly) & ~TLS_BITS;
+			case _: ALL;
+		};
+
+	// whether v is not null: just allocated, or known on the way here
+	// (condProp's facts: a null test of it, a branch on its comparison with null)
+	function knownNonNull(v:Int, fc:Array<Int>, fa:Array<Int>, fb:Array<Int>, fv:Array<Bool>):Bool {
+		if (fresh(v)) return true;
+		var k = fc.length;
+		while (k-- > 0) {
+			if (fc[k] == NONNULL) {
+				if (fa[k] == v) return true;
+				continue;
+			}
+			if (fc[k] < 0 || fb[k] < 0 || !isEqNe(fc[k])) continue;
+			var other = fa[k] == v ? fb[k] : fb[k] == v ? fa[k] : -1;
+			if (other >= 0 && isZero(other) && fv[k] == (fc[k] == (CNe : Int))) return true;
+		}
+		return false;
+	}
+
+	static inline var NONNULL = -2; // (condProp: a fact that fa is not null)
+
+	inline function isZero(v:Int):Bool {
+		var x = f.vals[v];
+		return x.op == Const && x.sym == null && x.imm == 0 && x.imm2 == 0;
+	}
+
+	// the block an operation in b continues in (OInfo.cont: MemLower needs the
+	// operation, its jump there and the continuation's phis as they are)
+	static function contOf(b:MBlock):Null<MBlock> {
+		var n = b.ins.length;
+		if (n < 2) return null;
+		var x = b.ins[n - 2];
+		return x.info != null ? x.info.cont : null;
+	}
+
+	// whether MemLower stores a reference with the write barrier for i
+	static function barriered(i:MIns):Bool {
+		var o = i.info;
+		return switch i.op {
+			case SetField: o.t.match(TRef(_)) && !o.flag;
+			case AnonStore: o.t.match(TRef(_));
+			case ArraySet | ArrayPush | ArrayInit: ptrElem(o.t);
+			case NArrayInit: o.kind == Abi.AK_PTR;
+			case NArraySet: o.flag;
+			case NArrayDyn: i.c >= 0;
+			case RefStore: true;
+			case _: false;
+		};
+	}
+
+	// What MemLower's lowering of an operation reads that other operations
+	// may read too becomes operands, loaded or computed before it, which are
+	// then shared and moved out of loops as any other value:
+	//  - a write barrier's nursery bounds (MemLower.setPtr), its last two
+	//    arguments (OInfo.young);
+	//  - an Array's header (its kind, length and storage) and its index
+	//    widened, for an element read or write or a push: arguments from
+	//    OInfo.ops on (MemLower.arrGet, arrSet, arrPush);
+	//  - a NativeArray's index widened (its b).
+	function operands() {
+		var vals = f.vals;
+		barriers = 0;
+		function ins(op:Op, ty:MTy, b:MBlock, at:Array<MIns>):MIns {
+			var x = new MIns(op, ty);
+			x.id = vals.length;
+			vals.push(x);
+			x.block = b;
+			at.push(x);
+			return x;
+		}
+		function hdr(b:MBlock, out:Array<MIns>, a:Int, disp:Int, ty:MTy):Int {
+			var l = ins(Load, ty, b, out);
+			l.a = a;
+			l.imm = disp;
+			l.imm2 = 1;
+			l.size = ty == I32 ? 4 : 8;
+			l.mem = MHdr;
+			return l.id;
+		}
+		function sext(b:MBlock, out:Array<MIns>, v:Int):Int {
+			var x = ins(SExt, I64, b, out);
+			x.a = v;
+			return x.id;
+		}
+		function append(i:MIns, more:Array<Int>) {
+			var n = i.args.length;
+			var args = new Vector<Int>(n + more.length);
+			Vector.blit(i.args, 0, args, 0, n);
+			for (k in 0...more.length)
+				args[n + k] = more[k];
+			i.args = args;
+		}
+		for (b in f.blocks) {
+			var any = false;
+			for (i in b.ins)
+				if (i.isObj() && (barriered(i) || i.op == ArrayGet || i.op == ArraySet || i.op == ArrayPush || i.op == NArrayGet || i.op == NArraySet))
+					any = true;
+			if (!any) continue;
+			var out = [];
+			for (i in b.ins) {
+				if (!i.isObj() || i.dead) {
+					out.push(i);
+					continue;
+				}
+				var o = i.info;
+				switch i.op {
+					case ArrayGet | ArraySet | ArrayPush if (o.ops < 0):
+						var a = i.a;
+						var len = -1;
+						if (i.op != ArrayGet || o.flag) {
+							var l = ins(ArrayLength, I32, b, out);
+							l.a = a;
+							l.info = new OInfo();
+							len = l.id;
+						}
+						var kind = hdr(b, out, a, 4, I32), data = hdr(b, out, a, 8, I64);
+						o.ops = i.args.length;
+						append(i, i.op == ArrayPush ? [kind, data, len] : len < 0 ? [kind, data, sext(b, out, i.b)] : [kind, len, data, sext(b, out, i.b)]);
+					case NArrayGet | NArraySet if (vals[i.b].ty == I32):
+						i.b = sext(b, out, i.b);
+					case _:
+				}
+				if (barriered(i) && !o.young) {
+					var bound = [];
+					for (s in ["rt_young_start", "rt_young_end"]) {
+						var a = ins(SymAddr, I64, b, out);
+						a.sym = s;
+						var l = ins(Load, I64, b, out);
+						l.a = a.id;
+						l.imm2 = 1;
+						l.size = 8;
+						l.mem = MCallOnly;
+						bound.push(l.id);
+					}
+					var size = ins(Sub, I64, b, out);
+					size.a = bound[1];
+					size.b = bound[0];
+					append(i, [bound[0], size.id]);
+					o.young = true;
+					barriers++;
+				}
+				out.push(i);
+			}
+			b.ins = out;
+		}
+	}
+
+	var barriers = 0;
+
+	public var freshStores = 0; // (stats: the stores freshTargets took the barrier of)
+
+	// the largest object (slots) the runtime always allocates in the nursery
+	// (Gc.allocNow: a quarter of it at most; it is 4 KB at least)
+	static inline var YOUNG_SLOTS = 63;
+
+	// A reference stored into an object allocated since the last point where
+	// a collection may happen (in the block, or one entered only from such a
+	// block) needs no write barrier: the object is young (OInfo.fresh; its
+	// store still publishes what it stores, MIns.release).
+	function freshTargets() {
+		var cfg = f.cfg();
+		var order = cfg.rpo;
+		var n = order.length;
+		var inOrder = number(order);
+		var outs = MFunc.ints(n, -1);
+		for (k in 0...n) {
+			var b = order[k];
+			var last = -1; // the object allocated since the last collection point
+			if (b.preds.length == 1 && !b.handler) {
+				var p = b.preds[0];
+				if (p.mark == inOrder && p.tmp < k) last = outs[p.tmp];
+			}
+			for (i in b.ins) {
+				if (i.dead) continue;
+				if (i.op == SetField && last >= 0 && i.a == last && i.info.young) {
+					i.args = i.args.slice(0, i.args.length - 2);
+					i.info.young = false;
+					i.info.fresh = true;
+					freshStores++;
+				}
+				if (i.isObj() ? objKill(i) == ALL : i.op == Call && (!i.keepsFrame || i.returnsTwice)) last = -1;
+				if (i.op == New && i.info.n <= YOUNG_SLOTS) last = i.id;
+			}
+			outs[k] = last;
+		}
+	}
+
+	// A barrier's operands that no other store shares, nor moved out of a
+	// loop, go again: MemLower loads them after the store, as it would
+	// without them (fewer values live across the store).
+	function loneBarrierOperands() {
+		var vals = f.vals;
+		var uses = MFunc.ints(vals.length, 0);
+		for (b in f.blocks)
+			for (i in b.ins) {
+				if (i.a >= 0) uses[i.a]++;
+				if (i.b >= 0) uses[i.b]++;
+				if (i.c >= 0) uses[i.c]++;
+				for (x in i.args)
+					uses[x]++;
+			}
+		var any = false;
+		for (b in f.blocks)
+			for (i in b.ins) {
+				if (!i.isObj() || i.info == null || !i.info.young) continue;
+				var n = i.args.length;
+				var ys = vals[i.args[n - 2]], size = vals[i.args[n - 1]];
+				if (size.op != Sub || size.block != b || ys.block != b || uses[size.id] != 1 || uses[ys.id] != 2 || size.b != ys.id) continue;
+				var ye = vals[size.a];
+				if (ye.op != Load || ye.block != b || uses[ye.id] != 1) continue;
+				i.args = i.args.slice(0, n - 2);
+				i.info.young = false;
+				any = true;
+			}
+		if (any) dce();
+	}
+
+	// After MemLower: a block that jumps to one only it enters absorbs it,
+	// copies are their operand, dead code goes (no other optimization: the
+	// optimizer ran on object-level Mir)
+	public static function lowered(f:MFunc) {
+		var o = new Opt(f);
+		o.simplifyCfg();
+		o.repl = MFunc.iota(f.vals.length);
+		var any = false;
+		for (b in f.blocks)
+			for (i in b.ins)
+				if (i.op == Copy && !i.dead) {
+					o.repl[i.id] = i.a;
+					i.dead = true;
+					any = true;
+				}
+		if (any) o.rewrite();
+		o.dce();
 	}
 
 	var next = 1; // the next fresh version
@@ -963,13 +1338,16 @@ class Opt {
 			}
 			for (i in b.ins) {
 				if (i.dead) continue;
-				if (i.op == Load) ver[i.id] = v[memClass(i)] else if (i.op == TlsLoad) ver[i.id] = v[tlsClass(i.sym)];
+				if (i.op == Load) ver[i.id] = v[memClass(i)] else if (i.op == TlsLoad) ver[i.id] = v[tlsClass(i.sym)] else if (i.isObj()) {
+					var c = objLoadClass(i);
+					if (c >= 0) ver[i.id] = v[c];
+				}
 				var m = killMask(i);
 				if (m != 0)
 					for (c in 0...NCLS)
 						if (m & (1 << c) != 0) v[c] = next++;
 				// (a store: the version it leaves its memory in, that of the loads it can answer)
-				if (i.op == Store) ver[i.id] = v[memClass(i)];
+				if (i.op == Store) ver[i.id] = v[memClass(i)] else if (objStore(i)) ver[i.id] = v[fieldCls(i.info)];
 			}
 			outs[k] = v;
 		}
@@ -1014,11 +1392,12 @@ class Opt {
 	}
 
 	function same(x:MIns, y:MIns):Bool
-		return x.op == y.op && x.ty == y.ty && cres(x.a) == cres(y.a) && cres(x.b) == cres(y.b) && cres(x.c) == cres(y.c) && x.imm == y.imm && x.imm2 == y.imm2
+		return x.isObj() ? x.op == y.op && x.ty == y.ty && cres(x.a) == cres(y.a) && cres(x.b) == cres(y.b) && cres(x.c) == cres(y.c) && okey(x) == okey(y)
+			&& ver[x.id] == ver[y.id] : x.op == y.op && x.ty == y.ty && cres(x.a) == cres(y.a) && cres(x.b) == cres(y.b) && cres(x.c) == cres(y.c) && x.imm == y.imm && x.imm2 == y.imm2
 			&& x.size == y.size && x.signed == y.signed && x.sym == y.sym && x.mem == y.mem && ver[x.id] == ver[y.id];
 
 	inline function hash(i:MIns):Int
-		return hashOf(i.op, i.a, i.b, i.c, i.imm, i.imm2, ver[i.id]);
+		return i.isObj() ? hashOf(i.op, i.a, i.b, i.c, okey(i), 0, ver[i.id]) : hashOf(i.op, i.a, i.b, i.c, i.imm, i.imm2, ver[i.id]);
 
 	inline function hashOf(op:Op, a:Int, b:Int, c:Int, imm:Int, imm2:Int, v:Int):Int {
 		var h = (op : Int) * 31 + cres(a);
@@ -1043,6 +1422,11 @@ class Opt {
 	function answers(st:MIns, l:MIns):Bool
 		return cres(st.a) == cres(l.a) && cres(st.b) == cres(l.b) && st.imm == l.imm && st.imm2 == l.imm2 && st.size == l.size && st.sym == l.sym
 			&& st.mem == l.mem && ver[st.id] == ver[l.id] && f.vals[res(st.c)].ty == l.ty;
+
+	// a field read that takes the value of a field write st (an object's
+	// initialization too: the same object, field and memory version)
+	function answersObj(st:MIns, l:MIns):Bool
+		return cres(st.a) == cres(l.a) && fieldOff(st.info) == fieldOff(l.info) && ver[st.id] == ver[l.id] && f.vals[res(st.b)].ty == l.ty;
 
 	// value numbering in a preorder walk of the dominator tree, with a
 	// scoped table (entries made in a subtree are undone after it); a store
@@ -1075,9 +1459,9 @@ class Opt {
 				for (i in order[bk].ins) {
 					if (i.dead) continue;
 					var op = i.op;
-					if (op == Store) {
-						if (!forwards(i)) continue;
-						var h = hashOf(Load, i.a, i.b, -1, i.imm, i.imm2, ver[i.id]);
+					if (op == Store || objStore(i)) {
+						if (op == Store && !forwards(i)) continue;
+						var h = op == Store ? hashOf(Load, i.a, i.b, -1, i.imm, i.imm2, ver[i.id]) : hashOf(GetField, i.a, -1, -1, fieldOff(i.info), 0, ver[i.id]);
 						h = (h ^ (h >>> 15)) * 0x2c1b3c6d;
 						var bk = (h ^ (h >>> 12)) & mask;
 						chain[i.id] = head[bk];
@@ -1087,7 +1471,7 @@ class Opt {
 						continue;
 					}
 					// (comparisons are recomputed: they fuse with their branch)
-					if (!(pure(op) || op == Load || op == TlsLoad) || op == Cmp) continue;
+					if (!(pure(op) || op == Load || op == TlsLoad || objPure(op) || objLoadClass(i) >= 0) || op == Cmp) continue;
 					if (fold(i)) continue;
 					var h = hash(i);
 					h = (h ^ (h >>> 15)) * 0x2c1b3c6d;
@@ -1099,6 +1483,11 @@ class Opt {
 						if (y.op == Store) {
 							if (op == Load && answers(y, i)) {
 								hit = res(y.c);
+								break;
+							}
+						} else if (y.op == SetField || y.op == InitField) {
+							if (op == GetField && answersObj(y, i)) {
+								hit = res(y.b);
 								break;
 							}
 						} else if (same(i, y)) {
@@ -1249,5 +1638,5 @@ class Opt {
 	}
 
 	static inline function removable(i:MIns):Bool
-		return pure(i.op) || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy;
+		return pure(i.op) || objPure(i.op) || objLoadClass(i) >= 0 || i.op == ArrayGet || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy || i.op == Phi;
 }

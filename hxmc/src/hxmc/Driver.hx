@@ -97,6 +97,9 @@ class Driver {
 	var escRemoved = 0;
 	var escFolds = 0;
 	var allocsFolded = 0; // (Fold)
+	var rootStores = 0; // (Frames)
+	var freshStores = 0; // (Opt.freshTargets)
+	var framesRemoved = 0;
 	var foldWhy = new Map<String, Int>(); // (Fold.whyOn)
 	var escTime = 0.0;
 	var escSlow:Array<{name:String, t:Float}> = [];
@@ -112,12 +115,10 @@ class Driver {
 		var e = templates.get(fn);
 		tlock.release();
 		if (e != null) return e.t;
-		// (object-level Mir, judged on its lowering: a second build)
+		// (object-level Mir, judged on the size of its lowering: Inline.size)
 		var cb = new MirBuild(prep, abi, fn);
 		cb.icSym = prep.funcSym(fn) + "__ic";
-		var lb = new MirBuild(prep, abi, fn);
-		lb.icSym = cb.icSym;
-		var t = try Inline.template(cb, cb.objects(), lb.build()) catch (_:Unsupported) null;
+		var t = try Inline.template(cb, cb.objects()) catch (_:Unsupported) null;
 		tlock.acquire();
 		var e2 = templates.get(fn);
 		if (e2 == null) templates.set(fn, {t: t}) else t = e2.t;
@@ -174,8 +175,26 @@ class Driver {
 				if (o.stats && te > 0.005) escSlow.push({name: name + " (" + mf.vals.length + " values)", t: te});
 				lock.release();
 			}
-			mb.lower();
+			// the optimizer on object-level Mir (struct values in frame slots
+			// replaced first), then the frame's slots nothing reads; after the
+			// lowering only allocation folding, the CFG's cleanup and
+			// dead code
 			if (o.opt && sroa) new Sroa(mf).run();
+			if (o.opt) {
+				var op = new Opt(mf);
+				op.run();
+				// (the rooted locals' slots nothing reads any more)
+				var fs = new Frames(mf);
+				fs.run();
+				if (fs.storesRemoved > 0 || fs.frameRemoved || op.freshStores > 0) {
+					lock.acquire();
+					freshStores += op.freshStores;
+					rootStores += fs.storesRemoved;
+					if (fs.frameRemoved) framesRemoved++;
+					lock.release();
+				}
+			}
+			mb.lower();
 			if (o.opt && Fold.on && mf.allocs > 1) {
 				var fo = new Fold(mf);
 				fo.run();
@@ -187,7 +206,7 @@ class Driver {
 					lock.release();
 				}
 			}
-			if (o.opt) new Opt(mf).run();
+			if (o.opt) Opt.lowered(mf);
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {
 				// WebAssembly: structured code from the Mir, no instruction selection or registers
@@ -263,6 +282,7 @@ class Driver {
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded (cpu ${ms(escTime)})');
 		Sys.println('hxmc: $allocsFolded allocations folded into the one before them (Fold)');
+		Sys.println('hxmc: frames: $rootStores root stores and $framesRemoved frames removed; $freshStores write barriers of objects just allocated left out');
 		var ks = [for (k in foldWhy.keys()) k];
 		ks.sort((a, b) -> foldWhy.get(b) - foldWhy.get(a));
 		for (k in ks)

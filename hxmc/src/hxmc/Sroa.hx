@@ -6,7 +6,8 @@ import haxe.ds.Vector;
 
 using core.ds.VectorTools;
 
-// Scalar replacement of frame slots (after inlining, before Opt): a slot
+// Scalar replacement of frame slots (on object-level Mir after Escape,
+// before Opt): a slot
 // whose address is only the base of loads and stores at constant offsets
 // (a struct value of the function that no call takes, FnLower.newSlot) has
 // its accesses replaced by SSA values, one variable per accessed range: a

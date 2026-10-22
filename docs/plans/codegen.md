@@ -84,16 +84,19 @@ optimization tier for #15's interpreted macros.
   struct value is the address of its memory (typed `TStruct` in
   `MIns.vty`); `MirBuild` builds C calls and entries from C with structs
   by value (`cCall`, `cEntry`, `CAbi`) as memory code, and `Sroa` replaces
-  frame slots after the lowering. Struct values as objects (scalar
+  frame slots (on object-level Mir since stage 4). Struct values as objects (scalar
   replacement of the value itself, methods on structs:
   [lowlevel.md](lowlevel.md)) are a later step none of #34's stages need.
 - **`Facts.checkRawAddresses` stays on the IR.** It checks
   `hxmc.unsafe`'s raw heap addresses against the GC points, which are the
-  IR's (`Roots`, cold sites) as long as `MirBuild` places the roots; it
-  moves when root placement moves after optimization (stage 4), where GC
-  points are object-level calls and allocations.
+  IR's (`Roots`, cold sites) as long as `MirBuild` places the roots. Stage
+  4 keeps that placement and only takes away, after optimization, the
+  slot stores nothing reads and the frames left unread (`Frames`), which
+  makes no raw address safer or less safe: the check stays where the GC
+  points are decided.
 - **What stays memory-level in `MirBuild`**: the shadow-stack frame and
-  the rooted locals' slots (stage 4 moves them), globals, `hxmc.unsafe`'s
+  the rooted locals' slots (stage 4 prunes them after optimization:
+  `Frames`), globals, `hxmc.unsafe`'s
   intrinsics (opaque memory operations inside object-level functions, as
   the plan has it), C calls, and strings' inline helpers (`String.length`,
   `charCodeAt`, `hx_str_eq`, `StringBuf.addChar`): no object-level pass
@@ -164,6 +167,95 @@ read across blocks, removed again by `removeTrivialPhis`, 0.57 G): about
 0.35 G; fewer barriers and roots after optimization: in register
 allocation and instruction selection rather than the Mir phase, as many as
 the sites removed. `Escape`'s shape matching is already gone (above).
+
+### Built: stage 4
+
+The pipeline: `MirBuild` (object-level, `objects`), `Inline`, the closures
+called where they are made, `Escape`, `Sroa`, `Opt`, `Frames`, then
+`MemLower` (`lower`), `Fold`, `Opt.lowered` and the back ends. The output
+changes from here (no byte-identity with stage 3).
+
+- **`Opt` on object-level Mir**, before `MemLower`: value numbering, store
+  forwarding, loop-invariant code motion and condition propagation see
+  objects. A field read (`GetField`) is a load of its field's class (by
+  offset, as the lowered loads were), a field write (`SetField`,
+  `InitField`) a store a later read of the field takes the value of, an
+  Array's length and elements and a NativeArray's elements loads of their
+  classes; type tests, enum tags and field addresses are pure; an
+  operation that may collect or call (an allocation, a box, a virtual or
+  structural call, an array store or push, a reference element read)
+  writes every class but immutable memory, as a call does. A null test
+  dominated by one of the same value, or by a branch on its comparison
+  with null, goes (`condProp`), and a branch on that comparison is
+  decided. An operation's continuation stays as `MemLower` needs it
+  (`Opt.contOf`: no block merge or jump threading takes it apart; what a
+  pass puts between an operation and its jump starts the continuation).
+- **What a lowering reads that another may read too becomes operands
+  first** (`Opt.operands`), so that it is shared and moved out of loops as
+  the lowered Mir's loads were: a write barrier's nursery bounds (its
+  last two arguments, `OInfo.young`; a store's own, shared with nothing,
+  go back to `MemLower`, which loads them after the store as before), an
+  Array's header (kind, length, storage) and widened index for its element
+  reads and writes and its pushes (`OInfo.ops`), a NativeArray's widened
+  index. `MemLower` reads an Array literal's storage again only after a
+  call that may collect (`MemLower.epoch`), and a structural read's cache
+  test reuses the type index its shape test read.
+- **After `MemLower`**: allocation folding (`Fold`), then `Opt.lowered`:
+  the jump threading of the lowered boolean phis (`a && b`, a type test's
+  result branched on), block merges, copies, dead code; no value
+  numbering, LICM or condition propagation.
+- **Write barriers after optimization**: `MemLower` places them, after
+  `Opt`, for the stores left; a reference stored into an object allocated
+  since the last point where a collection may happen (in the block, or a
+  block entered only from it) gets none (`Opt.freshTargets`,
+  `OInfo.fresh`; the store still publishes what it stores,
+  `MIns.release`). The object must be young: the runtime allocates an
+  object of a quarter of the nursery or less there, and the nursery is now
+  4 KB at least (`RT_MINOR_KB`), so objects of up to 63 slots qualify.
+- **Roots after optimization** (`Frames.hx`): `Roots` still gives the
+  rooted locals their shadow-stack slots on the IR, but after `Opt` (which
+  takes a stored value back where nothing collects in between) a slot
+  store no load can see any more goes (a liveness of the slots over the
+  graph; `HXMC_FRAMES_LIVE=0`: only the slots nothing reads), and a frame
+  left without loads is not pushed at all (its cold sites push their
+  spills on their slow paths); a cold site spills only the references read
+  after it (its continuation's phis, `MemLower.spillNeed`). Functions with
+  a `try` keep their frames.
+- **Inline templates at the object level, built once**: a template's size
+  is counted on its object-level Mir, an operation counting what `MemLower`
+  makes of it outside slow paths (`Inline.size`, `opSize`, fitted on the
+  port's 4,782 templates against their lowering: 1 is judged otherwise at
+  the flat limit of 16, 9 at the loop limit of 48).
+- **No trivial phis made**: `MirWriter` reads a sealed join's
+  predecessors first and makes a phi only where their values differ or a
+  read came back to the join (Braun et al.'s marker); `removeTrivialPhis`
+  is left with the loops' phis.
+- **Measured** (2026-10-22, linux-x86_64, against stage 3, which is
+  main's output; a machine shared with other work):
+
+| | stage 3 | stage 4 |
+| --- | --- | --- |
+| the port: sites replaced | 334 | 333 (`Genswf.build_swf9`'s `GlobalTypePath`: its constructor is no longer inlined, one of the templates judged otherwise) |
+| the tool (the same source): sites replaced | 259 | 259 |
+| the port: write barriers left out (`Opt.freshTargets`), slot stores and frames dropped (`Frames`) | | 1,206 barriers; 1,680 slot stores, 20 frames |
+| the port's binary | 20,611,872 B | 20,427,552 B (-0.9%) |
+| the tool's binary (the same source, built by each) | 18,175,200 B | 17,982,688 B (-1.1%) |
+| mandelbrot, mandelbrot (anonymous objects), binarytrees | 2.671 G, 2.868 G, 8.889 G instructions | 2.179 G, 2.179 G, 8.889 G |
+| the port's self-compile (instructions, callgrind) | 36.930 G | 36.852 G (-0.21%), its HXB the same (HxbCmp, 518 modules) |
+| the port's build, instructions (callgrind) | 102.09 G | 98.64 G (-3.4%) |
+| compile time: the port's build by the tool (one thread, nothing cached; runs interleaved, best and median) | Mir phase 3.94 s (median 4.21 s), whole build 17.02 s user (median 18.36 s); nine runs | Mir phase 3.64 s (median 3.90 s), whole build 17.25 s user (median 17.65 s) |
+
+Where the Mir phase's instructions went (callgrind, the port's build):
+about 21.6 G became 18.9 G (-2.75 G, -13%). `Opt` 7.43 G became 4.80 G
+on object-level Mir and 1.09 G after `MemLower` (`Opt.lowered`, mostly the
+threading's scan and block merges); `MirBuild.objects` 6.80 G became
+6.39 G, its `removeTrivialPhis` 0.61 G 0.16 G; `lower` 4.10 G became
+3.41 G; the inline templates 0.73 G became 0.29 G; `Inline` 0.81 G 0.85
+G; `Escape` with the closure-call pass 1.23 G 1.22 G; `Frames` is new,
+0.35 G; `Fold` 0.42 G 0.44 G; `Sroa` 0.10 G 0.02 G. Outside it, register
+allocation 19.09 G became 17.76 G and instruction selection 5.67 G 5.58 G
+(fewer barriers and frames); `Layout.order` 0.03 G became 0.27 G (it now
+builds the CFG's analyses `Opt` used to leave it).
 
 ## Escape analysis
 
@@ -295,8 +387,8 @@ port's build 525 to 261 ms.
 
 ## Allocation folding
 
-Built (`hxmc/src/hxmc/Fold.hx`, on Mir after `Escape` and `Sroa`, before
-`Opt`; `HXMC_FOLD=0` turns it off): an allocation of a constant size that
+Built (`hxmc/src/hxmc/Fold.hx`, on Mir after `MemLower`, `Escape`, `Sroa` and `Opt`
+having run on object-level Mir; `HXMC_FOLD=0` turns it off): an allocation of a constant size that
 follows another on a straight line, with nothing between them that could
 collect or allocate (no call, no use of `rt_young_ptr`), becomes part of
 it. One test of the room left and one bump for both; the second's header is

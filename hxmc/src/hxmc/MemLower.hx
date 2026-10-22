@@ -19,7 +19,9 @@ using core.ds.VectorTools;
 // stack around the slow paths of cold sites (docs/plans/codegen.md,
 // "Object-level Mir").
 //
-// It runs after the object-level passes (Inline, Escape), on what is left:
+// It runs after the object-level passes (Inline, Escape, Sroa, Opt,
+// Frames), on what is left, its write barriers and spills only where
+// they are still needed:
 // each operation's instructions where it is (its blocks after the
 // function's), the code after an operation that branches in its
 // continuation (OInfo.cont: the phis there, a reference a cold site reloads
@@ -34,7 +36,22 @@ class MemLower extends MirWriter {
 	var repl:Array<Int> = []; // an operation's value -> the value lowered for it (-1: none)
 	var nullBlocks = new Map<Int, MBlock>(); // per handler (OInfo.key): the block calling rt_null_access
 	var slotOf = new Map<Int, Int>(); // AnonTest -> the slot its inline cache gave
-	var arrData = new Map<Int, Int>(); // NewArray -> its storage, read before each element's value
+	var arrData = new Map<Int, Int>(); // NewArray -> its storage, read again after a call (arrEpoch)
+	var arrEpoch = new Map<Int, Int>();
+	// calls during which a collection may move objects, so far (each one
+	// lowered or passed through counts)
+	var epoch = 0;
+
+	override function call(sym:String, args:Vector<Int>, ret:MTy, noReturn = false):Int {
+		var v = super.call(sym, args, ret, noReturn);
+		if (!f.vals[v].keepsFrame) epoch++;
+		return v;
+	}
+
+	override function callInd(fnv:Int, args:Vector<Int>, ret:MTy, ?argTys:Vector<MTy>):Int {
+		epoch++;
+		return super.callInd(fnv, args, ret, argTys);
+	}
 	// the operation being lowered: its static part, its cold site's
 	// references (SSA variables of this pass), the frame's address, its
 	// spill slots
@@ -55,7 +72,7 @@ class MemLower extends MirWriter {
 	public static function branches(op:Op, o:OInfo):Bool {
 		return switch op {
 			case New | NewDyn | TypeTest | AnonGet | AnonCall | ArrayGet | ArraySet | ArrayPush | NewNArray | NArrayDyn | RefStore: true;
-			case SetField: o.t.match(TRef(_)) && !o.flag;
+			case SetField: o.t.match(TRef(_)) && !o.flag && !o.fresh;
 			case AnonStore: o.t.match(TRef(_));
 			case ArrayInit: !o.t.match(TF64 | TI64 | TI32 | TBool);
 			case NArrayInit: o.kind == Abi.AK_PTR;
@@ -77,6 +94,12 @@ class MemLower extends MirWriter {
 		for (b in f.cfg().rpo.copy())
 			lowerBlock(b);
 		f.edited();
+		// (the phis of the continuation of an operation a pass removed: plain ones)
+		for (b in f.blocks)
+			for (i in b.ins) {
+				if (i.op != Phi) break;
+				i.imm = 0;
+			}
 		// the operations' values replaced by their lowering's
 		if (repl.length > 0)
 			for (b in f.blocks)
@@ -132,6 +155,7 @@ class MemLower extends MirWriter {
 			if (!x.isObj()) {
 				x.block = cur;
 				cur.ins.push(x);
+				if (x.op == Call && !x.keepsFrame) epoch++;
 				continue;
 			}
 			var o = op = x.info;
@@ -145,6 +169,10 @@ class MemLower extends MirWriter {
 					spills.push(v);
 				}
 			fr = o.fr ? r(x.args[o.nspill]) : -1;
+			spillNeed = null;
+			cx = x;
+			youngStart = o.young ? r(x.args[x.args.length - 2]) : -1;
+			youngSize = o.young ? r(x.args[x.args.length - 1]) : -1;
 			spillBase = o.spillBase;
 			var c:Null<MBlock> = null, cphis = [], cins = [];
 			if (x.isTerm()) {
@@ -153,18 +181,32 @@ class MemLower extends MirWriter {
 				ended = true;
 			} else if (branches(x.op, o)) {
 				c = o.cont;
-				var j = k < list.length ? list[k] : null;
-				if (c != null && k == list.length - 1 && j.op == Jmp && j.targets[0] == c) {
+				var j = list[list.length - 1];
+				var direct = c != null && k < list.length && j.op == Jmp && j.targets[0] == c;
+				// (what a pass put between the operation and its jump, which
+				// runs after it: the start of its continuation)
+				if (direct)
+					for (q in k...list.length - 1)
+						if (list[q].isObj() && !list[q].dead) direct = false;
+				if (direct) {
 					// its continuation (a cold site's references have their phis
 					// there): entered by the lowering's edges, the code there
 					// after the lowering's
-					k++;
+					for (q in k...list.length - 1)
+						if (!list[q].dead) cins.push(list[q]);
+					k = list.length;
 					c.preds.remove(b);
 					for (i in c.ins)
 						(i.op == Phi ? cphis : cins).push(i);
 					c.ins = [];
 					ended = true;
+					if (cold && o.nspill > 0) {
+						spillNeed = [for (q in 0...o.nspill) q == o.listIndex];
+						for (phi in cphis)
+							if (phi.imm > 0) spillNeed[phi.imm - 1] = true;
+					}
 				} else {
+					if (c != null) throw "MemLower: " + MFunc.opName(x.op) + " apart from its continuation";
 					// (none: one of its own, where the rest of the block goes)
 					c = newBlock();
 					c.sealed = true;
@@ -242,6 +284,11 @@ class MemLower extends MirWriter {
 			case SetField if (!o.t.match(TRef(_)) || o.flag):
 				access(x, Store, Opt.MField, r(x.a), r(x.b), o.loc, o.t);
 				-1;
+			case SetField if (o.fresh):
+				// (into a young object: no barrier, the store publishing what it stores)
+				access(x, Store, Opt.MField, r(x.a), r(x.b), o.loc, o.t);
+				x.release = true;
+				-1;
 			case SetField:
 				storeSlot(r(x.a), o.loc, o.t, r(x.b), o.flag);
 				-1;
@@ -297,9 +344,15 @@ class MemLower extends MirWriter {
 				var k = arrKind(o.t);
 				var v = call("hx_arr_new_n", vector(iconst(k), iconst(o.n)), I64);
 				arrData.set(x.id, loadM(Opt.MHdr, I64, 8, v, 8));
+				arrEpoch.set(x.id, epoch);
 				v;
 			case ArrayInit:
 				var a = r(x.a);
+				// (the storage read again after what may have collected since)
+				if (arrEpoch.get(x.a) != epoch) {
+					arrData.set(x.a, loadM(Opt.MHdr, I64, 8, a, 8));
+					arrEpoch.set(x.a, epoch);
+				}
 				var d = arrData.get(x.a);
 				var v = r(x.b);
 				var i = o.loc;
@@ -309,8 +362,6 @@ class MemLower extends MirWriter {
 					case TBool: storeM(Opt.MElem, 1, d, i, v);
 					case _: setPtr(d, op2(Add, I64, d, lconst32(8 * i)), v, Opt.MElem);
 				}
-				// (the next element's storage is read before its value, as written)
-				if (i + 1 < o.n) arrData.set(x.a, loadM(Opt.MHdr, I64, 8, a, 8));
 				-1;
 			case NewNArray:
 				newNArray(o.kind, r(x.a));
@@ -323,12 +374,13 @@ class MemLower extends MirWriter {
 			case NArrayLength:
 				loadM(Opt.MConst, I32, 4, r(x.a), -4);
 			case NArrayGet:
-				var ix = op1(SExt, I64, r(x.b));
+				var ix = index64(r(x.b));
 				loadM(Opt.MElem, x.ty, o.n, r(x.a), 0, false, ix, o.n);
 			case NArraySet:
 				var a = r(x.a);
-				var ix = op1(SExt, I64, r(x.b));
-				if (o.flag) nativeSetPtr(a, op2(Add, I64, a, op2(Shl, I64, ix, iconst(3))), r(x.c));
+				var ix = index64(r(x.b));
+				if (o.flag) nativeSetPtr
+(a, op2(Add, I64, a, op2(Shl, I64, ix, iconst(3))), r(x.c));
 				else storeM(Opt.MElem, o.n, a, 0, r(x.c), ix, o.n);
 				-1;
 			case NArrayDyn:
@@ -406,9 +458,11 @@ class MemLower extends MirWriter {
 	function setPtr(obj:Int, slot:Int, val:Int, cls = 0, last = true) {
 		var prev = loadM(cls, I64, 8, slot, 0);
 		storeM(cls, 8, slot, 0, val, -1, 1, true);
-		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
-		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
-		var size = op2(Sub, I64, ye, ys);
+		var ys = youngStart, size = youngSize;
+		if (ys < 0) {
+			ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
+			size = op2(Sub, I64, loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0), ys);
+		}
 		var check = newBlock(), slow = newBlock(), done = last ? joinBlock() : newBlock();
 		slow.cold = true;
 		br(cmp(CULt, op2(Sub, I64, val, ys), size), check, done);
@@ -425,25 +479,24 @@ class MemLower extends MirWriter {
 
 	// Fixed arrays often outlive the values written into them. Avoid the
 	// barrier call altogether when the new value is null or outside the nursery.
-	function nativeSetPtr(obj:Int, slot:Int, val:Int, last = true) {
-		var prev = loadM(Opt.MElem, I64, 8, slot, 0);
-		storeM(Opt.MElem, 8, slot, 0, val, -1, 1, true);
-		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
-		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
-		var size = op2(Sub, I64, ye, ys);
-		var check = newBlock(), slow = newBlock(), done = last ? joinBlock() : newBlock();
-		slow.cold = true;
-		br(cmp(CULt, op2(Sub, I64, val, ys), size), check, done);
-		seal(check);
-		cur = check;
-		br(cmp(CULt, op2(Sub, I64, obj, ys), size), done, slow);
-		seal(slow);
-		cur = slow;
-		call("hxmc_barrier_slow", vector(obj, slot, val, prev), Void);
-		jmp(done);
-		seal(done);
-		cur = done;
-	}
+	function nativeSetPtr(obj:Int, slot:Int, val:Int, last = true)
+		setPtr(obj, slot, val, Opt.MElem, last);
+
+	// the nursery's bounds for the operation's write barrier, given by the
+	// optimizer as its last arguments (OInfo.young: loaded where the store is,
+	// shared and moved out of loops as other loads; -1: loaded here)
+	var youngStart = -1;
+	var youngSize = -1;
+
+	var cx:MIns; // the operation being lowered
+
+	// its k-th operand given by the optimizer (OInfo.ops: an array's header)
+	inline function given(k:Int):Int
+		return r(cx.args[op.ops + k]);
+
+	// an index widened (given widened by the optimizer: Opt.operands)
+	inline function index64(v:Int):Int
+		return f.vals[v].ty == I64 ? v : op1(SExt, I64, v);
 
 	function tindex(o:Int):Int
 		return loadM(Opt.MConst, I32, 2, o, Abi.HDR_TINDEX);
@@ -609,11 +662,14 @@ class MemLower extends MirWriter {
 	// spill slots (-1: none; list: whether there is a list, possibly empty,
 	// with extra slots after it)
 	function spillOpen(list:Bool, extra:Int):Int {
-		if (!list || spills.length + extra == 0) return -1;
+		var n = 0;
+		for (k in 0...spills.length)
+			if (spillNeeded(k)) n++;
+		if (!list || n + extra == 0) return -1;
 		if (spillBase >= 0) {
 			var area = op2(Add, I64, fr, lconst32(8 * spillBase));
 			for (k in 0...spills.length)
-				storeM(Opt.MFrame, 8, area, 8 * k, readVar(spills[k], cur));
+				if (spillNeeded(k)) storeM(Opt.MFrame, 8, area, 8 * k, readVar(spills[k], cur));
 			return area;
 		}
 		var sp = tlsLoad("rt_sp");
@@ -621,16 +677,24 @@ class MemLower extends MirWriter {
 		tlsStore("rt_sp", top);
 		raiseHw(top);
 		for (k in 0...spills.length)
-			store(8, sp, 8 * k, readVar(spills[k], cur));
+			if (spillNeeded(k)) store(8, sp, 8 * k, readVar(spills[k], cur));
 		return sp;
 	}
 
 	function spillClose(sp:Int) {
 		if (sp < 0) return;
 		for (k in 0...spills.length)
-			writeVar(spills[k], cur, spillBase >= 0 ? loadM(Opt.MFrame, I64, 8, sp, 8 * k) : load(I64, 8, sp, 8 * k));
+			if (spillNeeded(k)) writeVar(spills[k], cur, spillBase >= 0 ? loadM(Opt.MFrame, I64, 8, sp, 8 * k) : load(I64, 8, sp, 8 * k));
 		if (spillBase < 0) tlsStore("rt_sp", sp);
 	}
+
+	// the cold site's references read after it (its continuation's phis) or
+	// handed to the runtime (an array store's array): the others are not
+	// spilled (a slot left as it is holds null or a valid reference: rt_sp_hw)
+	var spillNeed:Null<Array<Bool>> = null;
+
+	inline function spillNeeded(k:Int):Bool
+		return spillNeed == null || spillNeed[k];
 
 	// ---- arrays
 
@@ -678,9 +742,10 @@ class MemLower extends MirWriter {
 		var k = arrKind(elem);
 		var fast = newBlock(), slow = newBlock(), join = joinBlock(), chk = newBlock();
 		slow.cold = true;
-		var kind = loadM(Opt.MHdr, I32, 4, av, 4);
-		var len = loadM(Opt.MHdr, I32, 4, av, 0);
-		var d = loadM(Opt.MHdr, I64, 8, av, 8);
+		var pre = o.ops >= 0;
+		var kind = pre ? given(0) : loadM(Opt.MHdr, I32, 4, av, 4);
+		var len = pre ? given(1) : loadM(Opt.MHdr, I32, 4, av, 0);
+		var d = pre ? given(2) : loadM(Opt.MHdr, I64, 8, av, 8);
 		br(cmp(CEq, kind, iconst(k)), chk, slow);
 		seal(chk);
 		cur = chk;
@@ -688,7 +753,7 @@ class MemLower extends MirWriter {
 		seal(fast);
 		seal(slow);
 		cur = fast;
-		var ix = op1(SExt, I64, iv);
+		var ix = pre ? given(3) : op1(SExt, I64, iv);
 		if (k == Abi.AK_PTR) {
 			setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv, Opt.MElem, false);
 		} else storeM(Opt.MElem, elemSize(elem), d, 0, vv, ix, elemSize(elem));
@@ -716,13 +781,14 @@ class MemLower extends MirWriter {
 		var k = arrKind(elem);
 		var fast = newBlock(), slow = newBlock(), join = joinBlock(), c1 = newBlock();
 		slow.cold = true;
-		br(cmp(CEq, loadM(Opt.MHdr, I32, 4, av, 4), iconst(k)), c1, slow);
+		var pre = o.ops >= 0;
+		br(cmp(CEq, pre ? given(0) : loadM(Opt.MHdr, I32, 4, av, 4), iconst(k)), c1, slow);
 		seal(c1);
 		cur = c1;
 		// (the storage's length, the capacity, never changes; one without
 		// room is the empty one)
-		var d = loadM(Opt.MHdr, I64, 8, av, 8);
-		var len = loadM(Opt.MHdr, I32, 4, av, 0);
+		var d = pre ? given(1) : loadM(Opt.MHdr, I64, 8, av, 8);
+		var len = pre ? given(2) : loadM(Opt.MHdr, I32, 4, av, 0);
 		br(cmp(CULt, len, loadM(Opt.MConst, I32, 4, d, -4)), fast, slow);
 		seal(fast);
 		seal(slow);
@@ -756,9 +822,10 @@ class MemLower extends MirWriter {
 		slow.cold = true;
 		// the header is read before the checks (every array has one): later
 		// accesses the first dominates reuse it (Opt)
-		var kind = loadM(Opt.MHdr, I32, 4, av, 4);
-		var len = checked ? loadM(Opt.MHdr, I32, 4, av, 0) : -1;
-		var d = loadM(Opt.MHdr, I64, 8, av, 8);
+		var pre = op.ops >= 0;
+		var kind = pre ? given(0) : loadM(Opt.MHdr, I32, 4, av, 4);
+		var len = checked ? (pre ? given(1) : loadM(Opt.MHdr, I32, 4, av, 0)) : -1;
+		var d = pre ? given(checked ? 2 : 1) : loadM(Opt.MHdr, I64, 8, av, 8);
 		if (checked) {
 			var chk = newBlock();
 			br(cmp(CEq, kind, iconst(k)), chk, slow);
@@ -769,7 +836,7 @@ class MemLower extends MirWriter {
 		seal(fast);
 		seal(slow);
 		cur = fast;
-		writeVar(res, cur, loadM(Opt.MElem, t, elemSize(elem), d, 0, false, op1(SExt, I64, iv), elemSize(elem)));
+		writeVar(res, cur, loadM(Opt.MElem, t, elemSize(elem), d, 0, false, pre ? given(checked ? 3 : 2) : op1(SExt, I64, iv), elemSize(elem)));
 		jmp(join);
 		cur = slow;
 		var name = switch k {
@@ -858,13 +925,13 @@ class MemLower extends MirWriter {
 	}
 
 	// rt_ic: the site's cache entry for the object's type (fid: a value)
-	function ic(o:Int, fid:Int):Int {
+	function ic(o:Int, fid:Int, ti = -1):Int {
 		var c = icache();
 		var res = newVar(I64);
 		writeVar(res, cur, c);
 		var miss = newBlock(), join = newBlock();
 		miss.cold = true;
-		br(cmp(CNe, load(I32, 4, c, 0), tindex(o)), miss, join);
+		br(cmp(CNe, load(I32, 4, c, 0), ti >= 0 ? ti : tindex(o)), miss, join);
 		seal(miss);
 		cur = miss;
 		writeVar(res, cur, call("rt_icache_miss", vector(o, fid, c), I64));
@@ -910,10 +977,12 @@ class MemLower extends MirWriter {
 		var mt = MirBuild.mty(t);
 		var res = newVar(mt);
 		var join = joinBlock();
+		var ti = -1; // (the type index the hint's test read, which the cache's test reuses)
 		if (hint != null && hint.tindex >= 0) {
 			var direct = newBlock(), other = newBlock();
 			other.cold = true;
-			br(cmp(CEq, tindex(o), tyConst(hint.tindex)), direct, other);
+			ti = tindex(o);
+			br(cmp(CEq, ti, tyConst(hint.tindex)), direct, other);
 			seal(direct);
 			seal(other);
 			cur = direct;
@@ -923,7 +992,7 @@ class MemLower extends MirWriter {
 			cur = other;
 			coldNew = true;
 		}
-		var c = ic(o, fid);
+		var c = ic(o, fid, ti);
 		var hit = newBlock(), miss = newBlock(), chk = newBlock();
 		miss.cold = true;
 		var slot = load(I32, 4, c, Abi.IC_SLOT);

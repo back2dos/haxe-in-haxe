@@ -1301,6 +1301,9 @@ class Gc {
 		var m = Os.getenv("RT_MINOR_KB");
 		minorFixed = !m.isNull();
 		minorSize = minorFixed ? (Os.atoi(m) : I64) << 10 : (MINOR_MIN : I64);
+		// (4 KB at least: an object of up to 1 KB is always allocated in the
+		// nursery, which generated code assumes: Opt.freshTargets)
+		if (minorSize < 4096) minorSize = 4096;
 		promotionSize = minorSize;
 		mutators = 1;
 		epoch = 1;

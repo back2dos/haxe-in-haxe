@@ -6,7 +6,7 @@ hxmc turns a typed Haxe program into a native executable with its own code
 generator and linker: no C compiler, assembler or system linker at build time.
 
 ```
-typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> object-level Mir --(Inline, Escape)--> --(MemLower)--> Mir (SSA) --(Sroa, Fold, Opt)-->
+typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> object-level Mir --(Inline, Escape, Sroa, Opt, Frames)--> --(MemLower)--> Mir (SSA) --(Fold)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
 ```
@@ -21,7 +21,7 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
 | `UpToDate.hx`, `Fingerprint.hx`, `LowerCache.hx` | rebuilds: the whole build skipped when nothing changed, each module's object reused when its fingerprint is unchanged, lowered bodies reused by the server |
 | `Mir.hx`, `MirWriter.hx`, `MirBuild.hx`, `MemLower.hx` | the SSA IR at two levels: object-level Mir (objects made, their fields, arrays, structural access, type tests, boxes, closures, virtual calls as operations; values typed from the IR) that `MirBuild` makes from the IR, and the memory-level Mir every back end takes, which `MemLower` makes from it (layouts, the nursery's allocation, barriers, inline caches, null tests, the shadow stack around cold sites' slow paths); `MirWriter` writes instructions and SSA variables for both ([plans/codegen.md](plans/codegen.md), "Object-level Mir") |
-| `Cfg.hx`, `Ssa.hx`, `Opt.hx`, `Inline.hx`, `Escape.hx`, `Sroa.hx` | the control-flow analyses (reverse postorder, dominator tree, loop nest; generic over the block type), SSA construction on a finished graph (Escape, Sroa), inlining, escape analysis (allocations that stay in their function replaced by their fields: [plans/codegen.md](plans/codegen.md), "Escape analysis"), scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
+| `Cfg.hx`, `Ssa.hx`, `Opt.hx`, `Inline.hx`, `Escape.hx`, `Sroa.hx`, `Frames.hx` | the control-flow analyses (reverse postorder, dominator tree, loop nest; generic over the block type), SSA construction on a finished graph (Escape, Sroa), inlining, escape analysis (allocations that stay in their function replaced by their fields: [plans/codegen.md](plans/codegen.md), "Escape analysis"), scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code, the write barriers into objects just allocated left out (all on object-level Mir), the shadow-stack slots and frames nothing reads after them dropped |
 | `Lir.hx`, `IselBase.hx`, `Regalloc.hx`, `x64/`, `a64/` | instruction selection (`IselBase`: the walk over the blocks, phi copies on split edges, the switch strategy, thread-local bases, parameters and calls; each architecture its instructions, folding, compares and branches), linear-scan allocation, encoders (checked against llvm-mc: `EncCheck`), emission |
 | `Unwind.hx`, `Dwarf.hx` | unwind tables from the emitters' frame records (`.eh_frame`, `.pdata`/`.xdata`, `__eh_frame`), `-debug`'s DWARF lines (Debugging, below) |
 | `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (`LinkCore.hx`: resolution, dead sections, GOT and import slots, placement and relocations, shared by static ELF, `LinkDyn.hx` dynamic ELF against glibc, PE with imports written directly, Mach-O with an ad-hoc signature; `wasm/LinkWasm.hx` shares the resolution), the runtime-object builder, the program's data |
@@ -236,7 +236,9 @@ what the system layers do the same way over the calls that differ
 (`SysCore.hx` for PosixSys, WinSys and WasiSys; `NetCore.hx` for PosixNet
 and WinNet: the resolver, select's wait with other threads, Boolean
 options), the system chosen by `Mem.os`, which folds while lowering. The nursery's size adapts (unless
-`RT_MINOR_KB` fixes it; Gc.hx): it starts at 4 MB, doubles after a minor
+`RT_MINOR_KB` fixes it, to 4 KB at least: generated code stores into an
+object of up to 1 KB allocated since the last collection point without a
+write barrier, which needs it young; Gc.hx): it starts at 4 MB, doubles after a minor
 collection that promoted more than a 16th of what was allocated since the
 previous one and halves after 8 that promoted less than a 64th, between a
 floor of 4 MB per thread that allocated in the last cycles (at most 32 MB)
