@@ -99,7 +99,6 @@ class Driver {
 	var allocsFolded = 0; // (Fold)
 	var foldWhy = new Map<String, Int>(); // (Fold.whyOn)
 	var escTime = 0.0;
-	var lambdaSyms:Null<Map<String, FuncInfo>>; // the closures' functions that may be inlined, by symbol
 	var escSlow:Array<{name:String, t:Float}> = [];
 	var raInsns = 0;
 	var raFuncs = 0;
@@ -113,9 +112,12 @@ class Driver {
 		var e = templates.get(fn);
 		tlock.release();
 		if (e != null) return e.t;
+		// (object-level Mir, judged on its lowering: a second build)
 		var cb = new MirBuild(prep, abi, fn);
 		cb.icSym = prep.funcSym(fn) + "__ic";
-		var t = try Inline.template(cb, cb.build()) catch (_:Unsupported) null;
+		var lb = new MirBuild(prep, abi, fn);
+		lb.icSym = cb.icSym;
+		var t = try Inline.template(cb, cb.objects(), lb.build()) catch (_:Unsupported) null;
 		tlock.acquire();
 		var e2 = templates.get(fn);
 		if (e2 == null) templates.set(fn, {t: t}) else t = e2.t;
@@ -130,10 +132,11 @@ class Driver {
 			var s0 = haxe.Timer.stamp();
 			var mb = new MirBuild(prep, abi, fn);
 			mb.icSym = name + "__ic";
-			var mf = mb.build();
+			// object-level Mir: inlined, its allocations replaced (Escape), then
+			// lowered (MemLower) for the memory-level passes and the back ends
+			var mf = mb.objects();
 			if (o.opt) {
 				// to a depth (Fingerprint keys callers with their callees' callees)
-				var ic = {sym: mb.icSym, count: mb.icaches};
 				function rounds(todo:Array<{call:MIns, fn:FuncInfo}>) {
 					for (_ in 0...Inline.DEPTH) {
 						if (todo.length == 0) break;
@@ -144,7 +147,7 @@ class Driver {
 							if (t != null && s.fn != fn && t.size <= Inline.maxSize(abi.wasm, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt.")))
 								sites.push({call: s.call, callee: t});
 						}
-						todo = Inline.run(mf, sites, ic);
+						todo = Inline.run(mf, sites);
 					}
 				}
 				rounds(mb.inlineSites);
@@ -152,15 +155,12 @@ class Driver {
 				// function, inlined when it may be and is of this module (its
 				// body and its callees' are in the module's key), so that
 				// Escape may replace the closure
-				if (Escape.on && mf.allocs > 0 && lambdaSyms != null && Escape.part("closures") && Escape.allowed(name)) {
+				if (Escape.on && mf.allocs > 0 && Escape.part("closures") && Escape.allowed(name)) {
 					var todo = [];
-					for (c in Escape.closureCalls(mf)) {
-						var g = lambdaSyms.get(c.sym);
-						if (g != null && g.module == fn.module && MirBuild.inlineCands.exists(g)) todo.push({call: c.call, fn: g});
-					}
+					for (c in Escape.closureCalls(mf, g -> g.module == fn.module && MirBuild.inlineCands.exists(g), prep.funcSym))
+						todo.push(c);
 					rounds(todo);
 				}
-				mb.icaches = ic.count;
 			}
 			if (o.opt && Escape.on) {
 				var es = new Escape(mf);
@@ -174,6 +174,7 @@ class Driver {
 				if (o.stats && te > 0.005) escSlow.push({name: name + " (" + mf.vals.length + " values)", t: te});
 				lock.release();
 			}
+			mb.lower();
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt && Fold.on && mf.allocs > 1) {
 				var fo = new Fold(mf);
@@ -301,29 +302,12 @@ class Driver {
 		for (f in prep.p.funcs)
 			if (Inline.candidate(f)) m.set(f, true);
 		MirBuild.inlineCands = m;
-		lambdaSyms = [for (l in prep.p.lambdas) if (m.exists(l.fn)) prep.funcSym(l.fn) => l.fn];
-		// (enums whose constructors' type indices less their tags agree, as
-		// EEnumTag subtracts: Escape folds the tag of a known constructor)
-		var tags = new Map<String, {en:Int, tag:Int}>();
-		for (k in 0...prep.p.enums.length) {
-			var en = prep.p.enums[k];
-			if (en.ctors.length == 0) continue;
-			var base = en.ctors[0].tindex - en.ctors[0].tag;
-			var ok = true;
-			for (c in en.ctors)
-				if (c.tindex < 0 || c.tindex - c.tag != base || prep.tySym(c.tindex) == null) ok = false;
-			if (ok)
-				for (c in en.ctors)
-					tags.set(prep.tySym(c.tindex), {en: k, tag: c.tag});
-		}
-		Escape.ctorTags = tags;
-		// (the slots of each type that hold references: Escape keeps them on the shadow stack)
-		var refs = new Map<String, haxe.ds.Vector<Bool>>();
+		// (the slots of each type that hold references: Escape keeps a
+		// Mem.alloc object's on the shadow stack)
+		var refs = new Map<Int, haxe.ds.Vector<Bool>>();
 		var types = prep.e.types;
-		for (ti in 0...types.length) {
-			var sym = prep.tySym(ti);
-			refs.set(sym != null ? sym : "#" + ti, core.ds.VectorTools.mapToVector(types[ti].slots, s -> s != null && s.match(TRef(_))));
-		}
+		for (ti in 0...types.length)
+			refs.set(ti, core.ds.VectorTools.mapToVector(types[ti].slots, s -> s != null && s.match(TRef(_))));
 		Escape.refSlots = refs;
 	}
 

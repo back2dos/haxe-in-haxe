@@ -33,22 +33,24 @@ optimization tier for #15's interpreted macros.
   (`Mem.setRefBarrier`) and `NullCheck` (explicit null tests). `MirBuild`
   (`MirWriter`: the instruction helpers and SSA variables, shared) makes
   them; `MemLower` lowers them to the memory-level Mir every back end
-  takes, before any other pass: layouts, the nursery's bump allocation
-  and its stubs, write barriers with the release store (the arm64
-  publication fence, `MIns.release`), inline caches, null tests, the
-  shadow stack around cold sites' slow paths.
-- **Byte-identical**: every target's output is what it was. The lowering
-  writes what the single pass wrote: its blocks and frame slots are
-  numbered and ordered among `MirBuild`'s as that pass made them
-  (`OInfo.at`, `slots`), and the code after an operation whose lowering
-  branches goes in a continuation block (`OInfo.cont`) that gets a phi for
-  each variable read there, as the lowering's last block did: the
-  instruction helpers' rules look at their operands (a phi is not a
-  constant), and so do the null tests (a phi is not known to be fresh). A
-  cold site's references are its GC point's arguments, and their phis in
-  the continuation get, per edge, the value that path has (the reloaded
-  one on the slow path). Value numbers do not reach the output, block
-  numbers, block order, frame slots and phi order do.
+  takes, after the object-level passes (stage 3): layouts, the nursery's
+  bump allocation and its stubs, write barriers with the release store
+  (the arm64 publication fence, `MIns.release`), inline caches, null
+  tests, the shadow stack around cold sites' slow paths. An operation whose
+  lowering branches and meets again ends its block: the code after it is
+  in its continuation (`OInfo.cont`), the lowering's last block, where a
+  cold site's references get their phis (one value per edge from
+  `MemLower`, the reloaded one on the slow path).
+- **Byte-identical at stage 2** ([#41](https://github.com/benmerckx/hxmc/pull/41)):
+  every target's output was what it had been, the lowering run right after
+  `MirBuild`. It wrote what the single pass wrote: its blocks and frame slots were
+  numbered and ordered among `MirBuild`'s as that pass made them, and the
+  continuation got a phi for each variable read there, as the lowering's
+  last block did: the instruction helpers' rules look at their operands (a
+  phi is not a constant), and so do the null tests (a phi is not known to
+  be fresh). Value numbers do not reach the output; block numbers, block
+  order, frame slots and phi order do. Stage 3 dropped that reproduction
+  (one implementation: the lowering runs after inlining now).
 - **Cost**: the port's build by the tool, one thread, nothing cached
   (2026-10-22, a machine shared with other work, the best of three): the
   Mir phase (building, lowering, inlining, escape analysis, the
@@ -99,24 +101,69 @@ optimization tier for #15's interpreted macros.
   The IR's casts are unchecked: no operation (a value keeps the type of its
   first definition).
 
-### Next: stage 3
+### Built: stage 3
 
-Escape analysis needs the inlined constructors, so stage 3 moves `Inline`
-to the object level with it (part of stage 4 brought forward): templates
-become object-level (their size still counted on their lowering, so that
-inlining decides as before), `MemLower` runs after `Escape`, and an
-inlined copy's operations are lowered in the caller (its inline caches the
-caller's; its null tests a null block of their own, as a copy has today).
-`Escape` then finds allocations as `New`, fields as
-`InitField`/`GetField`/`SetField` (no offsets, no barriers to see past),
-type tests as `TypeTest`/`EnumTag`, a cold site's references as its GC
-point's arguments and continuation phis; what stays memory-level until
-stage 4 is the rooted locals' slots ("cells"). Then its shape matching goes
-(the allocation's phi of fast and slow paths, constant offsets, the write
-barrier, the spill areas). The lowering's reproduction of the single
-pass's numbering (`OInfo.at`, `slots`) is only needed while the output must
-not change; after stage 3 the blocks it makes simply follow their
-operation's block.
+The pipeline: `MirBuild` (object-level, `objects`), `Inline`, the closures
+called where they are made, `Escape`, then `MemLower` (`lower`), `Sroa`,
+`Fold`, `Opt` and the back ends.
+
+- **`Inline` at the object level** (part of stage 4 brought forward:
+  escape analysis needs the inlined constructors): templates are
+  object-level, their size still counted on their lowering (a second
+  build), so inlining decides as it did; an inlined copy's operations are
+  lowered in the caller (its inline caches the caller's, its null tests a
+  block of their own, as a copy's were), and a copy of a function that
+  enters a safe region makes the caller's calls stop keeping its frame
+  (`MFunc.blocksHere`, which `MemLower`'s calls follow too).
+- **`Escape` at the object level** ("Escape analysis", below): an
+  allocation is `New` or `Box`, a field `GetField`/`SetField`/`InitField`,
+  a type test `TypeTest`/`EnumTag`; a cold site's references are its GC
+  point's arguments and its continuation's phis. Its shape matching is
+  gone (the allocation's phi of fast and slow paths, constant offsets into
+  the header, the write barrier's tests, the spill areas, the enum tag
+  table). What stays memory-level until stage 4 is the shadow-stack frame
+  and the rooted locals' slots ("cells"), and `Mem.alloc`'s objects, whose
+  words the runtime's Haxe code reads and writes with `hxmc.unsafe`.
+  Anonymous objects made in the function now have their structural reads
+  and writes folded (their fields are known), and a collapse of trivial
+  phis that missed a phi whose operand had collapsed first is fixed.
+- **`MemLower` after them**: its blocks follow the function's, its frame
+  slots the function's; an operation an object-level pass made without a
+  continuation gets one.
+- **Measured** (2026-10-22, linux-x86_64, against stage 2, which is main's
+  output; a machine shared with other work):
+
+| | stage 2 | stage 3 |
+| --- | --- | --- |
+| the port: sites replaced | 285 | 334 (no function replaces fewer) |
+| the tool: sites replaced | 222 | 253 (no function replaces fewer) |
+| `EscapeObjects`, `EscapeEnums`, `EscapeClosures` | 14, 10, 7 | 15, 14, 8 |
+| the port's binary | 20,620,064 B | 20,611,872 B |
+| the tool's binary | 18,174,704 B | 18,166,512 B |
+| type tests folded (`HXMC_STATS`; stage 2 counted each type index load and null comparison of the lowering, stage 3 each object-level test) | port 576, tool 272 | port 561, tool 209 |
+| mandelbrot, mandelbrot (anonymous objects), binarytrees | 2.671 G, 2.868 G, 8.889 G instructions | the same |
+| the port's self-compile (instructions, callgrind) | 36.955 G | 36.930 G (-0.07%), its HXB the same |
+| compile time: the port's build by the tool (one thread, nothing cached; seven runs interleaved, best and median) | Mir phase 3.90 s (median 4.17 s), whole build 17.84 s user | Mir phase 3.67 s (median 4.14 s), whole build 17.54 s user; `Escape` itself 525 to 261 ms |
+| the port's build, instructions (callgrind) | 102.22 G | 102.05 G (-0.17%) |
+
+Where the Mir phase's instructions went (callgrind, the port's build;
+about 21.7 G in all, so 1 G is about 0.19 s of it): `MirBuild` 8.98 G
+became `objects` 6.71 G and `lower` 4.01 G (`MemLower` 3.60 G); `Escape`
+2.85 G (with the closure-call pass) became 1.25 G; `Inline` 1.16 G became
+0.82 G; the inline templates 0.42 G became 0.77 G (each built twice, its
+size counted on its lowering); `Opt` 7.52 G became 7.60 G.
+
+What stage 4 is expected to take off the Mir phase, from those numbers:
+`Opt`'s value numbering, loop-invariant code motion and condition
+propagation on object-level Mir (about half the instructions of the
+lowered Mir, 2.05 M against 3.99 M on the port), with only `Fold` and dead
+code elimination after `MemLower`: about 2.5 G (0.45 s), and `MemLower`
+then lowers less; the byte-identity scaffolding left (a phi per variable
+read across blocks, removed again by `removeTrivialPhis`, 0.57 G): about
+0.3 G; templates judged on their object-level size, one build each:
+0.35 G; fewer barriers and roots after optimization: in register
+allocation and instruction selection rather than the Mir phase, as many as
+the sites removed. `Escape`'s shape matching is already gone (above).
 
 ## Escape analysis
 
@@ -131,21 +178,24 @@ another thread can see them.
 
 ### Built: phase 1, intraprocedural scalar replacement
 
-`hxmc/src/hxmc/Escape.hx`, on Mir after inlining and before `Sroa` and `Opt`
-(`HXMC_ESCAPE=0` turns it off; `HXMC_ESCAPE_LOG=1` says, per allocation
-analyzed, whether it is replaced and else why not). What it replaces:
+`hxmc/src/hxmc/Escape.hx`, on object-level Mir after inlining and before
+`MemLower` ("Object-level Mir", above; `HXMC_ESCAPE=0` turns it off;
+`HXMC_ESCAPE_LOG=1` says, per allocation analyzed, whether it is replaced
+and else why not; `HXMC_ESCAPE_DUMP=<symbol>` prints a function's Mir
+before and after). What it replaces:
 
-- objects allocated inline (`New`, `MemLower.alloc`: class instances,
-  anonymous objects, enum values, closures, the boxes of captured
-  variables), recognized by the allocation's shape (the phi of the fast
-  path's address and the slow path's stub call), and the runtime's boxing of
-  an Int, Float or Int64 into a Dynamic (`hx_box_int`, `hx_box_float`,
-  `hx_box_i64`, read back by `hx_unbox_*`);
-- when every use of every alias is a field read or write at a constant
-  offset (the header's type index included), a null test, the write
-  barrier, a store into a shadow-stack slot or cold-site spill area, or an
-  unboxing. Aliases are the value, its copies, phis of aliases only, and
-  what is loaded back from such slots ("cells": the store reaching each
+- allocations (`New`: class instances, anonymous objects, enum values,
+  closures, the boxes of captured variables, `Mem.alloc`'s objects of the
+  runtime) and boxings of an Int, Float or Int64 into a Dynamic (`Box`,
+  read back by `Unbox`);
+- when every use of every alias is a field read or write (`GetField`,
+  `SetField`, `InitField`; for `Mem.alloc`'s objects `hxmc.unsafe`'s loads
+  and stores at constant offsets and `Mem.setRefBarrier`), a null test
+  (`NullCheck`, a comparison), a cold site's GC point keeping it on the
+  shadow stack across its slow path, a store into a shadow-stack slot, or an
+  unboxing. Aliases are the value, its copies, phis of aliases only (a cold
+  site's continuation phi among them: the same object after the GC point),
+  and what is loaded back from such slots ("cells": the store reaching each
   load is found by SSA construction over the slot; a collection moves an
   object but keeps what the slot refers to, and a replaced object is never
   made);
@@ -156,12 +206,12 @@ analyzed, whether it is replaced and else why not). What it replaces:
   phis of one block compared coinductively); an object's allocation counts
   from its first use, so its constructor's arguments may read the previous
   instance;
-- fields holding references (the type's pointer map, from `Facts`) are not
-  SSA values, which a collection would leave pointing at an object's old
-  place, but new slots of the function's shadow-stack frame (a function
-  without a frame keeps such objects); the others are SSA values, phis
-  inserted as `Sroa` does;
-- closures called where they are made: an indirect call through a closure
+- fields holding references (their types; for `Mem.alloc`'s objects the
+  type's pointer map, from `Facts`) are not SSA values, which a collection
+  would leave pointing at an object's old place, but new slots of the
+  function's shadow-stack frame (a function without a frame keeps such
+  objects); the others are SSA values, phis inserted as `Sroa` does;
+- closures called where they are made: a `ClosureCall` through a closure
   whose function is known (made in the function, or loaded from a slot that
   only holds closures of that function) becomes a direct call, inlined when
   the closure does not certainly escape otherwise and the function is of the
@@ -172,10 +222,13 @@ analyzed, whether it is replaced and else why not). What it replaces:
   object stored into another);
 - frames left holding only nulls are not pushed.
 
-Before that, the type index of any alias is known, escaping or not: inline
-caches' tests, enum switches (`Escape.ctorTags`: a constructor's tag; the
-enum tag is in `ENewEnum`'s fingerprint) and null tests on it fold, so their
-slow paths, which take the object, go first. A screen keeps the analysis to
+Before that, what is known of any alias folds, escaping or not: its type
+tests (`TypeTest`; `EnumTag`, the constructor's tag, which is in
+`ENewEnum`'s fingerprint), its null tests, and an anonymous object's
+structural reads and writes (`AnonGet`, `AnonTest`: its fields are known,
+a field of the access's kind is read or written in place, the others take
+the slow path), so the slow paths, which take the object, go first. A
+screen keeps the analysis to
 the allocations that may stay (a use outside slow paths that certainly
 escapes: a call, a return, a heap store, a phi with a constant, parameter or
 call result) and folds the tests of the others on the spot; `f.allocs`
@@ -211,6 +264,12 @@ another object's field (500), a constructor that is not inlined
 call (290), a return (400), layouts that differ at a phi (260), a
 structural field write (`hx_anon_set_slow`, 54), not the latest instance (50).
 
+On object-level Mir (stage 3 of "Object-level Mir", 2026-10-22, against
+the memory-level pass it replaced): the port 285 to 334 sites (no function
+replaces fewer), the tool 222 to 253; mandelbrot, mandelbrot with anonymous
+objects and binarytrees the same instructions; the pass's own time on the
+port's build 525 to 261 ms.
+
 ### Left
 
 - Stack allocation (phase 2): objects passed to calls that do not keep
@@ -228,8 +287,9 @@ structural field write (`hx_anon_set_slow`, 54), not the latest instance (50).
 - Virtual calls on an object of known type: the type index is known, the
   method table could be read at compile time (devirtualization), then the
   method inlined.
-- Structural field writes: `SAnonSet` has no shape hint (`anonGet` has one),
-  so writes to an anonymous object go through an inline cache and escape.
+- Structural field writes to an object of an unknown shape: `SAnonSet` has
+  no shape hint (`anonGet` has one), so they go through an inline cache (on
+  an anonymous object made in the function, they fold).
 - The analysis' cost (the screen still lets through many allocations that
   escape: phis with loaded values, stores of reloaded values).
 

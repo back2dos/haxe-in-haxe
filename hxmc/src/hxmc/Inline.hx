@@ -6,16 +6,18 @@ import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
 
-// Inlining of small functions into their callers, on Mir (after MirBuild,
-// before Opt): the callee's blocks are copied in place of the call, its
-// parameters replaced by the arguments, its returns by jumps to the rest of
-// the caller's block (a phi joins the results).
+// Inlining of small functions into their callers, on object-level Mir (after
+// MirBuild, before Escape and MemLower): the callee's blocks are copied in
+// place of the call, its parameters replaced by the arguments, its returns
+// by jumps to the rest of the caller's block (a phi joins the results); the
+// copy's operations are lowered in the caller (its inline caches the
+// caller's).
 //
 // Candidates are decided on hxmc's IR (hxmc.ir) (`candidate`: no try, a small body),
 // so that Fingerprint can put a candidate's body into the key of every
-// module calling it; the final decision is on the callee's Mir: few
-// instructions on its fast path (its inline caches become the caller's; a
-// shadow-stack frame stays the copy's own: it pushes and pops it).
+// module calling it; the final decision is on the callee's lowered Mir: few
+// instructions on its fast path (a shadow-stack frame stays the copy's own:
+// it pushes and pops it).
 class Inline {
 	public static inline var MAX_IR = 40; // IR nodes of a candidate
 	// instructions outside slow paths: of a callee inlined anywhere, at a
@@ -70,18 +72,19 @@ class Inline {
 		return true;
 	}
 
-	// the callee's Mir when it can be inlined (built once per caller module)
-	public static function template(mb:MirBuild, mf:MFunc):Null<Template> {
+	// the callee's object-level Mir (mb's) when it can be inlined, judged on
+	// its lowering (built once per caller module)
+	public static function template(mb:MirBuild, mf:MFunc, lowered:MFunc):Null<Template> {
 		// (a callee with a shadow-stack frame keeps it: its copy pushes and pops it)
 		var n = 0;
-		for (b in mf.blocks)
+		for (b in lowered.blocks)
 			if (!b.cold)
 				for (i in b.ins) {
 					if (i.op == Call && i.returnsTwice) return null;
 					// (constants and addresses fold into their users)
 					if (i.op != Const && i.op != ConstF && i.op != SymAddr && i.op != StackAddr && i.op != Param) n++;
 				}
-		return n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n, icSym: mb.icSym, icaches: mb.icaches} : null;
+		return n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n} : null;
 	}
 
 	// drops the blocks no longer reachable (after a callee that never returns)
@@ -126,7 +129,7 @@ class Inline {
 
 	// replaces each call (in f) by a copy of its callee's template
 	// (returns the calls to candidates in the copies: inlined in turn, to a depth)
-	public static function run(f:MFunc, sites:Array<{call:MIns, callee:Template}>, ic:IcAlloc):Array<{call:MIns, fn:FuncInfo}> {
+	public static function run(f:MFunc, sites:Array<{call:MIns, callee:Template}>):Array<{call:MIns, fn:FuncInfo}> {
 		var more = [];
 		if (sites.length == 0) return more;
 		f.edited();
@@ -140,6 +143,9 @@ class Inline {
 			var k = b.ins.indexOf(c);
 			if (k < 0) continue;
 			f.allocs += g.allocs;
+			// (a copy of a function that enters a safe region: the caller's
+			// calls no longer keep its frame, MIns.keepsFrame, MemLower's too)
+			if (g.blocksHere) f.blocksHere = true;
 			// the rest of the block after the call
 			var tail = new MBlock(nextBlock++);
 			tail.cold = b.cold;
@@ -172,8 +178,6 @@ class Inline {
 				f.blocks.push(nb);
 			}
 			var slotBase = f.slots.length;
-			var icBase = ic.count;
-			ic.count += site.callee.icaches;
 			for (s in g.slots)
 				f.slots.push(s);
 			// values first (operands may refer forward: phis)
@@ -204,6 +208,12 @@ class Inline {
 					x.imm = i.imm;
 					x.imm2 = i.imm2;
 					x.vty = i.vty;
+					if (i.info != null) {
+						x.info = i.info.copy(i.info.cont == null ? null : bmap[i.info.cont.id]);
+						// (a copy's null tests share a block of their own, as a
+						// callee's: a try around the call keeps it inside)
+						if (i.op == NullCheck && x.info.key == -1) x.info.key = -2 - c.id;
+					}
 					// (the call's position: the copy is the caller's code, its
 					// frame the caller's, which a stack names with the call's
 					// line, as DWARF does without inlined subroutines;
@@ -229,10 +239,6 @@ class Inline {
 					x.args = i.args.map(v -> m(v));
 					x.targets = i.targets.map(t -> bmap[t.id]);
 					if (i.op == StackAddr) x.imm = i.imm + slotBase;
-					if (i.op == SymAddr && i.sym == site.callee.icSym) {
-						x.sym = ic.sym;
-						x.imm = i.imm + Abi.IC_SIZE * icBase;
-					}
 					x.block = nb;
 					if (i.op == Ret) {
 						// a jump to the rest of the caller's block
@@ -302,7 +308,5 @@ class Inline {
 	}
 }
 
-typedef Template = {mf:MFunc, sites:Array<{call:MIns, fn:FuncInfo}>, size:Int, icSym:String, icaches:Int};
+typedef Template = {mf:MFunc, sites:Array<{call:MIns, fn:FuncInfo}>, size:Int};
 
-// the caller's inline caches: copies of a callee's get their own entries
-typedef IcAlloc = {sym:String, count:Int};

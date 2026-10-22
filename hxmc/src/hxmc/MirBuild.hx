@@ -13,7 +13,8 @@ using core.ds.VectorTools;
 // function to Mir: object-level Mir (docs/plans/codegen.md, "Object-level
 // Mir": objects made, their fields, arrays, structural access, type tests,
 // boxes, closures and virtual calls as operations, values typed: MIns.vty),
-// which MemLower turns into memory-level Mir right away (build). Here:
+// (objects), which the object-level passes (Inline, Escape) work on and
+// MemLower turns into memory-level Mir (lower; build: both at once). Here:
 // - reference locals that Roots puts in shadow-stack slots live in memory
 //   (fr[k]); in functions with a try block the locals a handler can see
 //   live in memory, so values survive the second return of setjmp; the other
@@ -107,23 +108,19 @@ class MirBuild extends MirWriter {
 
 	// ---- object-level operations
 
-	// an object-level operation (its static part: o) where control is: it
-	// records the blocks and frame slots made so far (OInfo.at, slots). One
-	// whose lowering branches and meets again (MemLower.branches) ends its
-	// block: the code after it is in a block of its own (OInfo.cont), which
-	// gets a phi for each variable read there, as the lowering's last block
-	// would (the instruction helpers' rules look at what they are given: a
-	// phi is not a constant)
+	// an object-level operation (its static part: o) where control is. A
+	// cold site's GC point with references across it ends its block: the
+	// code after it is in a block of its own (OInfo.cont), its lowering's
+	// last block, where the references get their phis (MemLower makes the
+	// other operations' last blocks)
 	function obj(op:Op, ty:MTy, o:OInfo, a = -1, b = -1, c = -1):MIns {
 		var i = mk(op, ty);
 		i.a = a;
 		i.b = b;
 		i.c = c;
-		o.at = f.blocks.length;
-		o.slots = f.slots.length;
 		i.info = o;
 		add(i);
-		if (MemLower.branches(op, o)) {
+		if (o.nspill > 0 && MemLower.branches(op, o)) {
 			var k = newBlock();
 			jmp(k);
 			seal(k);
@@ -137,12 +134,14 @@ class MirBuild extends MirWriter {
 	// the continuations of operations (OInfo.cont), by block id
 	var conts = new Map<Int, OInfo>();
 
-	override function merges(b:MBlock):Bool
-		return conts.exists(b.id);
+	// a reference a cold site's slow path reads back gets a phi in its
+	// continuation, which keeps the index of that reference (MIns.imm, from
+	// 1: MemLower makes its arguments, one per edge; it is no trivial phi)
+	override function merges(v:Int, b:MBlock):Bool {
+		var o = conts.get(b.id);
+		return o != null && o.relocs != null && o.relocs.exists(v);
+	}
 
-	// a phi of a continuation: of a reference a cold site's slow path reads
-	// back, the index of that reference (MIns.imm, from 1: MemLower makes
-	// its arguments)
 	override function phiMade(v:Int, b:MBlock, phi:MIns) {
 		var o = conts.get(b.id);
 		if (o != null && o.relocs != null && o.relocs.exists(v)) phi.imm = o.relocs.get(v) + 1;
@@ -331,23 +330,37 @@ class MirBuild extends MirWriter {
 		body(mb, ps);
 		for (b in f.blocks)
 			if (!b.sealed) mb.seal(b);
+		mb.tidy();
 		mb.lower();
+		return f;
+	}
+
+	// the function's memory-level Mir: object-level (objects), then lowered
+	public function build():MFunc {
+		objects();
+		lower();
 		return f;
 	}
 
 	// the function's object-level Mir lowered to memory-level Mir
 	// (MemLower), its unreachable blocks dropped, its trivial phis replaced
-	function lower() {
+	public function lower() {
 		var ml = new MemLower(p, abi, fn, f, icSym);
 		ml.run();
 		icaches = ml.icaches;
+		tidy();
+	}
+
+	// unreachable blocks dropped, trivial phis replaced
+	function tidy() {
 		prune();
 		removeTrivialPhis();
 	}
 
 	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
 
-	public function build():MFunc {
+	// the function's object-level Mir (tidy)
+	public function objects():MFunc {
 		f = new MFunc(p.funcSym(fn));
 		f.blocksHere = fn.blocksHere;
 		// (a parameter of type Void, a T->Void callback of a C<Void>: an i32, as a Void
@@ -445,7 +458,7 @@ class MirBuild extends MirWriter {
 		}
 		for (b in f.blocks)
 			if (!b.sealed) seal(b);
-		lower();
+		tidy();
 		return f;
 	}
 
@@ -515,7 +528,8 @@ class MirBuild extends MirWriter {
 		if (nslots > 0) tlsStore("rt_sp", fr);
 	}
 
-	// replaces phis whose operands are one value (or the phi itself), until none is left
+	// replaces phis whose operands are one value (or the phi itself), until
+	// none is left (but a reference's phi in a continuation: OInfo.relocs)
 	function removeTrivialPhis() {
 		var repl:Null<haxe.ds.Vector<Int>> = null; // phi -> its value (-1: none)
 		inline function find(v:Int):Int {
@@ -529,7 +543,7 @@ class MirBuild extends MirWriter {
 			changed = false;
 			for (b in f.blocks)
 				for (i in b.ins) {
-					if (i.op != Phi || i.dead) continue;
+					if (i.op != Phi || i.dead || i.imm > 0) continue;
 					var same = -1;
 					var trivial = true;
 					for (a in i.args) {
