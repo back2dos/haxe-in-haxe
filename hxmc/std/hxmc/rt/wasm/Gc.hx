@@ -138,7 +138,7 @@ class Gc {
 		cur = -1;
 		newState = 1;
 		// the shadow stack: RT_STACK_MB (4 MB), its end checked where a frame
-		// first goes deeper (MirBuild.raiseHw: rt_stack_overflow); a browser's
+		// first goes deeper (MirWriter.raiseHw: rt_stack_overflow); a browser's
 		// wasm stack (about 1 MB) runs out well before (node's wasi.mjs sets it
 		// from --stack-size: as large as node's stack)
 		var smb = Wasi.envInt("RT_STACK_MB", STACK_MB);

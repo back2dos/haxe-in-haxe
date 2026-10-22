@@ -234,7 +234,7 @@ class FuncInfo {
 	public var collects:Bool = false;
 	public var cSymbol:Null<String>; // @:hxmc.export: the symbol (the runtime's C code calls it)
 	// (Facts) of the runtime's exports: the families hxmc.ir.RuntimeSymbols
-	// lists it for, which MirBuild.call checks; -1: not the runtime's
+	// lists it for, which MirWriter.call checks; -1: not the runtime's
 	public var rtFamilies:Int = -1;
 	// the Haxe module the function comes from (dot path): hxmc compiles the
 	// functions of a module into one object
@@ -492,4 +492,45 @@ class Ir {
 
 	public static function isScalar(t:Ty):Bool
 		return t == TI32 || t == TBool || t == TF64 || t == TI64;
+
+	// the type of an expression's value (what MirBuild gives the Mir value
+	// it makes: MIns.vty)
+	public static function typeOf(e:Ex):Ty
+		return switch e {
+			case EInt(_): TI32;
+			case EF64(_): TF64;
+			case EStr(_): TRef(RStr);
+			case ENull(t) | EGlobal(_, t) | EUnbox(t, _) | EAnonGet(_, t, _, _) | ECast(t, _) | EBoxGet(t, _) | ECallHost(_, _, t): t;
+			case ELocal(l): l.ty;
+			case EBin(op, _, _):
+				switch op {
+					case Add | Sub | Mul | Mod | And | Or | Xor | Shl | Shr | UShr: TI32;
+					case FAdd | FSub | FMul | FDiv | FMod: TF64;
+					case LAdd | LSub | LMul | LDiv | LMod | LAnd | LOr | LXor | LShl | LShr | LUShr: TI64;
+					case _: TBool;
+				}
+			case ENot(_) | EInstOf(_): TBool;
+			case EConv(op, _):
+				switch op {
+					case I2F | FNeg | L2F: TF64;
+					case F2I | L2I: TI32;
+					case I2L | F2L | LNeg: TI64;
+				}
+			case EBox(_): TRef(RAny);
+			case EField(c, idx, _) | EFieldAddr(c, idx, _): c.fields[idx].ty;
+			case EEnumTag(_): TI32;
+			case EEnumParam(c, idx, _): c.params[idx];
+			case EArrLen(_): TI32;
+			case EArrGet(elem, _, _) | EArrGetU(elem, _, _): elem;
+			case ECapture(l, idx, _): l.captures[idx].ty;
+			case EType(_): TRef(RType);
+			case ECall(g, _): g.ret;
+			case ECallDispatch(_, s, _) | ECallClos(s, _, _) | ECallAnon(_, s, _, _): s.ret;
+			case ENewObj(c): TRef(RObj(c));
+			case ENewEnum(c, _): TRef(RCtor(c));
+			case ENewArr(elem, _): TRef(RArr(elem));
+			case ENewClos(l, _): TRef(RClos(l.sig));
+			case ENewBox(t, _): TRef(RBox(t));
+			case ENewAnon(_): TRef(RAnon);
+		}
 }

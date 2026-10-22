@@ -1321,7 +1321,7 @@ class WasmGen {
 		}
 	}
 
-	// MirBuild.special: atomics as plain accesses (one thread), float32 conversions
+	// MirWriter.special: atomics as plain accesses (one thread), float32 conversions
 	function special(i:MIns, name:String) {
 		inline function at() {
 			valueAs(i.args[0], I32);

@@ -333,7 +333,7 @@ class Isel implements hxmc.Target.Selector {
 			// (Android's TLSDESC: the module's block from hxmc_tls_base too, LinkDyn)
 			var pendingBase = bi == 0 && usesTls && (abi.tls == MachoTlv || abi.tls == Desc);
 			// after the last parameter (the call clobbers their registers;
-			// constants such as MirBuild.zeroAt's may come before them)
+			// constants such as MirWriter.zeroAt's may come before them)
 			var lastParam = -1;
 			if (pendingBase)
 				for (k in 0...b.ins.length)
@@ -734,6 +734,10 @@ class Isel implements hxmc.Target.Selector {
 					x.cond = o;
 					x.size = size;
 				}
+			case NullCheck | New | NewDyn | InitField | GetField | SetField | FieldAddr | EnumTag | TypeTest | Box | Unbox | VirtualCall | ClosureCall | AnonGet |
+				AnonTest | AnonStore | AnonCall | ArrayLength | ArrayGet | ArraySet | ArrayPush | NewArray | ArrayInit | NewNArray | NArrayInit | NArrayLength |
+				NArrayGet | NArraySet | NArrayDyn | RefStore:
+				throw "isel: " + MFunc.opName(i.op) + " is object-level (MemLower lowers it first)";
 			case Rotr:
 				var x = emit(SHIFTI);
 				x.d = reg(i.id);
@@ -763,7 +767,7 @@ class Isel implements hxmc.Target.Selector {
 				x.s1 = use(i.a);
 				x.cond = i.op == FAbs ? 1 : i.op == FNeg ? 2 : 3;
 			case Cmp:
-				if (useCount[i.id] == 0) return; // unused (MirBuild.cmp folded it)
+				if (useCount[i.id] == 0) return; // unused (MirWriter.cmp folded it)
 				if (fusable(i, b)) return;
 				var cc = compare(i.imm, i.a, i.b);
 				var x = emit(CSET);
@@ -985,7 +989,7 @@ class Isel implements hxmc.Target.Selector {
 		jmp(def);
 	}
 
-	// the inline expansions of MirBuild.special: atomics (sequentially
+	// the inline expansions of MirWriter.special: atomics (sequentially
 	// consistent: ldar, stlr, ldaxr/stlxr loops) and float32 conversions
 	function special(i:MIns) {
 		var name = i.sym.substr(hxmc.MirBuild.SPECIAL.length);
