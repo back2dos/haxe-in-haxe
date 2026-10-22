@@ -133,6 +133,11 @@ class MIns {
 	public var cRet:Vector<CAbi.CPart> = vector();
 	public var dead = false;
 	public var mem = 0; // Load/Store: the memory class (Opt.MOther...)
+	// Store of a reference into the heap or a static (MirBuild.setPtr): it
+	// publishes what it stores, so the thread's stores before it (the
+	// initialising stores of the object) are seen first by a thread that
+	// reads the reference (arm64: dmb ishst before it; x86-64 orders stores)
+	public var release = false;
 	public var pos = 0; // (-debug) the source position (SrcPos; 0: none)
 
 	public function new(op, ty) {

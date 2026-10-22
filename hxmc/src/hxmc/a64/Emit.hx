@@ -462,7 +462,7 @@ class Emit implements hxmc.Target.Emitter {
 				}
 			case KEEP:
 			case DMB:
-				a.dmbIsh();
+				if (i.cond == 1) a.dmbIshst() else a.dmbIsh();
 			case FMOVSW:
 				a.fmovSFromW(i.d, i.s1);
 			case FMOVWS:

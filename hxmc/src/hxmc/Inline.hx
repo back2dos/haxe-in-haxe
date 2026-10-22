@@ -242,6 +242,7 @@ class Inline {
 					x.signed = i.signed;
 					x.sym = i.sym;
 					x.mem = i.mem;
+					x.release = i.release;
 					x.noReturn = i.noReturn;
 					x.returnsTwice = i.returnsTwice;
 					x.keepsFrame = i.keepsFrame && !f.blocksHere;
