@@ -237,25 +237,25 @@ changes from here (no byte-identity with stage 3).
 | --- | --- | --- |
 | the port: sites replaced | 334 | 333 (`Genswf.build_swf9`'s `GlobalTypePath`: its constructor is no longer inlined, one of the templates judged otherwise) |
 | the tool (the same source): sites replaced | 259 | 259 |
-| write barriers left out, slot stores and frames dropped (the port) | | barriers of fresh objects: see the binary; 1,680 root stores, 20 frames |
+| the port: write barriers left out (`Opt.freshTargets`), slot stores and frames dropped (`Frames`) | | 1,206 barriers; 1,680 slot stores, 20 frames |
 | the port's binary | 20,611,872 B | 20,427,552 B (-0.9%) |
-| the tool's binary (the same source, built by each) | 18,205,352 B | 18,012,840 B (-1.1%) |
+| the tool's binary (the same source, built by each) | 18,175,200 B | 17,982,688 B (-1.1%) |
 | mandelbrot, mandelbrot (anonymous objects), binarytrees | 2.671 G, 2.868 G, 8.889 G instructions | 2.179 G, 2.179 G, 8.889 G |
-| the port's self-compile (instructions, callgrind) | 36.933 G | 36.852 G (-0.22%), its HXB the same (HxbCmp, 518 modules) |
-| the port's build, instructions (callgrind) | 102.05 G | 98.39 G (-3.6%) |
-| compile time: the port's build by the tool (one thread, nothing cached; runs interleaved, best and median) | TIMING_MAIN | TIMING_NEW |
+| the port's self-compile (instructions, callgrind) | 36.930 G | 36.852 G (-0.21%), its HXB the same (HxbCmp, 518 modules) |
+| the port's build, instructions (callgrind) | 102.09 G | 98.64 G (-3.4%) |
+| compile time: the port's build by the tool (one thread, nothing cached; runs interleaved, best and median) | Mir phase 3.94 s (median 4.21 s), whole build 17.02 s user (median 18.36 s); nine runs | Mir phase 3.64 s (median 3.90 s), whole build 17.25 s user (median 17.65 s) |
 
 Where the Mir phase's instructions went (callgrind, the port's build):
-about 21.6 G became 18.8 G (-2.8 G, -13%). `Opt` 7.57 G became 4.75 G
+about 21.6 G became 18.9 G (-2.75 G, -13%). `Opt` 7.43 G became 4.80 G
 on object-level Mir and 1.09 G after `MemLower` (`Opt.lowered`, mostly the
-threading's scan and block merges); `MirBuild.objects` 6.75 G became
-6.50 G, its `removeTrivialPhis` 0.57 G 0.16 G; `lower` 3.93 G became
-3.38 G; the inline templates 0.74 G became 0.31 G; `Inline` 0.83 G 0.79
-G; `Escape` with the closure-call pass 1.28 G 1.21 G; `Frames` is new,
-0.34 G; `Fold` 0.44 G 0.43 G. Outside it, register allocation 18.95 G
-became 17.69 G and instruction selection 5.66 G 5.60 G (fewer barriers and
-frames); `Layout.order` 0.03 G became 0.27 G (it now builds the CFG's
-analyses `Opt` used to leave it).
+threading's scan and block merges); `MirBuild.objects` 6.80 G became
+6.39 G, its `removeTrivialPhis` 0.61 G 0.16 G; `lower` 4.10 G became
+3.41 G; the inline templates 0.73 G became 0.29 G; `Inline` 0.81 G 0.85
+G; `Escape` with the closure-call pass 1.23 G 1.22 G; `Frames` is new,
+0.35 G; `Fold` 0.42 G 0.44 G; `Sroa` 0.10 G 0.02 G. Outside it, register
+allocation 19.09 G became 17.76 G and instruction selection 5.67 G 5.58 G
+(fewer barriers and frames); `Layout.order` 0.03 G became 0.27 G (it now
+builds the CFG's analyses `Opt` used to leave it).
 
 ## Escape analysis
 
