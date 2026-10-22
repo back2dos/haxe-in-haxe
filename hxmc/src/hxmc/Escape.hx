@@ -2,6 +2,7 @@ package hxmc;
 
 import haxe.ds.Vector;
 import hxmc.Mir;
+import hxmc.Ssa;
 import core.ds.VectorTools.vector;
 
 using core.ds.VectorTools;
@@ -41,8 +42,8 @@ class Escape {
 	static inline var EMPTY = -1; // lattice: no allocation seen (yet)
 	static inline var TOP = -2; // lattice: anything else, or several groups
 	static inline var UNDEF = -2; // abstract value: no store reaches (the variable's entry)
-	static inline var NONE = -3; // no definition in the block
-	static inline var NOTSET = -4;
+	static inline var NONE = SsaReader.NONE; // no definition in the block
+	static inline var NOTSET = SsaReader.NOTSET;
 
 	public static var on = Sys.getEnv("HXMC_ESCAPE") != "0";
 
@@ -150,7 +151,7 @@ class Escape {
 		if (!any) return false;
 		sweep();
 		prune();
-		trivialPhis();
+		Ssa.trivialPhis(f.vals, newPhis);
 		if (part("frames")) elideFrames();
 		return true;
 	}
@@ -1079,7 +1080,7 @@ class Escape {
 			ends[b.id] = cur;
 		}
 		var first = vpBlock.length;
-		var rd = new Reader(f.entry, UNDEF, ends, memo, newVp, setVpArgs);
+		var rd = new SsaReader(f.entry, UNDEF, ends, memo, newVp, setVpArgs);
 		for (l in early)
 			reach[l.id] = rd.readEntry(l.block);
 		rd.finish();
@@ -1339,7 +1340,7 @@ class Escape {
 
 	// ---- the latest instance
 
-	var curReaders:Map<Int, Reader> = new Map();
+	var curReaders:Map<Int, SsaReader> = new Map();
 
 	// where u uses alias x: the group's reaching allocation is x's instance
 	function latest(g:Group, x:Int, u:MIns):Bool {
@@ -1348,7 +1349,7 @@ class Escape {
 			var defs = MFunc.ints(nb, NONE);
 			for (k in 0...sites.length)
 				if (find(k) == g.root) defs[sites[k].block.id] = sites[k].v.id;
-			rd = new Reader(f.entry, UNDEF, defs, MFunc.ints(nb, NOTSET), newVp, setVpArgs);
+			rd = new SsaReader(f.entry, UNDEF, defs, MFunc.ints(nb, NOTSET), newVp, setVpArgs);
 			curReaders.set(g.root, rd);
 		}
 		var b = u.block;
@@ -1646,10 +1647,10 @@ class Escape {
 			for (v in 0...n)
 				endsOf[v][b.id] = cur[v];
 		}
-		var readers = new Vector<Reader>(n);
+		var readers = new Vector<SsaReader>(n);
 		for (v in 0...n) {
 			var ty = vars[v].ty;
-			readers[v] = new Reader(f.entry, NONE, endsOf[v], MFunc.ints(nb, NOTSET), b -> {
+			readers[v] = new SsaReader(f.entry, NONE, endsOf[v], MFunc.ints(nb, NOTSET), b -> {
 				var phi = new MIns(Phi, ty);
 				phi.id = f.vals.length;
 				f.vals.push(phi);
@@ -1855,35 +1856,6 @@ class Escape {
 			if (k < ins.length) ins.resize(k);
 		}
 	}
-
-	// the phis made whose operands are one value (or the phi) are copies of it
-	function trivialPhis() {
-		var changed = true;
-		while (changed) {
-			changed = false;
-			for (p in newPhis) {
-				if (p.op != Phi || p.dead) continue;
-				var same = -1, trivial = true;
-				for (a in p.args) {
-					var x = a;
-					while (f.vals[x].op == Copy && f.vals[x].a >= 0)
-						x = f.vals[x].a;
-					if (x == p.id || x == same) continue;
-					if (same >= 0) {
-						trivial = false;
-						break;
-					}
-					same = x;
-				}
-				if (trivial && same >= 0) {
-					p.op = Copy;
-					p.a = same;
-					p.args = vector();
-					changed = true;
-				}
-			}
-		}
-	}
 }
 
 private class Site {
@@ -1945,99 +1917,5 @@ private class Var {
 		this.off = off;
 		this.size = size;
 		this.ty = ty;
-	}
-}
-
-// a variable's value at block entries, on demand (Braun et al.): the
-// definition at the end of a block (ends, by block number: NONE), else a
-// phi where predecessors meet (made by mkPhi, its operands set by setArgs in
-// finish), else the entry's value; iterative (no recursion along long
-// paths); memo: by block number, NOTSET (reset puts it back)
-private class Reader {
-	public var ends:Vector<Int>;
-	var memo:Vector<Int>;
-	var touched:Array<Int> = [];
-	var entry:MBlock;
-	var undef:Int;
-	var mkPhi:MBlock->Int;
-	var setArgs:(Int, Vector<Int>) -> Void;
-	var pendV:Array<Int> = [];
-	var pendB:Array<MBlock> = [];
-	var npend = 0;
-
-	static inline var NONE = -3;
-	static inline var NOTSET = -4;
-
-	public function new(entry, undef, ends, memo, mkPhi, setArgs) {
-		this.entry = entry;
-		this.undef = undef;
-		this.ends = ends;
-		this.memo = memo;
-		this.mkPhi = mkPhi;
-		this.setArgs = setArgs;
-	}
-
-	inline function remember(b:MBlock, v:Int) {
-		memo[b.id] = v;
-		touched.push(b.id);
-	}
-
-	public inline function readEnd(b:MBlock):Int {
-		var d = ends[b.id];
-		return d != NONE ? d : readEntry(b);
-	}
-
-	public function readEntry(b:MBlock):Int {
-		var chain:Array<MBlock> = [];
-		var r = undef;
-		var n = 0;
-		while (true) {
-			var m = memo[b.id];
-			if (m != NOTSET) {
-				r = m;
-				break;
-			}
-			if (b == entry || b.preds.length == 0 || n++ > 1000000) {
-				r = undef;
-				remember(b, r);
-				break;
-			}
-			if (b.preds.length == 1) {
-				chain.push(b);
-				var p = b.preds[0];
-				var d = ends[p.id];
-				if (d != NONE) {
-					r = d;
-					break;
-				}
-				b = p;
-				continue;
-			}
-			r = mkPhi(b);
-			remember(b, r);
-			pendV[npend] = r;
-			pendB[npend++] = b;
-			break;
-		}
-		for (x in chain)
-			remember(x, r);
-		return r;
-	}
-
-	public function finish() {
-		while (npend > 0) {
-			npend--;
-			var v = pendV[npend], b = pendB[npend];
-			var args = new Vector<Int>(b.preds.length);
-			for (k in 0...args.length)
-				args[k] = readEnd(b.preds[k]);
-			setArgs(v, args);
-		}
-	}
-
-	public function reset() {
-		for (k in touched)
-			memo[k] = NOTSET;
-		touched = [];
 	}
 }
