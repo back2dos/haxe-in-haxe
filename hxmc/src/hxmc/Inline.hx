@@ -15,9 +15,10 @@ using core.ds.VectorTools;
 //
 // Candidates are decided on hxmc's IR (hxmc.ir) (`candidate`: no try, a small body),
 // so that Fingerprint can put a candidate's body into the key of every
-// module calling it; the final decision is on the callee's lowered Mir: few
-// instructions on its fast path (a shadow-stack frame stays the copy's own:
-// it pushes and pops it).
+// module calling it; the final decision is on the callee's object-level Mir:
+// few instructions on its fast path once lowered (size: what MemLower makes
+// of each operation, counted on the operation; a shadow-stack frame stays the
+// copy's own: it pushes and pops it).
 class Inline {
 	public static inline var MAX_IR = 40; // IR nodes of a candidate
 	// instructions outside slow paths: of a callee inlined anywhere, at a
@@ -72,19 +73,73 @@ class Inline {
 		return true;
 	}
 
-	// the callee's object-level Mir (mb's) when it can be inlined, judged on
-	// its lowering (built once per caller module)
-	public static function template(mb:MirBuild, mf:MFunc, lowered:MFunc):Null<Template> {
-		// (a callee with a shadow-stack frame keeps it: its copy pushes and pops it)
+	// the instructions of f outside slow paths once lowered, from its
+	// object-level Mir: an object-level operation counts what MemLower makes
+	// of it outside slow paths (opSize), the others one each but constants
+	// and addresses, which fold into their users (-1: never inlined)
+	public static function size(f:MFunc):Int {
 		var n = 0;
-		for (b in lowered.blocks)
+		for (b in f.blocks)
 			if (!b.cold)
 				for (i in b.ins) {
-					if (i.op == Call && i.returnsTwice) return null;
-					// (constants and addresses fold into their users)
-					if (i.op != Const && i.op != ConstF && i.op != SymAddr && i.op != StackAddr && i.op != Param) n++;
+					if (i.op == Call && i.returnsTwice) return -1;
+					if (i.op != Const && i.op != ConstF && i.op != SymAddr && i.op != StackAddr && i.op != Param) n += i.isObj() ? opSize(i) : 1;
 				}
-		return n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n} : null;
+		return n;
+	}
+
+	// what MemLower makes of an object-level operation outside its slow paths
+	// (its blocks' instructions but constants, its continuation's phis)
+	static function opSize(i:MIns):Int {
+		var o = i.info;
+		inline function ref(t:Ty):Bool
+			return t.match(TRef(_));
+		// a reference stored with the write barrier (MemLower.setPtr: its tests)
+		var barrier = 11;
+		// a cold site's references: pushed on the shadow stack (the push's
+		// high-water test and the block after it are not slow paths), or in
+		// the frame's own slots
+		var spill = !o.cold || o.nspill == 0 ? 0 : o.fr ? -o.nspill : 2 + 2 * o.nspill;
+		return spill + switch i.op {
+			case NullCheck: 2;
+			case New: 12 + (o.name == OInfo.NEW_ARRAY ? 2 : o.name == OInfo.NEW_OBJECT || o.name == OInfo.NEW_ANON || o.name == OInfo.NEW_RAW ? 0 : 1) + (o.next >= 0 ? 1 : 0);
+			case NewDyn: 15;
+			case InitField: o.next >= 0 ? 2 : 1;
+			case GetField | ArrayLength | NArrayLength: 1;
+			case SetField: ref(o.t) && !o.flag ? 1 + barrier : 1;
+			case FieldAddr: 1;
+			case EnumTag: 2;
+			case TypeTest: 8;
+			case Box | Unbox: o.t.match(TI32 | TBool | TF64 | TI64) ? 1 : 0;
+			case VirtualCall: 4;
+			case ClosureCall: 2;
+			case AnonGet: o.shape != null && o.shape.tindex >= 0 ? 6 : 16;
+			case AnonTest: 12;
+			case AnonStore: ref(o.t) ? 4 + barrier : 3;
+			case AnonCall: 40;
+			case ArrayGet: o.flag ? 11 : 9;
+			// (a reference stored: rooted in a pushed slot on the slow path)
+			case ArraySet: o.t.match(TI32 | TBool | TF64 | TI64) ? 10 : 11 + barrier + (o.fr ? 0 : 4);
+			case ArrayPush: o.t.match(TI32 | TBool | TF64 | TI64) ? 13 : 14 + barrier + (o.fr ? 0 : 4);
+
+			case NewArray: 2;
+			case ArrayInit: o.t.match(TI32 | TBool | TF64 | TI64) ? 2 : 3 + barrier;
+			case NewNArray: 25;
+			case NArrayInit: o.kind == Abi.AK_PTR ? 1 + barrier : 1;
+			case NArrayGet: 2;
+			case NArraySet: o.flag ? 3 + barrier : 2;
+			case NArrayDyn: 10;
+			case RefStore: 1 + barrier;
+			case _: 1;
+		};
+	}
+
+	// the callee's object-level Mir (mb's) when it can be inlined, judged on
+	// the size of its lowering (size; built once per caller module; a callee
+	// with a shadow-stack frame keeps it: its copy pushes and pops it)
+	public static function template(mb:MirBuild, mf:MFunc):Null<Template> {
+		var n = size(mf);
+		return n >= 0 && n <= MAX_LOOP ? {mf: mf, sites: mb.inlineSites, size: n} : null;
 	}
 
 	// drops the blocks no longer reachable (after a callee that never returns)

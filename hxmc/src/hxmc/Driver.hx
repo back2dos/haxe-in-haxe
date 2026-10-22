@@ -112,12 +112,11 @@ class Driver {
 		var e = templates.get(fn);
 		tlock.release();
 		if (e != null) return e.t;
-		// (object-level Mir, judged on its lowering: a second build)
+		// (object-level Mir, judged on the size of its lowering: Inline.size)
 		var cb = new MirBuild(prep, abi, fn);
 		cb.icSym = prep.funcSym(fn) + "__ic";
-		var lb = new MirBuild(prep, abi, fn);
-		lb.icSym = cb.icSym;
-		var t = try Inline.template(cb, cb.objects(), lb.build()) catch (_:Unsupported) null;
+		var t = try Inline.template(cb, cb.objects()) catch (_:Unsupported) null;
+
 		tlock.acquire();
 		var e2 = templates.get(fn);
 		if (e2 == null) templates.set(fn, {t: t}) else t = e2.t;
@@ -174,8 +173,12 @@ class Driver {
 				if (o.stats && te > 0.005) escSlow.push({name: name + " (" + mf.vals.length + " values)", t: te});
 				lock.release();
 			}
-			mb.lower();
+			// the optimizer on object-level Mir (struct values in frame slots
+			// replaced first); after the lowering only allocation folding and
+			// dead code
 			if (o.opt && sroa) new Sroa(mf).run();
+			if (o.opt) new Opt(mf).run();
+			mb.lower();
 			if (o.opt && Fold.on && mf.allocs > 1) {
 				var fo = new Fold(mf);
 				fo.run();
@@ -187,7 +190,7 @@ class Driver {
 					lock.release();
 				}
 			}
-			if (o.opt) new Opt(mf).run();
+			if (o.opt) Opt.lowered(mf);
 			if (dumpSet != null && dumpSet.exists(name)) Sys.println(mf.dump());
 			if (abi.wasm) {
 				// WebAssembly: structured code from the Mir, no instruction selection or registers

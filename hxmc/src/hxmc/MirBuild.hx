@@ -14,7 +14,7 @@ using core.ds.VectorTools;
 // Mir": objects made, their fields, arrays, structural access, type tests,
 // boxes, closures and virtual calls as operations, values typed: MIns.vty),
 // (objects), which the object-level passes (Inline, Escape) work on and
-// MemLower turns into memory-level Mir (lower; build: both at once). Here:
+// MemLower turns into memory-level Mir (lower). Here:
 // - reference locals that Roots puts in shadow-stack slots live in memory
 //   (fr[k]); in functions with a try block the locals a handler can see
 //   live in memory, so values survive the second return of setjmp; the other
@@ -332,13 +332,6 @@ class MirBuild extends MirWriter {
 			if (!b.sealed) mb.seal(b);
 		mb.tidy();
 		mb.lower();
-		return f;
-	}
-
-	// the function's memory-level Mir: object-level (objects), then lowered
-	public function build():MFunc {
-		objects();
-		lower();
 		return f;
 	}
 
