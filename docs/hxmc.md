@@ -15,7 +15,7 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | --- | --- |
 | `Main.hx`, `Options.hx`, `Driver.hx` | the tool: runs the port's compiler with a generate hook, compiles every module (in parallel, cached) and links; `--server` keeps the compilation server resident |
 | `HaxeMain.hx` | `haxe` with hxmc built in (the npm package): `--custom-target hxmc=<out>` |
-| `ir/Ir.hx`, `Lower.hx`, `FnLower.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST |
+| `ir/Ir.hx`, `Lower.hx`, `FnLower.hx`, `LowerQueries.hx` | the IR (structured statements in A-normal form, explicit GC points) and the lowering of the filtered typed AST; a function body asks the program's lowering only what `LowerQueries` lists, each query tagged with how the server's reuse of bodies covers it |
 | `ir/Reach.hx` | the functions the program can run (Reachability, below): the others are not compiled |
 | `ir/RuntimeSymbols.hx` | the runtime's symbols generated code calls by name, per family of targets, checked on every build against what `hxmc.rt.Runtime` imports (Runtime in Haxe, below) |
 | `ir/Facts.hx`, `Prep.hx` | the program-wide facts: names, layouts, type indices, field ids, no-GC functions, cold sites, GC points, as symbols |
@@ -24,7 +24,7 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | `Cfg.hx`, `Ssa.hx`, `Opt.hx`, `Inline.hx`, `Escape.hx`, `Sroa.hx` | the control-flow analyses (reverse postorder, dominator tree, loop nest; generic over the block type), SSA construction on a finished graph (Escape, Sroa), inlining, escape analysis (allocations that stay in their function replaced by their fields: [plans/codegen.md](plans/codegen.md), "Escape analysis"), scalar replacement of frame slots (struct values), value numbering, store forwarding, LICM, dead code |
 | `Lir.hx`, `Regalloc.hx`, `x64/`, `a64/` | instruction selection, linear-scan allocation, encoders (checked against llvm-mc: `EncCheck`), emission |
 | `Unwind.hx`, `Dwarf.hx` | unwind tables from the emitters' frame records (`.eh_frame`, `.pdata`/`.xdata`, `__eh_frame`), `-debug`'s DWARF lines (Debugging, below) |
-| `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (static ELF, `LinkDyn.hx` dynamic ELF against glibc; PE with imports written directly; Mach-O with an ad-hoc signature), the runtime-object builder, the program's data |
+| `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (`LinkCore.hx`: resolution, dead sections, GOT and import slots, placement and relocations, shared by static ELF, `LinkDyn.hx` dynamic ELF against glibc, PE with imports written directly, Mach-O with an ad-hoc signature; `wasm/LinkWasm.hx` shares the resolution), the runtime-object builder, the program's data |
 | `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
 | `Target.hx`, `Abi.hx`, `CAbi.hx` | per-target facts; how each C ABI passes structs by value |
 | `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths; a custom target gets no `_std` directory in the reference compiler) |
@@ -148,9 +148,9 @@ an uncaught exception uses too:
   disagree with `.debug_line`): 16 bytes per function (its address as a
   PC-relative offset, no load-time fixup; its size; its class and the rest:
   the field and the rows, LEB128 deltas, a row only where the file or line
-  changes), the strings once each. The static ELF linker's dead code
-  elimination does not count the table's references (it is rebuilt with the
-  functions it keeps). Where `.debug_line` is 1.1 MB for the tool, the
+  changes), the strings once each. The linkers' dead-section removal
+  (LinkCore, on every native target) does not count the table's references
+  (it is rebuilt with the functions it keeps). Where `.debug_line` is 1.1 MB for the tool, the
   table is 0.64 MB (3.6% of the tool, the port 0.78 MB: 3.8%).
 - The walk: up the frame records (x86-64 by default, arm64 always:
   above), while a frame's return address is in a function of the table

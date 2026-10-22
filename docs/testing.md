@@ -142,7 +142,10 @@ sharing every object, for
 hxmc (the tool and `haxe`), JS and Eval. `CacheCheck` (`make quick`): its
 store (tool directories, the trim of indexes, packs of blobs, objects and
 tool directories, a tiny cap held as builds write past it, a cache that
-cannot be written). The cache is on by default, so builds from
+cannot be written). `LowerQueriesCheck` (`make quick`): each query a
+function body makes of the lowering (`ir/LowerQueries.hx`) is tagged with
+how the server's reuse of bodies covers it, and the logged ones are
+recorded by `LowerCache.hx`. The cache is on by default, so builds from
 source use it (the corpus builds from HXB archives and does not); CI's
 npm-pack job builds with it off (`HXMC_MODULE_CACHE=0`), the fixpoint
 builds the tool with it cold, warm and off, and `Crosshost` compares the
@@ -251,7 +254,8 @@ an edit starts the new build in place of the old one, a compile error shows
 while the old build keeps running, the fix runs; `server-verify.mjs`: a
 compilation server's builds of small programs through edits are the bytes a
 one-shot build of the same sources makes (typed modules kept in memory, then
-read back from HXB).
+read back from HXB), through edits of what a replayed body reads of other
+modules (an override's default value, a C function's declaration).
 
 ## CI
 
