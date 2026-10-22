@@ -78,8 +78,10 @@ optimization tier for #15's interpreted macros.
   region calls of `rt_blocking_enter`/`rt_blocking_leave`. No object-level
   pass needs to see through them: a function with `try` is not inlined
   (`Inline.candidate`) and its handler's locals live in memory. Stage 5
-  makes `Throw` and a try region operations (WasmGC's `try_table`), whose
-  native lowering is today's code.
+  made a try region operations for WasmGC only (`MirBuild.gc`: a `Try`
+  terminator, the handler's `Catch`, the locals the handler reads
+  `VarGet`/`VarSet`; `throw` the IR's own statement in an `IrNode`):
+  natively nothing needed them, and the native code stays as it was.
 - **`@:hxmc.struct` values and the by-value C ABI: memory-level only.** A
   struct value is the address of its memory (typed `TStruct` in
   `MIns.vty`); `MirBuild` builds C calls and entries from C with structs

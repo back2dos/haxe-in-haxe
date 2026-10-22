@@ -9,6 +9,7 @@ generator and linker: no C compiler, assembler or system linker at build time.
 typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBuild)--> object-level Mir --(Inline, Escape, Sroa, Opt, Frames)--> --(MemLower)--> Mir (SSA) --(Fold)-->
     --(x64|a64 Isel)--> LIR --(Regalloc, Emit)--> Obj (per module, cached) | --(wasm/WasmGen)--> wasm
     --(DataGen: tables, strings)--> Obj --(Link: ELF | LinkPE | LinkMachO | LinkWasm)--> executable
+-D hxmc.wasm-gc: hxmc IR --(ir.Reach)--> --(MirBuild.gc)--> object-level Mir --(Inline, Escape, Opt)--> --(wasmgc.MirGen, GcModule)--> WasmGC module
 ```
 
 | File (`hxmc/src/hxmc/`) | |
@@ -26,6 +27,7 @@ typed AST --(ir.Lower)--> hxmc IR --(ir.Reach)--> --(Prep: ir.Facts)--> --(MirBu
 | `Unwind.hx`, `Dwarf.hx` | unwind tables from the emitters' frame records (`.eh_frame`, `.pdata`/`.xdata`, `__eh_frame`), `-debug`'s DWARF lines (Debugging, below) |
 | `Obj.hx`, `ElfWriter.hx`, `*Reader.hx`, `Link*.hx`, `MkRt.hx`, `DataGen.hx` | objects, the linkers (`LinkCore.hx`: resolution, dead sections, GOT and import slots, placement and relocations, shared by static ELF, `LinkDyn.hx` dynamic ELF against glibc, PE with imports written directly, Mach-O with an ad-hoc signature; `wasm/LinkWasm.hx` shares the resolution), the runtime-object builder, the program's data |
 | `wasm/` | wasm32-wasi: structured code from Mir, the linker, exception handling with `exnref` (or the legacy instructions) |
+| `wasmgc/` | `-D hxmc.wasm-gc`: the object-level Mir of each function as WasmGC code (`MirGen`, over `FuncGen`'s expressions), the module, its types and helpers (`GcModule`, `Helpers`), reflection's tables (`Meta`), the pipeline (`GcGen`) |
 | `Target.hx`, `Abi.hx`, `CallConv.hx`, `CAbi.hx` | per-target facts; one calling convention per ABI (System V, Win64, AAPCS64 with its Apple and Windows variants: argument and result registers, where each argument goes, the registers a call clobbers and keeps; for calls and parameters alike); how each C ABI passes structs by value |
 | `MkStd.hx` | hxmc's std merged with the Eval originals (the macro context shares the program's class paths; a custom target gets no `_std` directory in the reference compiler) |
 | `macro/` | native macros, a prototype (`haxe` built with `-D hxmc.jit`, Linux x86-64; `-D hxmc.macros=native\|verify`): macro classes compiled by hxmc and linked into the running compiler, behind the macro engine seam `haxe/src/macros/MacroEngine.hx` ([plans/compiler.md](plans/compiler.md), "Native macros") |
@@ -635,7 +637,7 @@ default for `wasm32-wasi`, `=0` turns it off, `=1` adds the tests to the
 native targets) each dereference tests its reference: `MirBuild.nullCheck`, `MemLower.nullTest`
 (a branch to a block calling `rt_null_access`, one per try a function's
 tests share: a try's body is the dominator subtree of its first block,
-WasmGen), `FuncGen.derefAs` (WasmGC: a call of a per-type helper, `nn_<t>`,
+WasmGen; WasmGC: `MirBuild.nullCheck`'s `NullCheck`, a call of `nn_any`, and `FuncGen.derefAs` in the IR's own operations, a call of a per-type helper, `nn_<t>`,
 which gives a `(ref null t)` back as a `(ref t)`: 2 or 3 bytes a test),
 and `FnLower.receiverCheck` for the receiver of a method the runtime
 implements (it reads it untested). A test is dropped where the value is
@@ -1144,22 +1146,36 @@ MB) and a 64 MB shadow stack at startup.
 
 ### WasmGC (-D hxmc.wasm-gc, an experiment)
 
-With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the IR after Lower
-becomes a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): Haxe's values live
-in the engine's collector, with no shadow stack or barriers. What is
+With `-D hxmc.wasm-gc` (and `-D hxmc.target=wasm32-wasi`) the program becomes
+a WasmGC module instead (`hxmc/src/hxmc/wasmgc/`): Haxe's values live in the
+engine's collector, with no shadow stack or barriers. Each function goes
+through the native pipeline's object level (docs/plans/codegen.md,
+"Object-level Mir"): `MirBuild` in its WasmGC mode (`MirBuild.gc`: no
+roots, fields by index; what is memory-level natively, globals, strings,
+the runtime's intrinsics, `throw`, stays the IR's own as `IrNode`
+operations; a `try` is a `Try` terminator and the handler's `Catch`, the
+locals a handler reads `VarGet`/`VarSet`; the branch an if on a constant
+does not take is not built), `Inline` (the native templates and limits;
+also, in a loop, a callee that an object made here meets, passed or
+returned, judged on what WasmGC makes of it, so that the object may be
+replaced), the closures called where they are made, `Inline.devirtualize`,
+`Escape` and `Opt`; then `MirGen` writes it: its control flow structured
+as `wasm/WasmGen` structures linear memory's, each value a local of the
+wasm type its operation gives it (a value used once, right where it is
+made, left on the stack instead), the operations it does not write
+itself written by `FuncGen` as the IR's expressions and statements over
+locals standing for their operands (struct and array types, casts, the
+inline array and structural paths, the intrinsics: one place). What is
 emitted is what the reachability above keeps (method-level, by name), run
-twice: before and after each function's body goes through `IrOpt`, so a
-function inlined everywhere is dropped (the runtime's exports are live
-where this target's code calls them: `GcGen.runtimeCalls`). `IrOpt`:
-inlining where it lets scalar replacement turn objects
-that never escape into locals (the IR's counterpart of Mir's `Inline` and
-`Sroa`, which this path never reaches; V8 inlines small functions of a
-WasmGC module itself). A reference has the wasm type its IR type proves
+twice: before building the Mir and over what the Mir still calls
+(`Uses.summary`: each function's IR with the callees inlined into it
+followed), so a function inlined everywhere is dropped (the runtime's
+exports are live where this target's code calls them:
+`GcGen.runtimeCalls`). A reference has the wasm type its IR type proves
 (classes, strings, arrays, enums, closures, Bytes: `GcModule.keyOf`), else
-`eqref` cast where it is used; a local that is only ever cast to one type
-gets it (`FuncGen.refine`, a second emission); one set from a Dynamic
-value (Haxe's unchecked conversions) gets none, as linear memory may hold
-a value of another type there. All types are in one recursion
+`eqref` cast where it is used (an untyped object whose fields a block
+reads or writes more than once: cast once there, `MirGen.classOperand`).
+All types are in one recursion
 group, so the class hierarchy is wasm's subtyping (`instanceof` is
 `ref.test`; leaf classes are final types); methods have their own typed
 signatures, virtual and interface calls go through a funcref table indexed
@@ -1229,10 +1245,7 @@ it through the linear memory (in linear memory: its own address, no
 copy); strings cross as UTF-8 through it (`Repr.utf8To`,
 `Repr.octetsAt`). A `@:hxmc.struct` class whose fields are all final is
 an object here (a value that cannot change needs no copies); the others
-live in the linear memory. Statements after one that always leaves, and
-the branch an if on a constant does not take, are dropped before
-emission (`IrOpt.live`: what follows `if (Mem.os() == 3) {...; return;}`
-is another target's, as Mir drops it). The name section is written with
+live in the linear memory. The name section is written with
 `-debug`, `-D hxmc.symbols` or `HXMC_SYMBOLS=1`, as linear memory's.
 universe's browser tests (`gfx-web-check`, `ui-web-check`) run on such
 builds too. A runtime function
