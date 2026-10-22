@@ -29,7 +29,12 @@ using core.ds.VectorTools;
 // array's length and elements loads of theirs; type tests and enum tags are
 // pure; an operation that may collect or call writes every class (a call's
 // effect); null tests dominated by one of the same value, or by a branch on
-// it, go. After MemLower only dead code is removed (lowered).
+// it, go. What the lowering of an operation reads that others read too
+// becomes its operands first (operands: shared and hoisted as any value),
+// and a reference stored into an object allocated since the last point
+// where a collection may happen loses its write barrier (freshTargets).
+// After MemLower only the CFG's cleanup, copies and dead code (lowered).
+
 class Opt {
 	// memory classes (MIns.mem)
 	public static inline var MOther = 0; // anything: written by any store or call

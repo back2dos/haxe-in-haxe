@@ -31,55 +31,45 @@ class Frames {
 				break;
 			}
 		if (r == null) return;
-		for (b in f.blocks)
-			for (i in b.ins)
-				if (i.op == Call && i.returnsTwice) return;
 		var vals = f.vals;
-		// the frame's address and the addresses derived from it (r + a
-		// constant: the push's new top), by offset
+		var cfg = f.cfg();
+		var order = cfg.rpo;
+		var n = order.length;
+		// one walk in reverse postorder (a value before its uses, but a
+		// phi's): the frame's address and those derived from it (r + a
+		// constant: the push's new top) by offset; the slot each load or
+		// store of the frame accesses (an array store's rooted array: the
+		// runtime reads its slot); the push, pops and high-water test; the
+		// operations that take the frame (OInfo.fr: a cold site's spill
+		// slots, an array store's rooted array)
 		var off = MFunc.ints(vals.length, NONE);
 		off[r.id] = 0;
-		var more = true;
-		while (more) {
-			more = false;
-			for (b in f.blocks)
-				for (i in b.ins)
-					if (!i.dead && i.op == Add && i.ty == I64 && off[i.id] == NONE && off[i.a] != NONE) {
-						var c = vals[i.b];
-						if (c.op != Const || c.sym != null || c.imm2 != (c.imm < 0 ? -1 : 0)) return;
-						off[i.id] = off[i.a] + c.imm;
-						more = true;
-					}
-		}
 		inline function derived(v:Int):Bool
 			return v >= 0 && off[v] != NONE;
-		// the accesses: slot loads and stores, the push, pops and high-water
-		// test, the operations that take the frame (a cold site's spill slots,
-		// an array store's rooted array: a load of its slot)
-		var slotOf = new Map<Int, Int>(); // load or store -> its slot
-		var nslots = 0;
-		var manage:Array<MIns> = [];
-		var takers:Array<MIns> = [];
-		var taken = new Map<Int, Bool>();
-		for (b in f.blocks)
+		var slot = MFunc.ints(vals.length, -1);
+		var nslots = 0, stores = 0, reads = 0;
+		var manage:Array<MIns> = [], takers:Array<MIns> = [], phis:Array<MIns> = [];
+		for (b in order)
 			for (i in b.ins) {
 				if (i.dead) continue;
 				switch i.op {
+					case Call if (i.returnsTwice):
+						return; // (a try: its handlers read the slots)
+					case Phi:
+						phis.push(i);
+						continue;
 					case Add if (derived(i.a)):
+						var c = vals[i.b];
+						if (c.op != Const || c.sym != null || c.imm2 != (c.imm < 0 ? -1 : 0)) return;
+						off[i.id] = off[i.a] + c.imm;
 						continue;
-					case Load if (derived(i.a)):
-						if (i.b >= 0 || i.size != 8) return;
+					case Load | Store if (derived(i.a)):
+						if (i.b >= 0 || i.size != 8 || i.op == Store && derived(i.c)) return;
 						var s = off[i.a] + i.imm;
 						if (s < 0 || s & 7 != 0) return;
-						slotOf.set(i.id, s >> 3);
+						slot[i.id] = s >> 3;
 						if ((s >> 3) >= nslots) nslots = (s >> 3) + 1;
-						continue;
-					case Store if (derived(i.a)):
-						if (i.b >= 0 || i.size != 8 || derived(i.c)) return;
-						var s = off[i.a] + i.imm;
-						if (s < 0 || s & 7 != 0) return;
-						slotOf.set(i.id, s >> 3);
-						if ((s >> 3) >= nslots) nslots = (s >> 3) + 1;
+						if (i.op == Store) stores++ else reads++;
 						continue;
 					case TlsStore if ((i.sym == "rt_sp" || i.sym == "rt_sp_hw") && derived(i.a)):
 						manage.push(i);
@@ -94,100 +84,101 @@ class Frames {
 				var takes = false;
 				for (k in 0...i.args.length)
 					if (derived(i.args[k])) {
-						// (only as an operation's frame: OInfo.fr)
 						if (!i.isObj() || !i.info.fr || k != i.info.nspill || i.args[k] != r.id) return;
 						takes = true;
 					}
 				if (takes) {
 					takers.push(i);
-					taken.set(i.id, true);
-					if (i.info.rootSlot >= nslots) nslots = i.info.rootSlot + 1;
-				}
-			}
-		if (nslots == 0 && takers.length == 0) return;
-		// the slots live at each point: read by a later load (or an array
-		// store's runtime call) before a store replaces them
-		var cfg = f.cfg();
-		var order = cfg.rpo;
-		var n = order.length;
-		var inOrder = f.newMark();
-		for (k in 0...n) {
-			order[k].mark = inOrder;
-			order[k].tmp = k;
-		}
-		var gen = new Vector<Bits>(n), kill = new Vector<Bits>(n), liveIn = new Vector<Bits>(n);
-		inline function reads(i:MIns):Int
-			return i.op == Load ? (slotOf.exists(i.id) ? slotOf.get(i.id) : -1) : i.info != null && i.info.rootSlot >= 0 && taken.exists(i.id) ? i.info.rootSlot : -1;
-		for (k in 0...n) {
-			var g = new Bits(nslots), x = new Bits(nslots);
-			var ins = order[k].ins;
-			var q = ins.length;
-			while (q-- > 0) {
-				var i = ins[q];
-				if (i.dead) continue;
-				if (i.op == Store && slotOf.exists(i.id)) {
-					var s = slotOf.get(i.id);
-					x.set(s);
-					g.clear(s);
-				} else {
-					var s = reads(i);
-					if (s >= 0) g.set(s);
-				}
-			}
-			gen[k] = g;
-			kill[k] = x;
-			liveIn[k] = g.copy();
-		}
-		inline function liveOut(k:Int):Bits {
-			var o = new Bits(nslots);
-			for (s in order[k].succs)
-				if (s.mark == inOrder) o.union(liveIn[s.tmp]);
-			return o;
-		}
-		var changed = true;
-		while (changed) {
-			changed = false;
-			var k = n;
-			while (k-- > 0) {
-				var o = liveOut(k);
-				// liveIn = gen | (out & ~kill)
-				var w = o.w, kw = kill[k].w, gw = gen[k].w, iw = liveIn[k].w;
-				for (j in 0...w.length) {
-					var v = gw[j] | (w[j] & ~kw[j]);
-					if (v != iw[j]) {
-						iw[j] = v;
-						changed = true;
+					var s = i.info.rootSlot;
+					if (s >= 0) {
+						slot[i.id] = s;
+						if (s >= nslots) nslots = s + 1;
+						reads++;
 					}
 				}
 			}
-		}
-		// the stores nothing reads
-		var loads = 0;
-		for (k in 0...n) {
-			var live = liveOut(k);
-			var ins = order[k].ins;
-			var q = ins.length;
-			while (q-- > 0) {
-				var i = ins[q];
-				if (i.dead) continue;
-				if (i.op == Store && slotOf.exists(i.id)) {
-					var s = slotOf.get(i.id);
-					if (!live.get(s)) {
+		for (p in phis)
+			for (x in p.args)
+				if (derived(x)) return;
+		if (nslots == 0 && takers.length == 0) return;
+		inline function isStore(i:MIns):Bool
+			return i.op == Store && slot[i.id] >= 0;
+		if (reads == 0) {
+			// nothing reads the frame: no store is seen
+			for (b in order)
+				for (i in b.ins)
+					if (isStore(i)) {
 						i.dead = true;
 						storesRemoved++;
-					} else live.clear(s);
-				} else {
-					var s = reads(i);
-					if (s >= 0) {
-						live.set(s);
-						loads++;
 					}
+		} else if (stores > 0) {
+			// the slots live at each point: read by a later load before a
+			// store replaces them
+			var inOrder = f.newMark();
+			for (k in 0...n) {
+				order[k].mark = inOrder;
+				order[k].tmp = k;
+			}
+			var gen = new Vector<Bits>(n), kill = new Vector<Bits>(n), liveIn = new Vector<Bits>(n);
+			for (k in 0...n) {
+				var g = new Bits(nslots), x = new Bits(nslots);
+				var ins = order[k].ins;
+				var q = ins.length;
+				while (q-- > 0) {
+					var i = ins[q];
+					var s = slot[i.id];
+					if (s < 0 || i.dead) continue;
+					if (i.op == Store) {
+						x.set(s);
+						g.clear(s);
+					} else g.set(s);
+				}
+				gen[k] = g;
+				kill[k] = x;
+				liveIn[k] = g.copy();
+			}
+			var out = new Bits(nslots);
+			function liveOut(k:Int) {
+				out.w.fill(0);
+				for (s in order[k].succs)
+					if (s.mark == inOrder) out.union(liveIn[s.tmp]);
+			}
+			var changed = true;
+			while (changed) {
+				changed = false;
+				var k = n;
+				while (k-- > 0) {
+					liveOut(k);
+					// liveIn = gen | (out & ~kill)
+					var w = out.w, kw = kill[k].w, gw = gen[k].w, iw = liveIn[k].w;
+					for (j in 0...w.length) {
+						var v = gw[j] | (w[j] & ~kw[j]);
+						if (v != iw[j]) {
+							iw[j] = v;
+							changed = true;
+						}
+					}
+				}
+			}
+			// the stores nothing reads
+			for (k in 0...n) {
+				liveOut(k);
+				var ins = order[k].ins;
+				var q = ins.length;
+				while (q-- > 0) {
+					var i = ins[q];
+					var s = slot[i.id];
+					if (s < 0 || i.dead) continue;
+					if (i.op != Store) out.set(s) else if (!out.get(s)) {
+						i.dead = true;
+						storesRemoved++;
+					} else out.clear(s);
 				}
 			}
 		}
 		// a frame nothing reads: not pushed (its operations push their
 		// spills on their slow paths)
-		if (loads == 0) {
+		if (reads == 0) {
 			for (i in manage)
 				if (i.op == Cmp) {
 					i.op = Const;

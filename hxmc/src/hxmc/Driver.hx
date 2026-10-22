@@ -176,7 +176,8 @@ class Driver {
 				lock.release();
 			}
 			// the optimizer on object-level Mir (struct values in frame slots
-			// replaced first); after the lowering only allocation folding and
+			// replaced first), then the frame's slots nothing reads; after the
+			// lowering only allocation folding, the CFG's cleanup and
 			// dead code
 			if (o.opt && sroa) new Sroa(mf).run();
 			if (o.opt) {

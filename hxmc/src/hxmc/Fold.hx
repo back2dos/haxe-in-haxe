@@ -11,8 +11,8 @@ import core.ds.VectorTools.vector;
 // copies them apart). The first's slow path allocates both, its header
 // written again after the call (the runtime makes a record of the size it is
 // given); the second's slow path, its spills and reloads, are gone: its
-// object is the first's address plus the first's bytes. Runs after Escape
-// (what it removes is not folded) and before Opt (which cleans up).
+// object is the first's address plus the first's bytes. Runs after MemLower
+// (Escape's replacements are not folded; Opt.lowered cleans up after it).
 class Fold {
 	// the most bytes one allocation takes for the objects folded into it
 	static inline var MAX_BYTES = 4096;

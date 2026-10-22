@@ -19,7 +19,10 @@ using core.ds.VectorTools;
 // stack around the slow paths of cold sites (docs/plans/codegen.md,
 // "Object-level Mir").
 //
-// It runs after the object-level passes (Inline, Escape), on what is left:
+// It runs after the object-level passes (Inline, Escape, Sroa, Opt,
+// Frames), on what is left, its write barriers and spills only where
+// they are still needed:
+
 // each operation's instructions where it is (its blocks after the
 // function's), the code after an operation that branches in its
 // continuation (OInfo.cont: the phis there, a reference a cold site reloads
