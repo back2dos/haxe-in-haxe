@@ -123,7 +123,10 @@ class Opt {
 		if (licmOn)
 			for (_ in 0...3)
 				if (!licm()) break;
-		if (barriers > 0) loneBarrierOperands();
+		if (barriers > 0) {
+			freshTargets();
+			loneBarrierOperands();
+		}
 	}
 
 	static var licmOn = Sys.getEnv("HXMC_LICM") != "0";
@@ -1166,6 +1169,42 @@ class Opt {
 
 	var barriers = 0;
 
+	// the largest object (slots) the runtime always allocates in the nursery
+	// (Gc.allocNow: a quarter of it at most; it is 4 KB at least)
+	static inline var YOUNG_SLOTS = 63;
+
+	// A reference stored into an object allocated since the last point where
+	// a collection may happen (in the block, or one entered only from such a
+	// block) needs no write barrier: the object is young (OInfo.fresh; its
+	// store still publishes what it stores, MIns.release).
+	function freshTargets() {
+		var cfg = f.cfg();
+		var order = cfg.rpo;
+		var n = order.length;
+		var inOrder = number(order);
+		var outs = MFunc.ints(n, -1);
+		for (k in 0...n) {
+			var b = order[k];
+			var last = -1; // the object allocated since the last collection point
+			if (b.preds.length == 1 && !b.handler) {
+				var p = b.preds[0];
+				if (p.mark == inOrder && p.tmp < k) last = outs[p.tmp];
+			}
+			for (i in b.ins) {
+				if (i.dead) continue;
+				if (i.op == SetField && last >= 0 && i.a == last && i.info.young) {
+					i.args = i.args.slice(0, i.args.length - 2);
+					i.info.young = false;
+					i.info.fresh = true;
+				}
+				if (i.isObj() ? objKill(i) == ALL : i.op == Call && (!i.keepsFrame || i.returnsTwice)) last = -1;
+				if (i.op == New && i.info.n <= YOUNG_SLOTS) last = i.id;
+			}
+			outs[k] = last;
+		}
+	}
+
+
 	// A barrier's operands that no other store shares, nor moved out of a
 	// loop, go again: MemLower loads them after the store, as it would
 	// without them (fewer values live across the store).
@@ -1579,5 +1618,5 @@ class Opt {
 	}
 
 	static inline function removable(i:MIns):Bool
-		return pure(i.op) || objPure(i.op) || objLoadClass(i) >= 0 || i.op == ArrayGet || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy;
+		return pure(i.op) || objPure(i.op) || objLoadClass(i) >= 0 || i.op == ArrayGet || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy || i.op == Phi;
 }

@@ -97,6 +97,8 @@ class Driver {
 	var escRemoved = 0;
 	var escFolds = 0;
 	var allocsFolded = 0; // (Fold)
+	var rootStores = 0; // (Frames)
+	var framesRemoved = 0;
 	var foldWhy = new Map<String, Int>(); // (Fold.whyOn)
 	var escTime = 0.0;
 	var escSlow:Array<{name:String, t:Float}> = [];
@@ -177,7 +179,18 @@ class Driver {
 			// replaced first); after the lowering only allocation folding and
 			// dead code
 			if (o.opt && sroa) new Sroa(mf).run();
-			if (o.opt) new Opt(mf).run();
+			if (o.opt) {
+				new Opt(mf).run();
+				// (the rooted locals' slots nothing reads any more)
+				var fs = new Frames(mf);
+				fs.run();
+				if (fs.storesRemoved > 0 || fs.frameRemoved) {
+					lock.acquire();
+					rootStores += fs.storesRemoved;
+					if (fs.frameRemoved) framesRemoved++;
+					lock.release();
+				}
+			}
 			mb.lower();
 			if (o.opt && Fold.on && mf.allocs > 1) {
 				var fo = new Fold(mf);
@@ -266,6 +279,8 @@ class Driver {
 		Sys.println('hxmc: regalloc: $raFuncs functions, $raRounds rounds, $raInsns instructions');
 		Sys.println('hxmc: escape: $escRemoved allocation sites replaced, $escFolds type tests folded (cpu ${ms(escTime)})');
 		Sys.println('hxmc: $allocsFolded allocations folded into the one before them (Fold)');
+		Sys.println('hxmc: frames: $rootStores root stores and $framesRemoved frames removed');
+
 		var ks = [for (k in foldWhy.keys()) k];
 		ks.sort((a, b) -> foldWhy.get(b) - foldWhy.get(a));
 		for (k in ks)

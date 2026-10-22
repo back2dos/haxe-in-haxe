@@ -155,6 +155,9 @@ class OInfo {
 	// a store with the write barrier: its last two arguments are the
 	// nursery's start and size (Opt.operands, MemLower.setPtr)
 	public var young = false;
+	// SetField of a reference into an object allocated since the last point
+	// where a collection may happen: no write barrier (Opt.freshTargets)
+	public var fresh = false;
 	// ArrayGet, ArraySet, ArrayPush: where the array's header and the index
 	// widened start among the arguments (Opt.operands; -1: none)
 	public var ops = -1;
@@ -190,6 +193,8 @@ class OInfo {
 		o.rootSlot = rootSlot;
 		o.listIndex = listIndex;
 		o.young = young;
+		o.fresh = fresh;
+
 		o.ops = ops;
 
 		return o;

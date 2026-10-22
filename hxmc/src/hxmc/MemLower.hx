@@ -70,7 +70,7 @@ class MemLower extends MirWriter {
 	public static function branches(op:Op, o:OInfo):Bool {
 		return switch op {
 			case New | NewDyn | TypeTest | AnonGet | AnonCall | ArrayGet | ArraySet | ArrayPush | NewNArray | NArrayDyn | RefStore: true;
-			case SetField: o.t.match(TRef(_)) && !o.flag;
+			case SetField: o.t.match(TRef(_)) && !o.flag && !o.fresh;
 			case AnonStore: o.t.match(TRef(_));
 			case ArrayInit: !o.t.match(TF64 | TI64 | TI32 | TBool);
 			case NArrayInit: o.kind == Abi.AK_PTR;
@@ -168,6 +168,8 @@ class MemLower extends MirWriter {
 					spills.push(v);
 				}
 			fr = o.fr ? r(x.args[o.nspill]) : -1;
+			spillNeed = null;
+
 			cx = x;
 			youngStart = o.young ? r(x.args[x.args.length - 2]) : -1;
 			youngSize = o.young ? r(x.args[x.args.length - 1]) : -1;
@@ -199,6 +201,11 @@ class MemLower extends MirWriter {
 						(i.op == Phi ? cphis : cins).push(i);
 					c.ins = [];
 					ended = true;
+					if (cold && o.nspill > 0) {
+						spillNeed = [for (q in 0...o.nspill) q == o.listIndex];
+						for (phi in cphis)
+							if (phi.imm > 0) spillNeed[phi.imm - 1] = true;
+					}
 				} else {
 					if (c != null) throw "MemLower: " + MFunc.opName(x.op) + " apart from its continuation";
 					// (none: one of its own, where the rest of the block goes)
@@ -278,6 +285,12 @@ class MemLower extends MirWriter {
 			case SetField if (!o.t.match(TRef(_)) || o.flag):
 				access(x, Store, Opt.MField, r(x.a), r(x.b), o.loc, o.t);
 				-1;
+			case SetField if (o.fresh):
+				// (into a young object: no barrier, the store publishing what it stores)
+				access(x, Store, Opt.MField, r(x.a), r(x.b), o.loc, o.t);
+				x.release = true;
+				-1;
+
 			case SetField:
 				storeSlot(r(x.a), o.loc, o.t, r(x.b), o.flag);
 				-1;
@@ -651,11 +664,14 @@ class MemLower extends MirWriter {
 	// spill slots (-1: none; list: whether there is a list, possibly empty,
 	// with extra slots after it)
 	function spillOpen(list:Bool, extra:Int):Int {
-		if (!list || spills.length + extra == 0) return -1;
+		var n = 0;
+		for (k in 0...spills.length)
+			if (spillNeeded(k)) n++;
+		if (!list || n + extra == 0) return -1;
 		if (spillBase >= 0) {
 			var area = op2(Add, I64, fr, lconst32(8 * spillBase));
 			for (k in 0...spills.length)
-				storeM(Opt.MFrame, 8, area, 8 * k, readVar(spills[k], cur));
+				if (spillNeeded(k)) storeM(Opt.MFrame, 8, area, 8 * k, readVar(spills[k], cur));
 			return area;
 		}
 		var sp = tlsLoad("rt_sp");
@@ -663,16 +679,24 @@ class MemLower extends MirWriter {
 		tlsStore("rt_sp", top);
 		raiseHw(top);
 		for (k in 0...spills.length)
-			store(8, sp, 8 * k, readVar(spills[k], cur));
+			if (spillNeeded(k)) store(8, sp, 8 * k, readVar(spills[k], cur));
 		return sp;
 	}
 
 	function spillClose(sp:Int) {
 		if (sp < 0) return;
 		for (k in 0...spills.length)
-			writeVar(spills[k], cur, spillBase >= 0 ? loadM(Opt.MFrame, I64, 8, sp, 8 * k) : load(I64, 8, sp, 8 * k));
+			if (spillNeeded(k)) writeVar(spills[k], cur, spillBase >= 0 ? loadM(Opt.MFrame, I64, 8, sp, 8 * k) : load(I64, 8, sp, 8 * k));
 		if (spillBase < 0) tlsStore("rt_sp", sp);
 	}
+
+	// the cold site's references read after it (its continuation's phis) or
+	// handed to the runtime (an array store's array): the others are not
+	// spilled (a slot left as it is holds null or a valid reference: rt_sp_hw)
+	var spillNeed:Null<Array<Bool>> = null;
+
+	inline function spillNeeded(k:Int):Bool
+		return spillNeed == null || spillNeed[k];
 
 	// ---- arrays
 
