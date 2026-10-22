@@ -4,8 +4,10 @@
 # build times, the targets' check outputs compared.
 #
 # Runs nightly on main (skipped when that commit is already measured) and on
-# demand: a dispatch, or a push whose head commit message says [bench] (or
-# [bench-publish], which also publishes); other pushes start no job.
+# demand: a dispatch (any branch: `gh workflow run bench.yml --ref <branch>`,
+# `-f publish=true` to publish), or a push to main whose head commit message
+# says [bench] (or [bench-publish]); other pushes to main start no job, and
+# pushes to other branches no run.
 # Independent of build.yml, so it never holds up a release or the website.
 #
 # Sharded by case: `plan` checks whether the commit is measured already and
@@ -40,6 +42,13 @@
 # cancels most of a runner's speed), the wasm runners once, hxmc's cold builds
 # of the port once: about 10 minutes.
 #
+# Memory and time (haxe/test/Measure.hx, `make measure`): one `measure` job
+# beside the compile job, on a runner of its own: the timed bootstrap from the
+# stage0, peak RSS, wall and CPU time of the self-compile (ours and the
+# reference), the cold native build of the port, the stage0 and the npm
+# package's WebAssembly compiler building native compilers; in its job summary
+# only (nothing published).
+#
 # Results: the job summaries and an artifact (bench-results); from main (or
 # with publish, or [bench-publish]) appended to the bench-data branch as
 # results/<date>-<commit>.json, with history.json and latest.json
@@ -53,7 +62,7 @@ name: bench
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
@@ -395,6 +404,65 @@ jobs:
           name: compile-tool
           path: bin/hxmc/hxmc
           retention-days: 1
+
+  # memory and time (make measure), in the job summary
+  measure:
+    name: memory and time
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.compile)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: System packages
+        run: sudo apt-get install -qqy time
+      - name: Runtime objects
+        id: rt
+        run: |
+          echo "zig=$(cat hxmc/deps/zig-version)" >> "$GITHUB_OUTPUT"
+          if node hxmc/bootstrap/rt.mjs fetch bin/hxmc/rt; then echo "hit=true" >> "$GITHUB_OUTPUT"; else echo "hit=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: mlugg/setup-zig@v2
+        if: steps.rt.outputs.hit != 'true'
+        with:
+          version: ${{ steps.rt.outputs.zig }}
+      - name: Runtime objects with zig
+        if: steps.rt.outputs.hit != 'true'
+        run: sudo apt-get install -qqy lld && make rt-build
+      - name: Bootstrap from the stage0 (timed)
+        run: |
+          set -ex
+          touch bin/hxmc/rt/*/*.o
+          s=$(date +%s)
+          make bootstrap
+          echo "BOOTSTRAP_SECONDS=$(( $(date +%s) - s ))" >> "$GITHUB_ENV"
+      - name: Reference compiler revision
+        id: ref
+        run: echo "rev=$(git rev-parse --short=7 HEAD:haxe/upstream)" >> "$GITHUB_OUTPUT"
+      - name: Cache the reference compiler
+        uses: actions/cache@v6
+        with:
+          path: bin/reference
+          key: reference-nightly-${{ steps.ref.outputs.rev }}
+      - name: Memory and time
+        run: |
+          set -ex
+          {
+            echo "### Builds"
+            echo ""
+            echo "| | |"
+            echo "| --- | ---: |"
+            echo "| clean bootstrap from the stage0 (stage0 under node, the tool from source, the fixpoint) | ${BOOTSTRAP_SECONDS} s |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          make lix
+          if [ ! -x bin/reference/haxe ]; then make -o bin/lix/lix reference; fi
+          touch bin/reference/haxe
+          make -o bin/reference/haxe measure
 
   # the shards' results as one, published
   results:

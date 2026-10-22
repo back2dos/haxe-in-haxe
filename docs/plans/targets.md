@@ -304,9 +304,9 @@ the maps, haxe.Json, haxe.crypto...) is the same Haxe source.
 
 #### The compiler itself (2026-10-18)
 
-The port (`haxe.Main`, every generator) builds with `-D hxmc.wasm-gc` (`make
-wasmgc-port`) and, run by node as the port, passes the lanes the native
-port passes (`make test-wasmgc-port`, docs/testing.md): HXB 279 + 7
+The port (`haxe.Main`, every generator) builds with `-D hxmc.wasm-gc` and,
+run by node as the port, passes the lanes the native port passes
+(docs/testing.md, "The port as a WasmGC module"): HXB 279 + 7
 expected failures, macros 66/66, `--hxb-lib` 7/7, `--interp` 275/275 (but
 a case whose Eval threads interleave), display 679/679, `-L` 7/7 (batch),
 upstream's target suites compiled for every target, identical; its

@@ -100,7 +100,7 @@ Needs GNU make, node 22 and git; zig only to rebuild the runtime objects
 ```sh
 make quick       # after every hxmc edit (~20 s)
 make check       # before a commit
-make test        # the port's HXB conformance against the reference compiler
+make test        # the port's HXB conformance against the reference (LANES=...: the other harnesses)
 ```
 
 Every harness compares against the official nightly of the pinned upstream

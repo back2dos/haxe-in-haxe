@@ -498,8 +498,8 @@ hxmc target and implements `haxe.ds.Vector<T>` as an abstract over
 `hxmc.NativeArray<T>`. Indexing, length and construction inline to the same
 operations as NativeArray. `toData`/`fromData` share NativeArray storage;
 `toArray`/`fromArrayCopy` copy. `MkStd` keeps the upstream
-Vector for Eval and macros in the merged `bin/hxmc/std`. `make bench-arrays`
-compares Array, NativeArray and Vector
+Vector for Eval and macros in the merged `bin/hxmc/std`. `make bench-micro
+WHICH=arrays` compares Array, NativeArray and Vector
 ([measurement notes](../hxmc/test/bench/README.md)).
 
 WasmGC (`-D hxmc.wasm-gc`, below) has the same NativeArray over the engine's
@@ -692,7 +692,7 @@ indices and parameters), not an identity map.
 `hxmc/test/cases/ObjectMapGc.hx` checks maps across collections (keys
 added young, removals, keys that never move, keys allocated in the old
 space, threads reading one map), natively, on wasm32 and on WasmGC
-(`GcCheck`); `make bench-maps` measures them (`hxmc/test/bench/MapBench.hx`;
+(`GcCheck`); `make bench-micro WHICH=maps` measures them (`hxmc/test/bench/MapBench.hx`;
 the numbers of 2026-10-20 below, Linux x86-64, nanoseconds per operation,
 the fastest of 11 rounds (a range: two runs), before (16-bit header hashes, a 4-byte index
 without hashes, tombstones, up to 3/4 full) and after):
@@ -753,7 +753,7 @@ target; Std depends on the runtime): of those, the one typed with the
 build's defines (its context's signature) is restored, and a variant typed
 with other defines is kept beside one with the same reads (at most four
 per module), so builds that alternate (WasmGC, linear, native) each
-restore their own (`make gfx-cache-check`). The server's
+restore their own (universe's graphics programs check it). The server's
 checks decide which modules are good, lazily, for the modules the build
 loads, also those a restored module's HXB names (decoded from the store
 only once checked, else typed from source); beyond them, a module's file
@@ -1198,8 +1198,9 @@ takes `GcNative.find`'s names as it takes `Dyn`'s), copies objects
 none, gets -1 minus its index in its type value), and calls the methods of
 Arrays and Strings through Dynamic as through structural types
 (`gc_anon_call`); calling what is not a function throws. The port builds
-so (`make wasmgc-port`) and passes the conformance lanes as the port
-(`make test-wasmgc-port`, docs/testing.md).
+so and passed the conformance lanes as the port (docs/testing.md, "The
+port as a WasmGC module", which says how to run them; `make wasmgc-check`
+keeps the lowering checked in CI).
 
 A program that uses `hxmc.unsafe` or C functions gets a small linear
 memory besides (a hybrid module, `GcModule.memory`): `Mem`'s loads and

@@ -81,5 +81,5 @@ in `playground` and deploys it from main in `pages`.
 | `make quick` | after every edit of hxmc: the x64 corpus, again with `RT_VERIFY=1`, the wasm corpus under node, the module cache's store (about 20 s; `CASES="Int64Gc Bench"` restricts it) |
 | `make check` | before a commit: quick, arm64 (qemu), x64 Windows (wine), a 16 KB nursery, the wasm corpus with legacy exception handling, ThreadNatives x30, crosshost on three cases, Android's APKs and iOS's apps checked (`PORT=1`: the port's self-compile) |
 | `make full` | before a push: every nursery and `RT_VERIFY`, wasmtime, the port's self-compile natively and as a module, crosshost on everything, the fixpoint |
-| `make test` | HXB conformance of the port against the reference (seconds per 100 cases) |
-| `make portcheck` | the port built by hxmc self-compiles to the reference's HXB |
+| `make test` | HXB conformance of the port against the reference (seconds per 100 cases); `LANES="display server ..."` for the other harnesses (docs/testing.md) |
+| `make check PORT=1` | check, and the port built by hxmc self-compiles to the reference's HXB |
