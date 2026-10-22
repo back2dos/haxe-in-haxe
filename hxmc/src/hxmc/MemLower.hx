@@ -22,7 +22,6 @@ using core.ds.VectorTools;
 // It runs after the object-level passes (Inline, Escape, Sroa, Opt,
 // Frames), on what is left, its write barriers and spills only where
 // they are still needed:
-
 // each operation's instructions where it is (its blocks after the
 // function's), the code after an operation that branches in its
 // continuation (OInfo.cont: the phis there, a reference a cold site reloads
@@ -159,7 +158,6 @@ class MemLower extends MirWriter {
 				if (x.op == Call && !x.keepsFrame) epoch++;
 				continue;
 			}
-
 			var o = op = x.info;
 			curPos = x.pos;
 			cold = o.cold;
@@ -172,11 +170,9 @@ class MemLower extends MirWriter {
 				}
 			fr = o.fr ? r(x.args[o.nspill]) : -1;
 			spillNeed = null;
-
 			cx = x;
 			youngStart = o.young ? r(x.args[x.args.length - 2]) : -1;
 			youngSize = o.young ? r(x.args[x.args.length - 1]) : -1;
-
 			spillBase = o.spillBase;
 			var c:Null<MBlock> = null, cphis = [], cins = [];
 			if (x.isTerm()) {
@@ -293,7 +289,6 @@ class MemLower extends MirWriter {
 				access(x, Store, Opt.MField, r(x.a), r(x.b), o.loc, o.t);
 				x.release = true;
 				-1;
-
 			case SetField:
 				storeSlot(r(x.a), o.loc, o.t, r(x.b), o.flag);
 				-1;
@@ -999,7 +994,6 @@ class MemLower extends MirWriter {
 		}
 		var c = ic(o, fid, ti);
 		var hit = newBlock(), miss = newBlock(), chk = newBlock();
-
 		miss.cold = true;
 		var slot = load(I32, 4, c, Abi.IC_SLOT);
 		br(cmp(CGt, slot, iconst(0)), chk, miss);

@@ -121,7 +121,6 @@ class Inline {
 			// (a reference stored: rooted in a pushed slot on the slow path)
 			case ArraySet: o.t.match(TI32 | TBool | TF64 | TI64) ? 10 : 11 + barrier + (o.fr ? 0 : 4);
 			case ArrayPush: o.t.match(TI32 | TBool | TF64 | TI64) ? 13 : 14 + barrier + (o.fr ? 0 : 4);
-
 			case NewArray: 2;
 			case ArrayInit: o.t.match(TI32 | TBool | TF64 | TI64) ? 2 : 3 + barrier;
 			case NewNArray: 25;

@@ -194,11 +194,8 @@ class OInfo {
 		o.listIndex = listIndex;
 		o.young = young;
 		o.fresh = fresh;
-
 		o.ops = ops;
-
 		return o;
-
 	}
 }
 

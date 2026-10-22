@@ -167,7 +167,6 @@ class Frames {
 				}
 			}
 		} else if (reads > 0 && stores > storesRemoved && live) {
-
 			// the slots live at each point: read by a later load before a
 			// store replaces them
 			var inOrder = f.newMark();

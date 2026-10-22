@@ -97,7 +97,6 @@ optimization tier for #15's interpreted macros.
 - **What stays memory-level in `MirBuild`**: the shadow-stack frame and
   the rooted locals' slots (stage 4 prunes them after optimization:
   `Frames`), globals, `hxmc.unsafe`'s
-
   intrinsics (opaque memory operations inside object-level functions, as
   the plan has it), C calls, and strings' inline helpers (`String.length`,
   `charCodeAt`, `hx_str_eq`, `StringBuf.addChar`): no object-level pass
@@ -168,6 +167,95 @@ read across blocks, removed again by `removeTrivialPhis`, 0.57 G): about
 0.35 G; fewer barriers and roots after optimization: in register
 allocation and instruction selection rather than the Mir phase, as many as
 the sites removed. `Escape`'s shape matching is already gone (above).
+
+### Built: stage 4
+
+The pipeline: `MirBuild` (object-level, `objects`), `Inline`, the closures
+called where they are made, `Escape`, `Sroa`, `Opt`, `Frames`, then
+`MemLower` (`lower`), `Fold`, `Opt.lowered` and the back ends. The output
+changes from here (no byte-identity with stage 3).
+
+- **`Opt` on object-level Mir**, before `MemLower`: value numbering, store
+  forwarding, loop-invariant code motion and condition propagation see
+  objects. A field read (`GetField`) is a load of its field's class (by
+  offset, as the lowered loads were), a field write (`SetField`,
+  `InitField`) a store a later read of the field takes the value of, an
+  Array's length and elements and a NativeArray's elements loads of their
+  classes; type tests, enum tags and field addresses are pure; an
+  operation that may collect or call (an allocation, a box, a virtual or
+  structural call, an array store or push, a reference element read)
+  writes every class but immutable memory, as a call does. A null test
+  dominated by one of the same value, or by a branch on its comparison
+  with null, goes (`condProp`), and a branch on that comparison is
+  decided. An operation's continuation stays as `MemLower` needs it
+  (`Opt.contOf`: no block merge or jump threading takes it apart; what a
+  pass puts between an operation and its jump starts the continuation).
+- **What a lowering reads that another may read too becomes operands
+  first** (`Opt.operands`), so that it is shared and moved out of loops as
+  the lowered Mir's loads were: a write barrier's nursery bounds (its
+  last two arguments, `OInfo.young`; a store's own, shared with nothing,
+  go back to `MemLower`, which loads them after the store as before), an
+  Array's header (kind, length, storage) and widened index for its element
+  reads and writes and its pushes (`OInfo.ops`), a NativeArray's widened
+  index. `MemLower` reads an Array literal's storage again only after a
+  call that may collect (`MemLower.epoch`), and a structural read's cache
+  test reuses the type index its shape test read.
+- **After `MemLower`**: allocation folding (`Fold`), then `Opt.lowered`:
+  the jump threading of the lowered boolean phis (`a && b`, a type test's
+  result branched on), block merges, copies, dead code; no value
+  numbering, LICM or condition propagation.
+- **Write barriers after optimization**: `MemLower` places them, after
+  `Opt`, for the stores left; a reference stored into an object allocated
+  since the last point where a collection may happen (in the block, or a
+  block entered only from it) gets none (`Opt.freshTargets`,
+  `OInfo.fresh`; the store still publishes what it stores,
+  `MIns.release`). The object must be young: the runtime allocates an
+  object of a quarter of the nursery or less there, and the nursery is now
+  4 KB at least (`RT_MINOR_KB`), so objects of up to 63 slots qualify.
+- **Roots after optimization** (`Frames.hx`): `Roots` still gives the
+  rooted locals their shadow-stack slots on the IR, but after `Opt` (which
+  takes a stored value back where nothing collects in between) a slot
+  store no load can see any more goes (a liveness of the slots over the
+  graph; `HXMC_FRAMES_LIVE=0`: only the slots nothing reads), and a frame
+  left without loads is not pushed at all (its cold sites push their
+  spills on their slow paths); a cold site spills only the references read
+  after it (its continuation's phis, `MemLower.spillNeed`). Functions with
+  a `try` keep their frames.
+- **Inline templates at the object level, built once**: a template's size
+  is counted on its object-level Mir, an operation counting what `MemLower`
+  makes of it outside slow paths (`Inline.size`, `opSize`, fitted on the
+  port's 4,782 templates against their lowering: 1 is judged otherwise at
+  the flat limit of 16, 9 at the loop limit of 48).
+- **No trivial phis made**: `MirWriter` reads a sealed join's
+  predecessors first and makes a phi only where their values differ or a
+  read came back to the join (Braun et al.'s marker); `removeTrivialPhis`
+  is left with the loops' phis.
+- **Measured** (2026-10-22, linux-x86_64, against stage 3, which is
+  main's output; a machine shared with other work):
+
+| | stage 3 | stage 4 |
+| --- | --- | --- |
+| the port: sites replaced | 334 | 333 (`Genswf.build_swf9`'s `GlobalTypePath`: its constructor is no longer inlined, one of the templates judged otherwise) |
+| the tool (the same source): sites replaced | 259 | 259 |
+| write barriers left out, slot stores and frames dropped (the port) | | barriers of fresh objects: see the binary; 1,680 root stores, 20 frames |
+| the port's binary | 20,611,872 B | 20,427,552 B (-0.9%) |
+| the tool's binary (the same source, built by each) | 18,205,352 B | 18,012,840 B (-1.1%) |
+| mandelbrot, mandelbrot (anonymous objects), binarytrees | 2.671 G, 2.868 G, 8.889 G instructions | 2.179 G, 2.179 G, 8.889 G |
+| the port's self-compile (instructions, callgrind) | 36.933 G | 36.852 G (-0.22%), its HXB the same (HxbCmp, 518 modules) |
+| the port's build, instructions (callgrind) | 102.05 G | 98.39 G (-3.6%) |
+| compile time: the port's build by the tool (one thread, nothing cached; runs interleaved, best and median) | TIMING_MAIN | TIMING_NEW |
+
+Where the Mir phase's instructions went (callgrind, the port's build):
+about 21.6 G became 18.8 G (-2.8 G, -13%). `Opt` 7.57 G became 4.75 G
+on object-level Mir and 1.09 G after `MemLower` (`Opt.lowered`, mostly the
+threading's scan and block merges); `MirBuild.objects` 6.75 G became
+6.50 G, its `removeTrivialPhis` 0.57 G 0.16 G; `lower` 3.93 G became
+3.38 G; the inline templates 0.74 G became 0.31 G; `Inline` 0.83 G 0.79
+G; `Escape` with the closure-call pass 1.28 G 1.21 G; `Frames` is new,
+0.34 G; `Fold` 0.44 G 0.43 G. Outside it, register allocation 18.95 G
+became 17.69 G and instruction selection 5.66 G 5.60 G (fewer barriers and
+frames); `Layout.order` 0.03 G became 0.27 G (it now builds the CFG's
+analyses `Opt` used to leave it).
 
 ## Escape analysis
 

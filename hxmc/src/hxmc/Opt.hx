@@ -34,7 +34,6 @@ using core.ds.VectorTools;
 // and a reference stored into an object allocated since the last point
 // where a collection may happen loses its write barrier (freshTargets).
 // After MemLower only the CFG's cleanup, copies and dead code (lowered).
-
 class Opt {
 	// memory classes (MIns.mem)
 	public static inline var MOther = 0; // anything: written by any store or call
@@ -551,7 +550,6 @@ class Opt {
 		for (b in f.blocks.copy()) {
 			if (b == f.entry || b.handler || b.preds.length == 0 || b.preds.length == 1 && contOf(b.preds[0]) == b) continue;
 			var ins = b.ins;
-
 			var n = ins.length;
 			if (n < 2 || n > 4) continue;
 			var phi = ins[0], br = ins[n - 1];
@@ -1226,7 +1224,6 @@ class Opt {
 			outs[k] = last;
 		}
 	}
-
 
 	// A barrier's operands that no other store shares, nor moved out of a
 	// loop, go again: MemLower loads them after the store, as it would
