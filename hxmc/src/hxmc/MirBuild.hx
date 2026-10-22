@@ -108,10 +108,11 @@ class MirBuild extends MirWriter {
 
 	// ---- object-level operations
 
-	// an object-level operation (its static part: o) where control is. One
-	// whose lowering branches and meets again (MemLower.branches) ends its
-	// block: the code after it is in a block of its own (OInfo.cont), the
-	// lowering's last block, where a cold site's references get their phis
+	// an object-level operation (its static part: o) where control is. A
+	// cold site's GC point with references across it ends its block: the
+	// code after it is in a block of its own (OInfo.cont), its lowering's
+	// last block, where the references get their phis (MemLower makes the
+	// other operations' last blocks)
 	function obj(op:Op, ty:MTy, o:OInfo, a = -1, b = -1, c = -1):MIns {
 		var i = mk(op, ty);
 		i.a = a;
@@ -119,7 +120,7 @@ class MirBuild extends MirWriter {
 		i.c = c;
 		i.info = o;
 		add(i);
-		if (MemLower.branches(op, o)) {
+		if (o.nspill > 0 && MemLower.branches(op, o)) {
 			var k = newBlock();
 			jmp(k);
 			seal(k);

@@ -71,23 +71,22 @@ class MemLower extends MirWriter {
 			defs.push(new BlockDefs());
 			incomplete.push(null);
 		}
+		// (in reverse postorder: an operation another one's lowering needs, a
+		// NewArray its ArrayInits', an AnonTest its AnonStore's, dominates it)
 		f.edited();
-		var live = f.newMark();
-		for (b in f.blocks)
-			b.mark = live;
-		var ops = [for (i in f.vals) if (i.isObj() && !i.dead && i.block != null && i.block.mark == live) i];
-		for (x in ops)
-			lowerOp(x);
+		for (b in f.cfg().rpo.copy())
+			lowerBlock(b);
 		f.edited();
 		// the operations' values replaced by their lowering's
-		for (b in f.blocks)
-			for (i in b.ins) {
-				if (i.a >= 0) i.a = r(i.a);
-				if (i.b >= 0) i.b = r(i.b);
-				if (i.c >= 0) i.c = r(i.c);
-				for (q in 0...i.args.length)
-					i.args[q] = r(i.args[q]);
-			}
+		if (repl.length > 0)
+			for (b in f.blocks)
+				for (i in b.ins) {
+					if (i.a >= 0) i.a = r(i.a);
+					if (i.b >= 0) i.b = r(i.b);
+					if (i.c >= 0) i.c = r(i.c);
+					for (q in 0...i.args.length)
+						i.args[q] = r(i.args[q]);
+				}
 	}
 
 	inline function r(v:Int):Int {
@@ -110,107 +109,101 @@ class MemLower extends MirWriter {
 	inline function frameSlot(size:Int, align:Int):Int
 		return f.slot(size, align);
 
-	function lowerOp(x:MIns) {
-		var o = op = x.info;
-		var b = x.block;
-		var k = b.ins.indexOf(x);
-		var rest = b.ins.slice(k + 1);
-		b.ins.resize(k);
-		var term = x.isTerm();
+	// the block's instructions again, its operations lowered where they are
+	// (the code after one that branches in its last block)
+	function lowerBlock(b:MBlock) {
+		var list = b.ins;
+		var any = false;
+		for (i in list)
+			if (i.isObj() && !i.dead) {
+				any = true;
+				break;
+			}
+		if (!any) return;
+		b.ins = [];
 		var succs = b.succs;
 		b.succs = [];
-		if (term)
-			for (t in x.targets)
-				t.preds.remove(b);
-		// a continuation: entered by the lowering's edges; the code there,
-		// its phis first, after the lowering's
-		var c = branches(x.op, o) ? o.cont : null;
-		var cphis = [], cins = [];
-		var last = rest.length > 0 ? rest[rest.length - 1] : null;
-		if (c != null && (last == null || last.op != Jmp || last.targets[0] != c)) c = null;
-		if (c != null) {
-			// (what comes between the operation and the jump to its
-			// continuation, added by object-level passes, goes first there)
-			rest.pop();
-			for (i in c.ins)
-				if (i.op == Phi) cphis.push(i);
-			for (i in rest) {
-				i.block = c;
-				cins.push(i);
-			}
-			for (i in c.ins)
-				if (i.op != Phi) cins.push(i);
-			c.preds.remove(b);
-			c.ins = [];
-			rest = [];
-			op.cont = c;
-		} else if (branches(x.op, o)) {
-			// (none, an operation an object-level pass made: one of its own,
-			// with the rest of the block)
-			c = newBlock();
-			c.sealed = true;
-			for (i in rest) {
-				i.block = c;
-				cins.push(i);
-			}
-			c.succs = succs;
-			for (s in succs)
-				for (q in 0...s.preds.length)
-					if (s.preds[q] == b) s.preds[q] = c;
-			rest = [];
-			op = o = o.copy(c);
-		}
 		cur = b;
-		curPos = x.pos;
-		cold = o.cold;
-		spills = [];
-		if (cold)
-			for (q in 0...o.nspill) {
-				var v = newVar(I64);
-				writeVar(v, b, r(x.args[q]));
-				spills.push(v);
+		var ended = false; // (its successors are the lowering's)
+		var k = 0;
+		while (k < list.length) {
+			var x = list[k++];
+			if (x.dead) continue;
+			if (!x.isObj()) {
+				x.block = cur;
+				cur.ins.push(x);
+				continue;
 			}
-		fr = o.fr ? r(x.args[o.nspill]) : -1;
-		spillBase = o.spillBase;
-		var v = lower(x, o);
-		if (v >= 0) {
-			replace(x.id, v);
-			var y = f.vals[v];
-			if (y.vty == null) y.vty = x.vty;
-		}
-		if (c != null) {
-			if (cur != c) throw "MemLower: " + MFunc.opName(x.op) + " ends elsewhere than its continuation";
-			// MirBuild's phis there: one value per edge, the same, or the
-			// reference the edge's path has (read back on the slow path)
-			for (phi in cphis) {
-				var one = phi.args[0];
-				var args = new Vector<Int>(c.preds.length);
-				for (q in 0...args.length)
-					args[q] = phi.imm > 0 ? readVar(spills[phi.imm - 1], c.preds[q]) : one;
-				phi.args = args;
-				phi.imm = 0;
+			var o = op = x.info;
+			curPos = x.pos;
+			cold = o.cold;
+			spills = [];
+			if (cold)
+				for (q in 0...o.nspill) {
+					var v = newVar(I64);
+					writeVar(v, cur, r(x.args[q]));
+					spills.push(v);
+				}
+			fr = o.fr ? r(x.args[o.nspill]) : -1;
+			spillBase = o.spillBase;
+			var c:Null<MBlock> = null, cphis = [], cins = [];
+			if (x.isTerm()) {
+				for (t in x.targets)
+					t.preds.remove(b);
+				ended = true;
+			} else if (branches(x.op, o)) {
+				c = o.cont;
+				var j = k < list.length ? list[k] : null;
+				if (c != null && k == list.length - 1 && j.op == Jmp && j.targets[0] == c) {
+					// its continuation (a cold site's references have their phis
+					// there): entered by the lowering's edges, the code there
+					// after the lowering's
+					k++;
+					c.preds.remove(b);
+					for (i in c.ins)
+						(i.op == Phi ? cphis : cins).push(i);
+					c.ins = [];
+					ended = true;
+				} else {
+					// (none: one of its own, where the rest of the block goes)
+					c = newBlock();
+					c.sealed = true;
+					op = o = o.copy(c);
+				}
 			}
-			var ins = [for (i in c.ins) if (i.op == Phi) i];
-			for (i in cphis)
-				ins.push(i);
-			for (i in c.ins)
-				if (i.op != Phi) ins.push(i);
-			for (i in cins)
-				ins.push(i);
-			c.ins = ins;
-			return;
+			var v = lower(x, o);
+			if (v >= 0) {
+				replace(x.id, v);
+				var y = f.vals[v];
+				if (y.vty == null) y.vty = x.vty;
+			}
+			if (c != null && cur != c) throw "MemLower: " + MFunc.opName(x.op) + " ends elsewhere than its continuation";
+			if (cphis.length > 0 || cins.length > 0) {
+				// its phis: one value per edge, the reference the edge's path has
+				for (phi in cphis) {
+					var one = phi.args[0];
+					var args = new Vector<Int>(c.preds.length);
+					for (q in 0...args.length)
+						args[q] = phi.imm > 0 ? readVar(spills[phi.imm - 1], c.preds[q]) : one;
+					phi.args = args;
+					phi.imm = 0;
+				}
+				var ins = [for (i in c.ins) if (i.op == Phi) i];
+				for (i in cphis)
+					ins.push(i);
+				for (i in c.ins)
+					if (i.op != Phi) ins.push(i);
+				for (i in cins)
+					ins.push(i);
+				c.ins = ins;
+			}
 		}
-		var e = cur;
-		for (i in rest) {
-			i.block = e;
-			e.ins.push(i);
-		}
-		if (term) return;
-		if (e != b) {
-			e.succs = succs;
+		if (ended) return;
+		if (cur != b) {
+			cur.succs = succs;
 			for (s in succs)
 				for (q in 0...s.preds.length)
-					if (s.preds[q] == b) s.preds[q] = e;
+					if (s.preds[q] == b) s.preds[q] = cur;
 		} else b.succs = succs;
 	}
 

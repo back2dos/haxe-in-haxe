@@ -323,17 +323,20 @@ class Escape {
 				// continuation computes before, its constructor's arguments, may
 				// read the previous instance of its group)
 				var j = o.cont;
+				var after = false;
 				if (j != null && j.preds.length == 1 && j.preds[0] == i.block) {
 					s.block = j;
-					s.defAt = j.term();
-					for (u in j.ins) {
-						if (u.dead || u.op == Phi) continue;
-						if (u.a == i.id || u.b == i.id || u.c == i.id || u.args.indexOf(i.id) >= 0) {
-							s.defAt = u;
-							break;
-						}
+					after = true;
+				} else j = i.block;
+				s.defAt = j.term();
+				for (u in j.ins) {
+					if (u == i) after = true;
+					if (!after || u == i || u.dead || u.op == Phi) continue;
+					if (u.a == i.id || u.b == i.id || u.c == i.id || u.args.indexOf(i.id) >= 0) {
+						s.defAt = u;
+						break;
 					}
-				} else s.defAt = i;
+				}
 				if (s.defAt == null) return null;
 				s.key = o.name + ":" + o.tindex + ":" + o.n;
 				return s;
