@@ -59,12 +59,14 @@ class LowerCache {
 	var platform = -1; // (and its Apple platform: Mem.platform)
 	var lines = false; // and whether they have their positions (Lower.lines)
 	var wasmGc = false; // (and the runtime's implementations they call: Lower.wasmGc)
-	var resources:Array<{name:String, data:String}> = []; // (and haxe.Resource's content: Lower.resources)
+	// (and haxe.Resource's names, literals of its bodies: Lower.resources; the
+	// bytes are DataGen's, written again every build)
+	var resources:Array<String> = [];
 
-	static function sameResources(a:Array<{name:String, data:String}>, b:Array<{name:String, data:String}>):Bool {
+	static function sameNames(a:Array<{name:String, data:haxe.io.Bytes}>, b:Array<String>):Bool {
 		if (a.length != b.length) return false;
 		for (i in 0...a.length)
-			if (a[i].name != b[i].name || a[i].data != b[i].data) return false;
+			if (a[i].name != b[i]) return false;
 		return true;
 	}
 	var bounds = Lower.BOUNDS_UNCHECKED; // and their tests of NativeArray indices (Lower.bounds)
@@ -75,7 +77,7 @@ class LowerCache {
 		why = null;
 		build++;
 		if (Lower.targetCode != target || Lower.targetPlatform != platform || Lower.lines != lines || Lower.wasmGc != wasmGc
-			|| Lower.bounds != bounds || Lower.nullChecks != nullChecks || !sameResources(Lower.resources, resources)) {
+			|| Lower.bounds != bounds || Lower.nullChecks != nullChecks || !sameNames(Lower.resources, resources)) {
 			entries = new haxe.ds.ObjectMap();
 			lambdas = new haxe.ds.ObjectMap();
 			byKey = new Map();
@@ -83,7 +85,7 @@ class LowerCache {
 			platform = Lower.targetPlatform;
 			lines = Lower.lines;
 			wasmGc = Lower.wasmGc;
-			resources = Lower.resources;
+			resources = [for (r in Lower.resources) r.name];
 			bounds = Lower.bounds;
 			nullChecks = Lower.nullChecks;
 		}

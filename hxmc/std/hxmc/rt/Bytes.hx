@@ -124,6 +124,33 @@ class Bytes {
 		#end
 	}
 
+	// haxe.Resource's bytes (hxmc.NativeResource). In linear memory the table
+	// DataGen.resources writes in the read-only data: per resource, the offset
+	// of its bytes from the table and their length (32 bits each), the bytes
+	// after it; outside the heap, so they stay where they are while the copy is
+	// allocated. Under -D hxmc.wasm-gc bytes(i) is an instruction
+	// (array.new_data of resource i's segment: GcModule.resourceBytes).
+	#if !(hxmc.wasm_gc)
+	@:hxmc.host("hxmc_NativeResource_bytes") static function resourceBytes(i:Int):Dynamic {
+		var t = Mem.sym("hxmc_resources");
+		var n = Mem.getI32(t, 8 * i + 4);
+		var b = allocUninit(n);
+		LibC.memcpy(bytes(b), t.add(Mem.getI32(t, 8 * i)), n);
+		return b;
+	}
+	#end
+
+	// (decoded where the bytes are: linear memory's, without a copy)
+	@:hxmc.host("hxmc_NativeResource_string") static function resourceString(i:Int):String {
+		#if (hxmc.wasm_gc)
+		var b = hxmc.NativeResource.bytes(i);
+		return Str.decode(Repr.octets(b), 0, len(b));
+		#else
+		var t = Mem.sym("hxmc_resources");
+		return Str.ofUtf8(t.add(Mem.getI32(t, 8 * i)), Mem.getI32(t, 8 * i + 4));
+		#end
+	}
+
 	@:hxmc.host("hxmc_NativeBytes_toHex") static function toHex(b:Dynamic):String {
 		var n = len(b);
 		var s = Str.make(2 * n);
