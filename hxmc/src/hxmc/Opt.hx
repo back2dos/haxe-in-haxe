@@ -1654,5 +1654,5 @@ class Opt {
 
 	static inline function removable(i:MIns):Bool
 		return pure(i.op) || objPure(i.op) || objLoadClass(i) >= 0 || i.op == ArrayGet || i.op == Load || i.op == TlsLoad || i.op == Const || i.op == ConstF || i.op == SymAddr || i.op == StackAddr || i.op == Copy || i.op == Phi
-			|| i.op == IrNode && i.info.ex != null && i.args.length == 0; // (a literal, a type value or a global read: WasmGC)
+			|| i.op == IrNode && i.info.ex != null && i.info.ex.match(EStr(_) | EType(_) | EGlobal(_, _)); // (a literal, a type value or a global read: WasmGC)
 }

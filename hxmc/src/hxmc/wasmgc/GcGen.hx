@@ -1,6 +1,7 @@
 package hxmc.wasmgc;
 
 import hxmc.ir.Ir;
+import hxmc.Mir;
 
 // -D hxmc.wasm-gc: the program's IR (after Lower) as a WasmGC module, an
 // experiment to compare with the linear-memory target (docs/plans/targets.md,
@@ -8,6 +9,9 @@ import hxmc.ir.Ir;
 // (hxmc.ir.Reach, as for linear memory: method-level, by name), the runtime's
 // exports where this target's code calls them (runtimeCalls).
 class GcGen {
+	// the functions by their symbol in the Mir (MirBuild.gcSymOf: Uses)
+	public static var funcBySym:Map<String, FuncInfo>;
+
 	// HXMC_GC_SURVEY=1: what is emitted, then what the module would lack (each
 	// unsupported construct, the functions with it); =2: also the module
 	// written, those functions trapping (to measure the rest)
@@ -23,9 +27,15 @@ class GcGen {
 			}
 		};
 		hxmc.ir.Reach.run(prog, o.stats, calls);
+		var t0 = haxe.Timer.stamp();
 		var u = new Uses(prog, o.opt, o.jobs > 0 ? o.jobs : hxmc.Driver.domains());
-		hxmc.ir.Reach.run(prog, o.stats, calls, f -> u.bodies.get(f).body);
+		hxmc.ir.Reach.run(prog, o.stats, calls, u.summary);
 		u.scan();
+		if (o.stats) {
+			Sys.println('hxmc: wasm-gc Mir ${Std.int((haxe.Timer.stamp() - t0) * 1000)} ms, ${u.sitesReplaced} allocation sites replaced, ${Lambda.count(u.unbuilt)} functions not built');
+			for (f => why in u.unbuilt)
+				Sys.println('  ${f.name}: $why');
+		}
 		var survey = Sys.getEnv("HXMC_GC_SURVEY");
 		if (survey != "1" && survey != "2") {
 			sys.io.File.saveBytes(out, new GcModule(prog, u, !o.strip).build());
@@ -75,10 +85,11 @@ class GcGen {
 		}
 }
 
-// What the emitted functions use: each one's body as emitted (IrOpt: inlined,
-// objects scalar-replaced), the host functions it calls, the classes it
-// makes (or has the class value of), the selectors it dispatches on, the
-// closures and anonymous structures it makes
+// What the emitted functions use: each one's object-level Mir as emitted
+// (MirBuild, inlined, its allocations replaced, optimized: wasmgc.MirGen
+// emits it), the host functions it calls, the classes it makes (or has the
+// class value of), the selectors it dispatches on, the closures and
+// anonymous structures it makes
 class Uses {
 	public final prog:Program;
 	public final funcs:Array<FuncInfo> = [];
@@ -87,7 +98,12 @@ class Uses {
 	public final classes = new Map<ClassInfo, Bool>();
 	public final lambdas = new Map<LambdaInfo, Bool>();
 	public final shapes = new Map<ShapeInfo, Bool>();
-	public final bodies = new Map<FuncInfo, {body:haxe.ds.Vector<Stmt>, locals:Array<Local>}>();
+	public final mirs = new Map<FuncInfo, MFunc>();
+	// the functions MirBuild does not take, with why (the IR walker writes them: FuncGen)
+	public final unbuilt = new Map<FuncInfo, String>();
+	public var sitesReplaced = 0; // (Escape)
+	final cands = new Map<FuncInfo, Bool>(); // (the functions that may be inlined: Inline.candidate)
+	final summaries = new Map<FuncInfo, haxe.ds.Vector<Stmt>>();
 	// the program works on linear memory (hxmc.unsafe, C functions: GcModule.memory)
 	public var memory = false;
 	// the class of dates, the runtime's hxmc.rt.gc.GcDate (GcRepr.dateOf): Date's
@@ -98,35 +114,106 @@ class Uses {
 	public function new(prog:Program, optimize:Bool, jobs:Int) {
 		this.prog = prog;
 		dateClass = Lambda.find(prog.classes, c -> c.name == "hxmc.rt.gc.GcDate");
-		// (each function's on its own: on threads, an IrOpt each, as its
-		// memos of the callees are the same for every function)
+		// the functions by symbol (MirBuild's calls name their callee: MirGen)
+		var syms = new haxe.ds.ObjectMap<FuncInfo, String>();
+		var bySym = new Map<String, FuncInfo>();
+		for (k in 0...prog.funcs.length) {
+			var s = "f" + k;
+			syms.set(prog.funcs[k], s);
+			bySym.set(s, prog.funcs[k]);
+		}
+		GcGen.funcBySym = bySym;
+		MirBuild.gcSymOf = g -> {
+			var s = syms.get(g);
+			s != null ? s : "?" + g.name;
+		};
+		if (optimize)
+			for (f in prog.funcs)
+				if (Inline.candidate(f)) cands.set(f, true);
+		MirBuild.inlineCands = optimize ? cands : null;
+		var abi = Abi.get("wasm32-wasi");
+		var dump = Sys.getEnv("HXMC_GC_DUMP"); // (a function's Mir, by its name)
+		// (each function's on its own, on threads: the callees' templates shared)
+		var templates = new haxe.ds.ObjectMap<FuncInfo, {t:Null<Inline.Template>}>();
+		var tlock = new sys.thread.Mutex();
+		function template(fn:FuncInfo):Null<Inline.Template> {
+			tlock.acquire();
+			var e = templates.get(fn);
+			tlock.release();
+			if (e != null) return e.t;
+			var cb = new MirBuild(null, abi, fn);
+			cb.gc = true;
+			var t = try Inline.template(cb, cb.objects()) catch (_:MirBuild.Unsupported) null;
+			tlock.acquire();
+			var e2 = templates.get(fn);
+			if (e2 == null) templates.set(fn, {t: t}) else t = e2.t;
+			tlock.release();
+			return t;
+		}
+		function build(fn:FuncInfo):MFunc {
+			var mb = new MirBuild(null, abi, fn);
+			mb.gc = true;
+			var mf = mb.objects();
+			if (!optimize) return mf;
+			function rounds(todo:Array<{call:MIns, fn:FuncInfo}>) {
+				for (_ in 0...Inline.DEPTH) {
+					if (todo.length == 0) break;
+					var sites = [];
+					var inLoop = Inline.loopBlocks(mf);
+					for (s in todo) {
+						var t = template(s.fn);
+						if (t != null && s.fn != fn && t.size <= Inline.maxSize(true, s.call.block.mark == inLoop, StringTools.startsWith(s.fn.module, "hxmc.rt.")))
+							sites.push({call: s.call, callee: t});
+					}
+					todo = Inline.run(mf, sites);
+				}
+			}
+			rounds(mb.inlineSites);
+			if (Escape.on && mf.allocs > 0 && Escape.part("closures"))
+				rounds(Escape.closureCalls(mf, g -> g.module == fn.module && cands.exists(g), MirBuild.gcSymOf));
+			if (Escape.on) {
+				var es = new Escape(mf);
+				es.run();
+				if (es.removed > 0) {
+					tlock.acquire();
+					sitesReplaced += es.removed;
+					tlock.release();
+				}
+			}
+			new Opt(mf).run();
+			if (dump != null && dump == fn.name) Sys.println(mf.dump());
+			return mf;
+		}
 		var fs = prog.funcs;
-		var out = new haxe.ds.Vector<{body:haxe.ds.Vector<Stmt>, locals:Array<Local>}>(fs.length);
+		var out = new haxe.ds.Vector<MFunc>(fs.length);
 		var next = 0, failure:Null<String> = null;
 		var lock = new sys.thread.Mutex();
 		function work() {
-			var opt = new IrOpt();
 			while (true) {
 				lock.acquire();
 				var k = next;
-				next += 64;
+				next += 16;
 				lock.release();
 				if (k >= fs.length || failure != null) return;
-				var end = k + 64 < fs.length ? k + 64 : fs.length;
-				try {
-					for (i in k...end) {
-						var b = opt.run(fs[i], optimize);
-						out[i] = {body: IrOpt.live(b.body), locals: b.locals};
+				var end = k + 16 < fs.length ? k + 16 : fs.length;
+				for (i in k...end)
+					try {
+						out[i] = build(fs[i]);
+					} catch (e:MirBuild.Unsupported) {
+						// (what MirBuild does not take: the function traps, GcModule.survey)
+						out[i] = null;
+						lock.acquire();
+						unbuilt.set(fs[i], e.msg);
+						lock.release();
+					} catch (e:Dynamic) {
+						lock.acquire();
+						if (failure == null) failure = fs[i].name + ": " + Std.string(e) + haxe.CallStack.toString(haxe.CallStack.exceptionStack());
+						lock.release();
+						return;
 					}
-				} catch (e:Dynamic) {
-					lock.acquire();
-					if (failure == null) failure = Std.string(e);
-					lock.release();
-					return;
-				}
 			}
 		}
-		if (jobs > fs.length >> 6) jobs = (fs.length >> 6) + 1;
+		if (jobs > fs.length >> 4) jobs = (fs.length >> 4) + 1;
 		if (jobs <= 1) work() else {
 			var done = new sys.thread.Lock();
 			for (_ in 0...jobs)
@@ -139,15 +226,122 @@ class Uses {
 		}
 		if (failure != null) throw failure;
 		for (i in 0...fs.length)
-			bodies.set(fs[i], out[i]);
+			if (out[i] != null) mirs.set(fs[i], out[i]);
+	}
+
+	// What Reach's second pass reads of f (Reach.bodyOf): its IR, flattened,
+	// each call its Mir no longer makes (inlined everywhere, or gone) replaced
+	// by the callee's body, its parameters by the arguments (so that the names
+	// passed to lookups are still seen: Reach.findSinks); what the Mir dropped
+	// otherwise stays, which keeps more than needed, never less
+	public function summary(f:FuncInfo):haxe.ds.Vector<Stmt> {
+		var mf = mirs.get(f);
+		if (mf == null) return f.body;
+		var done = summaries.get(f);
+		if (done != null) return done;
+		var called = new Map<String, Bool>();
+		for (b in mf.blocks)
+			for (i in b.ins)
+				if (!i.dead && i.op == Call && i.sym != null) called.set(i.sym, true);
+		var out:Array<Stmt> = [];
+		var open:Array<FuncInfo> = [f];
+		function flatten(body:haxe.ds.Vector<Stmt>, subst:Null<Map<Local, Ex>>) {
+			function ex(e:Ex):Ex {
+				switch e {
+					case ELocal(l) if (subst != null && subst.exists(l)):
+						return subst.get(l);
+					// (a call made at other sites may have been inlined at some: its body too)
+					case ECall(g, args) if ((cands.exists(g) || !called.exists(MirBuild.gcSymOf(g))) && open.length <= Inline.DEPTH
+						&& open.indexOf(g) < 0):
+						var xs = args.map(ex);
+						var m = new Map<Local, Ex>();
+						for (k in 0...g.args.length)
+							if (k < xs.length) m.set(g.args[k], xs[k]);
+						open.push(g);
+						flatten(g.body, m);
+						open.pop();
+						return called.exists(MirBuild.gcSymOf(g)) ? ECall(g, xs) : ECallHost("hxmc_gc_inlined", xs, g.ret);
+					case _:
+						return hxmc.ir.Facts.mapEx(ex, e);
+				}
+			}
+			function st(s:Stmt) {
+				switch s {
+					case SSet(l, e): out.push(SSet(l, ex(e)));
+					case SExpr(e) | SReturn(e) if (e != null): out.push(SExpr(ex(e)));
+					case SReturn(_) | SBreak | SContinue | SPos(_):
+					case SThrow(e): out.push(SThrow(ex(e)));
+					case SSetGlobal(g, e): out.push(SSetGlobal(g, ex(e)));
+					case SSetField(c, idx, o, v): out.push(SSetField(c, idx, ex(o), ex(v)));
+					case SAnonSet(n, t, o, v): out.push(SAnonSet(n, t, ex(o), ex(v)));
+					case SBoxSet(t, o, v): out.push(SBoxSet(t, ex(o), ex(v)));
+					case SArrSet(t, a, i, v): out.push(SArrSet(t, a, ex(i), ex(v)));
+					case SArrPush(t, a, v): out.push(SArrPush(t, a, ex(v)));
+					case SIf(c, a, b):
+						out.push(SExpr(ex(c)));
+						for (x in a)
+							st(x);
+						for (x in b)
+							st(x);
+					case SLoop(body):
+						for (x in body)
+							st(x);
+					case SCold(_, x):
+						st(x);
+					case SSwitch(e, cases, def):
+						out.push(SExpr(ex(e)));
+						for (c in cases)
+							for (x in c.body)
+								st(x);
+						for (x in def)
+							st(x);
+					case STry(body, catches):
+						for (x in body)
+							st(x);
+						for (c in catches) {
+							out.push(SSet(c.l, ENull(c.l.ty)));
+							if (c.test != null) out.push(SExpr(ex(c.test(ELocal(c.l)))));
+							for (x in c.body)
+								st(x);
+						}
+					case SExpr(_):
+				}
+			}
+			for (s in body)
+				st(s);
+		}
+		flatten(f.body, null);
+		var r = haxe.ds.Vector.fromArrayCopy(out);
+		summaries.set(f, r);
+		return r;
 	}
 
 	// (the functions the program keeps: what they use)
 	public function scan() {
 		for (f in prog.funcs) {
 			funcs.push(f);
-			for (s in bodies.get(f).body)
-				stmt(s);
+			var mf = mirs.get(f);
+			if (mf == null) {
+				for (s in f.body)
+					stmt(s);
+				continue;
+			}
+			for (b in mf.blocks)
+				for (i in b.ins) {
+					if (i.dead) continue;
+					var o = i.info;
+					switch i.op {
+						case IrNode:
+							if (o.ex != null) ex(o.ex) else stmt(o.stmt);
+						case VirtualCall:
+							sels.set(o.sel, true);
+						case New:
+							if (o.cls != null) cls(o.cls);
+							if (o.shape != null) shapes.set(o.shape, true);
+							if (o.lambda != null) lambdas.set(o.lambda, true);
+						case _:
+					}
+				}
 		}
 		// (the classes Type.createInstance makes: Meta.createInstance)
 		for (c in prog.classes)

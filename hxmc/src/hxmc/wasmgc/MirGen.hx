@@ -208,6 +208,12 @@ class MirGen extends FuncGen {
 
 	// ---- keys
 
+	static inline function repr(t:Ty):String
+		return GcModule.repr(t);
+
+	static inline function rOf(e:Ex):String
+		return FuncGen.rOf(e);
+
 	static inline function isConst(i:MIns):Bool
 		return i.op == Const || i.op == ConstF;
 
@@ -563,7 +569,7 @@ class MirGen extends FuncGen {
 
 	function nodeWithin(x:MBlock, ys:Array<MBlock>, k:Int) {
 		if (k == ys.length) {
-			block(x);
+			mblock(x);
 			return;
 		}
 		op(0x02);
@@ -611,7 +617,7 @@ class MirGen extends FuncGen {
 			localSet(locs[ps[k].phi.id]);
 	}
 
-	function block(x:MBlock) {
+	function mblock(x:MBlock) {
 		for (i in x.ins) {
 			if (i.dead || i.op == Phi) continue;
 			if (i.isTerm()) {
@@ -623,8 +629,21 @@ class MirGen extends FuncGen {
 		unsupported("a block without a terminator");
 	}
 
-	function cond(v:Int)
-		push(v, "i");
+	// v as a condition: not zero (a reference: not null; Opt's condProp
+	// branches on a value tested against 0 itself)
+	function cond(v:Int) {
+		var k = valueKey(v);
+		if (k != null && isRefKey(k)) {
+			push(v, "p");
+			op(0xD1);
+			op(0x45);
+		} else if (k == "l") {
+			push(v, "l");
+			op(0x50);
+			op(0x45);
+		} else
+			push(v, "i");
+	}
 
 	function term(x:MBlock, t:MIns) {
 		switch t.op {
@@ -764,7 +783,7 @@ class MirGen extends FuncGen {
 				var k = keys[i.id];
 				push(i.b, k);
 				push(i.c, k);
-				push(i.a, "i");
+				cond(i.a);
 				if (isRefKey(k)) {
 					op(0x1C);
 					op(1);

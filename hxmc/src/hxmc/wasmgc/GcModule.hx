@@ -537,6 +537,9 @@ class GcModule {
 
 	// a function's code: emitted again when locals can be given a type (FuncGen.refine)
 	function emitFunc(f:FuncInfo):Buf {
+		var mf = uses.mirs.get(f);
+		if (mf != null && Sys.getEnv("HXMC_GC_MIR") != "0")
+			return try new MirGen(this, f, mf).emit() catch (e:String) throw e + " (in " + f.name + ")";
 		var g = new FuncGen(this, f);
 		var code = g.emit();
 		var r = g.refine();

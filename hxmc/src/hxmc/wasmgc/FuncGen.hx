@@ -97,7 +97,7 @@ class FuncGen {
 			local.set(s.id, i);
 			localKey.set(s.id, s.key);
 		}
-		var code = m.uses.bodies.get(f);
+		var code = {body: IrOpt.live(f.body), locals: f.locals};
 		function setSt(s:Stmt) {
 			switch s {
 				case SSet(l, ECast(TRef(_), x) | x) if (!l.ty.match(TRef(RAny)) && dynamicTyped(x)): loose.set(l.id, true);
