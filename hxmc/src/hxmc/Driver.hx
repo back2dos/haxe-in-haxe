@@ -217,7 +217,7 @@ class Driver {
 			// the runtime's Haxe functions: a section each, dropped by the linker
 			// when nothing reaches them (the exported ones are always compiled)
 			var rtFunc = StringTools.startsWith(fn.module, "hxmc.rt.");
-			if (rtFunc) emit.useSection(Link.GC_PREFIX + name);
+			if (rtFunc) emit.useSection(LinkCore.GC_PREFIX + name);
 			emit.func(lf, ra.usedRegs, true);
 			if (rtFunc) emit.useSection(null);
 			var s4 = haxe.Timer.stamp();
