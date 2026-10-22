@@ -10,31 +10,29 @@ import core.ds.VectorTools.vector;
 using core.ds.VectorTools;
 
 // hxmc's IR (hxmc.ir.Ir: structured statements in A-normal form) of one
-// function to Mir (the runtime's inline helpers are expanded here,
-// so the native code and the runtime agree on every detail):
+// function to Mir: object-level Mir (docs/plans/codegen.md, "Object-level
+// Mir": objects made, their fields, arrays, structural access, type tests,
+// boxes, closures and virtual calls as operations, values typed: MIns.vty),
+// which MemLower turns into memory-level Mir right away (build). Here:
 // - reference locals that Roots puts in shadow-stack slots live in memory
 //   (fr[k]); in functions with a try block the locals a handler can see
 //   live in memory, so values survive the second return of setjmp; the other
 //   locals become SSA values (Braun et al., "Simple and Efficient
-//   Construction of Static Single Assignment Form", on the structured input);
-// - cold sites (SCold) root the references live across them only on the
-//   slow path of the allocation or array store.
+//   Construction of Static Single Assignment Form", on the structured input:
+//   MirWriter);
+// - cold sites (SCold) give their GC points (an allocation, an array store)
+//   the references live across them, which the lowering roots on the slow
+//   path only, and read back after it (the phis of its continuation);
+// - exceptions (the handler record, setjmp), C calls and their structs by
+//   value, the intrinsics of hxmc.unsafe and strings' inline helpers are
+//   memory-level already.
 // Constructs not handled throw Unsupported (the build fails).
-class MirBuild {
-	var p:Prep;
-	var abi:Abi;
-	var fn:FuncInfo;
-	var f:MFunc;
-	var cur:MBlock;
+class MirBuild extends MirWriter {
 	var roots:Roots;
 	var refSlot = new Map<Local, Int>();
 	var nslots = 0;
 	var fr = -1; // the frame's shadow-stack slots (value)
 	var memSlot = new Map<Local, Int>(); // try functions: frame slot of a scalar local
-	var defs:Array<BlockDefs> = [];
-	var incomplete:Array<Null<Map<Int, MIns>>> = []; // (made when a block gets one)
-	var varTy = new Map<Int, MTy>();
-	var nextVar = 0;
 	var loops:Array<{cont:MBlock, brk:MBlock, tries:Int}> = [];
 	var tries:Array<Int> = []; // frame slots of the enclosing handlers
 	var coldList:Null<Array<Local>> = null;
@@ -50,12 +48,7 @@ class MirBuild {
 	static var noShadow = Sys.getEnv("HXMC_NOSHADOW") == "1";
 	static var frameSpills = Sys.getEnv("HXMC_FRAMESPILL") != "0"; // (measurement: 0 pushes on every slow path)
 
-	// explicit null tests (Lower.nullChecks): the block of a call of
-	// rt_null_access per try (its handler's slot; -1: none), which the tests
-	// of the code it covers share (WebAssembly: a try's body is wrapped as
-	// the dominator subtree of its first block, so a block shared across
-	// tries would be outside them), and the values known not to be null
-	var nullBlocks = new Map<Int, MBlock>();
+	// explicit null tests (Lower.nullChecks): the values known not to be null
 	var fresh = new Map<Int, Bool>();
 	// the local each value was last read from, and the locals tested since
 	// their last assignment on every path here (a reference does not become
@@ -66,13 +59,11 @@ class MirBuild {
 	var localOfVal = new Map<Int, Int>();
 	var checkedLocals = new Map<Int, Bool>();
 
-	public var icaches = 0; // inline caches of this function (bss: <name>__ic, IC_SIZE each)
+	public var icaches = 0; // inline caches of this function (bss: <name>__ic, IC_SIZE each: MemLower)
 	public var icSym:String;
 
 	public function new(p:Prep, abi:Abi, fn:FuncInfo) {
-		this.p = p;
-		this.abi = abi;
-		this.fn = fn;
+		super(p, abi, fn);
 	}
 
 	public static function mty(t:Ty):MTy
@@ -84,374 +75,19 @@ class MirBuild {
 			case TRef(_) | TStruct(_): I64;
 		};
 
-	// ---- instruction helpers
-
-	// (-debug) the source position of the statement being built (SrcPos):
-	// the instructions it adds carry it
-	var curPos = 0;
-
-	function add(i:MIns):Int {
-		if (i.pos == 0) i.pos = curPos;
-		i.id = f.vals.length;
-		f.vals.push(i);
-		i.block = cur;
-		cur.ins.push(i);
-		return i.id;
-	}
-
-	inline function mk(op:Op, ty:MTy):MIns
-		return new MIns(op, ty);
-
-	function op2(op:Op, ty:MTy, a:Int, b:Int):Int {
-		// a commutative operation's constant on the right (the instruction
-		// selections' immediate forms)
-		if ((op == Add || op == Mul || op == And || op == Or || op == Xor) && f.vals[a].op == Const && f.vals[b].op != Const) {
-			var t = a;
-			a = b;
-			b = t;
-		}
-		// (x >>> n) | (x << (w - n)): a rotation
-		if (op == Or && (ty == I32 || ty == I64)) {
-			var r = rotation(a, b, ty);
-			if (r < 0) r = rotation(b, a, ty);
-			if (r >= 0) return r;
-			// haxe.crypto's 16-bit split addition (safeAdd, addme): an addition
-			if (ty == I32) {
-				r = splitAdd(a, b);
-				if (r < 0) r = splitAdd(b, a);
-				if (r >= 0) return r;
-			}
-		}
-		var i = mk(op, ty);
-		i.a = a;
-		i.b = b;
-		return add(i);
-	}
-
-	inline function isConst(v:Int, k:Int):Bool {
-		var c = f.vals[v];
-		return c.op == Const && c.sym == null && c.imm == k;
-	}
-
-	// a = (msw << 16), b = (lsw & 0xFFFF), lsw = (x & 0xFFFF) + (y & 0xFFFF),
-	// msw = (x >> 16) + (y >> 16) + (lsw >> 16): x + y
-	function splitAdd(a:Int, b:Int):Int {
-		var sh = f.vals[a], lo = f.vals[b];
-		if (sh.op != Shl || !isConst(sh.b, 16) || lo.op != And || lo.ty != I32) return -1;
-		var lsw = -1;
-		if (isConst(lo.b, 0xFFFF)) lsw = lo.a else if (isConst(lo.a, 0xFFFF)) lsw = lo.b else return -1;
-		var l = f.vals[lsw];
-		if (l.op != Add) return -1;
-		// the operands of lsw: x & 0xFFFF, y & 0xFFFF
-		function masked(v:Int):Int {
-			var m = f.vals[v];
-			if (m.op != And) return -1;
-			return isConst(m.b, 0xFFFF) ? m.a : isConst(m.a, 0xFFFF) ? m.b : -1;
-		}
-		var x = masked(l.a), y = masked(l.b);
-		if (x < 0 || y < 0) return -1;
-		// msw: the sum, in any order, of x >> 16, y >> 16 and lsw >> 16
-		var terms = [];
-		function collect(v:Int, depth:Int) {
-			var t = f.vals[v];
-			if (t.op == Add && depth < 2) {
-				collect(t.a, depth + 1);
-				collect(t.b, depth + 1);
-			} else terms.push(v);
-		}
-		collect(sh.a, 0);
-		if (terms.length != 3) return -1;
-		var want = [x, y, lsw];
-		for (t in terms) {
-			var s = f.vals[t];
-			if (s.op != Sar || !isConst(s.b, 16)) return -1;
-			var k = want.indexOf(s.a);
-			if (k < 0) return -1;
-			want.splice(k, 1);
-		}
-		return op2(Add, I32, x, y);
-	}
-
-	function rotation(a:Int, b:Int, ty:MTy):Int {
-		var x = f.vals[a], y = f.vals[b];
-		if (x.op != Shr || y.op != Shl || x.a != y.a || x.ty != ty || y.ty != ty) return -1;
-		var n = f.vals[x.b], m = f.vals[y.b];
-		if (n.op != Const || m.op != Const || n.sym != null || m.sym != null) return -1;
-		var w = ty == I32 ? 32 : 64;
-		var k = n.imm & (w - 1);
-		if (k == 0 || (m.imm & (w - 1)) != w - k) return -1;
-		var i = mk(Rotr, ty);
-		i.a = x.a;
-		i.b = iconst(k);
-		return add(i);
-	}
-
-	function op1(op:Op, ty:MTy, a:Int):Int {
-		// a constant widened: a constant
-		var x = f.vals[a];
-		if (x.op == Const && x.sym == null && x.ty == I32) {
-			if (op == SExt) return lconst32(x.imm);
-			if (op == ZExt) return lconst(x.imm, 0);
-			if (op == I2F) return fconst(x.imm);
-		}
-		var i = mk(op, ty);
-		i.a = a;
-		return add(i);
-	}
-
-	function iconst(v:Int):Int {
-		var i = mk(Const, I32);
-		i.imm = v;
-		return add(i);
-	}
-
-	// a program-wide number (Prep.tySym...): an absolute symbol + addend, or a plain constant
-	function idConst(sym:Null<String>, value:Int, addend = 0, t:MTy = I32):Int {
-		if (sym == null) return t == I32 ? iconst(value + addend) : lconst32(value + addend);
-		var i = mk(Const, t);
-		i.sym = sym;
-		i.imm = addend;
-		return add(i);
-	}
-
-	inline function tyConst(tindex:Int, addend = 0):Int
-		return idConst(p.tySym(tindex), tindex, addend);
-
-	inline function fidConst(name:String):Int
-		return idConst(p.fidSym(name), 0);
-
-	inline function sigConst(s:SigInfo):Int
-		return idConst(p.sigSym(s), 0);
-
 	// the address of rt_globals[g]
 	function globalAddr(g:Int):Int
 		return op2(Add, I64, loadM(Opt.MConst, I64, 8, symAddr("rt_globals"), 0), idConst(p.globalOffSym(g), 0, 0, I64));
-
-	function lconst(lo:Int, hi:Int):Int {
-		var i = mk(Const, I64);
-		i.imm = lo;
-		i.imm2 = hi;
-		return add(i);
-	}
-
-	inline function lconst32(v:Int):Int
-		return lconst(v, v < 0 ? -1 : 0);
-
-	function fconst(v:Float):Int {
-		var i = mk(ConstF, F64);
-		i.f = v;
-		return add(i);
-	}
-
-	function symAddr(s:String, addend = 0):Int {
-		var i = mk(SymAddr, I64);
-		i.sym = s;
-		i.imm = addend;
-		return add(i);
-	}
 
 	// the symbol of a @:hxmc.threadLocal static (8 bytes per thread), or null
 	// (WebAssembly: one thread, an ordinary global)
 	function tlsGlobal(g:Int):Null<String>
 		return abi.wasm ? null : p.p.globals[g].tls;
 
-	function tlsLoad(s:String):Int {
-		var i = mk(TlsLoad, I64);
-		i.sym = s;
-		return add(i);
-	}
-
-	function tlsStore(s:String, v:Int) {
-		var i = mk(TlsStore, Void);
-		i.sym = s;
-		i.a = v;
-		add(i);
-	}
-
-	// a constant index: part of the displacement
-	inline function constIndex(index:Int):Bool {
-		if (index < 0) return false;
-		var x = f.vals[index];
-		return x.op == Const && x.sym == null && x.ty == I64 && x.imm2 == (x.imm < 0 ? -1 : 0) && x.imm >= -0x1000000 && x.imm < 0x1000000;
-	}
-
-	function load(ty:MTy, size:Int, base:Int, disp:Int, signed = false, index = -1, scale = 1):Int {
-		if (constIndex(index)) {
-			disp += f.vals[index].imm * scale;
-			index = -1;
-		}
-		var i = mk(Load, ty);
-		i.mem = memCls;
-		i.a = base;
-		i.b = index;
-		i.imm = disp;
-		i.imm2 = scale;
-		i.size = size;
-		i.signed = signed;
-		return add(i);
-	}
-
-	// the memory class of the loads and stores made (Opt.MOther...)
-	var memCls = 0;
-
-	function loadM(cls:Int, ty:MTy, size:Int, base:Int, disp:Int, signed = false, index = -1, scale = 1):Int {
-		memCls = cls;
-		var r = load(ty, size, base, disp, signed, index, scale);
-		memCls = 0;
-		return r;
-	}
-
-	function storeM(cls:Int, size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1, release = false) {
-		memCls = cls;
-		store(size, base, disp, v, index, scale, release);
-		memCls = 0;
-	}
-
-	function store(size:Int, base:Int, disp:Int, v:Int, index = -1, scale = 1, release = false) {
-		if (constIndex(index)) {
-			disp += f.vals[index].imm * scale;
-			index = -1;
-		}
-		var i = mk(Store, Void);
-		i.mem = memCls;
-		i.a = base;
-		i.b = index;
-		i.c = v;
-		i.imm = disp;
-		i.imm2 = scale;
-		i.size = size;
-		i.release = release;
-		add(i);
-	}
-
-	function cmp(c:Cond, a:Int, b:Int):Int {
-		// (x op y) == 0 is the inverse comparison, (x op y) != 0 the same one
-		// (the inner comparison is left unused: instruction selection drops it)
-		var x = f.vals[a], z = f.vals[b];
-		if ((c == CEq || c == CNe) && x.op == Cmp && z.op == Const && z.imm == 0) {
-			var inner:Cond = x.imm;
-			if (c == CNe) return cmp(inner, x.a, x.b);
-			var inv = invert(inner);
-			if (inv >= 0) return cmp(inv, x.a, x.b);
-		}
-		var i = mk(Cmp, I32);
-		i.imm = c;
-		i.a = a;
-		i.b = b;
-		return add(i);
-	}
-
-	// the comparison true exactly when c is false, or -1 (ordered double
-	// comparisons are false with NaN either way)
-	static function invert(c:Cond):Int {
-		return switch c {
-			case CEq: CNe;
-			case CNe: CEq;
-			case CLt: CGe;
-			case CGe: CLt;
-			case CLe: CGt;
-			case CGt: CLe;
-			case CULt: CUGe;
-			case CUGe: CULt;
-			case CULe: CUGt;
-			case CUGt: CULe;
-			case FEq: FNe;
-			case FNe: FEq;
-			case _: -1;
-		}
-	}
-
-	function tyOfVal(v:Int):MTy
-		return f.vals[v].ty;
-
-	// whether nothing collects during a call of sym (in this function): a
-	// function of the program that never reaches a GC point nor enters a
-	// safe region, or such a C function, unless this function is in a
-	// safe region itself (another thread may collect meanwhile). The root
-	// slots then keep their values across the call (Opt: MIns.keepsFrame).
-	function keepsFrame(sym:String):Bool
-		return p != null && fn != null && !fn.blocksHere && keepsFrameOf(sym, p.e.bySymbol.get(sym));
-
-	// (g: the program's function of that symbol, or null)
-	function keepsFrameOf(sym:String, g:Null<FuncInfo>):Bool {
-		if (p == null || fn == null || fn.blocksHere) return false;
-		if (g != null) return g.noGc && !g.blocks;
-		if (sym == "rt_blocking_enter" || sym == "rt_blocking_leave") return false;
-		return hxmc.ir.FnLower.noGcHost(sym) || QUIET.exists(sym) || StringTools.startsWith(sym, "hxmc$");
-	}
-
-	// C functions that neither collect nor wait in a safe region, besides
-	// the runtime functions FnLower.noGcHost names
 	// the runtime's machine-code stubs (Target.Emitter.stub)
 	public static inline var STUB_CALL_ON_STACK = "hxmc_call_on_stack";
 	public static inline var STUB_ZERO = "hxmc_zero";
 	public static inline var STUB_FRAME = "hxmc_frame";
-
-	static var QUIET = [
-		"hxmc_zero" => true, "memset" => true, "memcpy" => true, "memmove" => true, "floor" => true, "ceil" => true,
-		"hxmc_barrier_slow" => true, "setjmp" => true, "_setjmp" => true, "__mingw_setjmp" => true, "hxmc_tls_base" => true,
-	];
-
-	function call(sym:String, args:Vector<Int>, ret:MTy, noReturn = false):Int {
-		var g = p == null ? null : p.e.bySymbol.get(sym);
-		// (a function the runtime exports, called by its symbol: one hxmc.ir.RuntimeSymbols lists)
-		if (g != null && g.cSymbol == sym) {
-			var family = abi.wasm ? hxmc.ir.RuntimeSymbols.WASM32 : hxmc.ir.RuntimeSymbols.NATIVE;
-			if (g.rtFamilies & family == 0) hxmc.ir.RuntimeSymbols.called(sym, family);
-		}
-		var i = mk(Call, ret);
-		i.sym = sym;
-		i.keepsFrame = keepsFrameOf(sym, g);
-		i.args = args;
-		i.argTys = args.map(tyOfVal);
-		i.noReturn = noReturn;
-		return add(i);
-	}
-
-	function callInd(fnv:Int, args:Vector<Int>, ret:MTy, ?argTys:Vector<MTy>):Int {
-		var i = mk(Call, ret);
-		i.a = fnv;
-		i.args = args;
-		i.argTys = argTys != null ? argTys : args.map(tyOfVal);
-		return add(i);
-	}
-
-	// blocks made while set are slow paths (the inline-cache path behind a
-	// shape hint: unlikely)
-	var coldNew = false;
-
-	function newBlock():MBlock {
-		var b = f.newBlock();
-		if (coldNew) b.cold = true;
-		defs.push(new BlockDefs());
-		incomplete.push(null);
-		return b;
-	}
-
-	function edge(from:MBlock, to:MBlock) {
-		from.succs.push(to);
-		to.preds.push(from);
-	}
-
-	inline function terminated():Bool
-		return cur.term() != null;
-
-	function jmp(to:MBlock) {
-		if (terminated()) return;
-		var i = mk(Jmp, Void);
-		i.targets = vector(to);
-		add(i);
-		edge(cur, to);
-	}
-
-	function br(c:Int, t:MBlock, e:MBlock) {
-		var i = mk(Br, Void);
-		i.a = c;
-		i.targets = vector(t, e);
-		add(i);
-		edge(cur, t);
-		edge(cur, e);
-	}
 
 	// a new block reached only from where control is now
 	function split():MBlock {
@@ -469,93 +105,80 @@ class MirBuild {
 		cur = b;
 	}
 
-	// ---- SSA variables (locals by id; temporaries above)
+	// ---- object-level operations
 
-	function newVar(t:MTy):Int {
-		var v = nextVar++;
-		varTy.set(v, t);
-		return v;
-	}
-
-	function writeVar(v:Int, b:MBlock, val:Int)
-		defs[b.id].set(v, val);
-
-	function readVar(v:Int, b:MBlock):Int {
-		var d = defs[b.id].get(v);
-		if (d != null) return d;
-		return readVarRec(v, b);
-	}
-
-	function newPhi(b:MBlock, t:MTy):MIns {
-		var i = mk(Phi, t);
-		i.id = f.vals.length;
-		f.vals.push(i);
-		i.block = b;
-		var k = 0;
-		while (k < b.ins.length && b.ins[k].op == Phi)
-			k++;
-		b.ins.insert(k, i);
+	// an object-level operation (its static part: o) where control is: it
+	// records the blocks and frame slots made so far (OInfo.at, slots). One
+	// whose lowering branches and meets again (MemLower.branches) ends its
+	// block: the code after it is in a block of its own (OInfo.cont), which
+	// gets a phi for each variable read there, as the lowering's last block
+	// would (the instruction helpers' rules look at what they are given: a
+	// phi is not a constant)
+	function obj(op:Op, ty:MTy, o:OInfo, a = -1, b = -1, c = -1):MIns {
+		var i = mk(op, ty);
+		i.a = a;
+		i.b = b;
+		i.c = c;
+		o.at = f.blocks.length;
+		o.slots = f.slots.length;
+		i.info = o;
+		add(i);
+		if (MemLower.branches(op, o)) {
+			var k = newBlock();
+			jmp(k);
+			seal(k);
+			cur = k;
+			o.cont = k;
+			conts.set(k.id, o);
+		}
 		return i;
 	}
 
-	function readVarRec(v:Int, b:MBlock):Int {
-		var t = varTy.get(v);
-		var val:Int;
-		if (!b.sealed) {
-			var phi = newPhi(b, t);
-			var inc = incomplete[b.id];
-			if (inc == null) incomplete[b.id] = inc = new Map();
-			inc.set(v, phi);
-			val = phi.id;
-		} else if (b.preds.length == 0) {
-			// never assigned (C: the local starts as 0)
-			val = zeroAt(b, t);
-		} else if (b.preds.length == 1) {
-			val = readVar(v, b.preds[0]);
-		} else {
-			var phi = newPhi(b, t);
-			writeVar(v, b, phi.id);
-			phi.args = readVars(v, b);
-			val = phi.id;
+	// the continuations of operations (OInfo.cont), by block id
+	var conts = new Map<Int, OInfo>();
+
+	override function merges(b:MBlock):Bool
+		return conts.exists(b.id);
+
+	// a phi of a continuation: of a reference a cold site's slow path reads
+	// back, the index of that reference (MIns.imm, from 1: MemLower makes
+	// its arguments)
+	override function phiMade(v:Int, b:MBlock, phi:MIns) {
+		var o = conts.get(b.id);
+		if (o != null && o.relocs != null && o.relocs.exists(v)) phi.imm = o.relocs.get(v) + 1;
+	}
+
+	inline function info():OInfo
+		return new OInfo();
+
+	// a GC point at a cold site (coldList): the references live across its
+	// slow path become its arguments, read back after it (their phis in its
+	// continuation: phiMade); none elsewhere (a list made only to root an
+	// array store's value, OInfo.cold false, has no references)
+	function gcPoint(op:Op, ty:MTy, o:OInfo, a = -1, b = -1, c = -1):MIns {
+		var list = coldList;
+		if (list != null) {
+			o.cold = true;
+			o.nspill = list.length;
+			o.relocs = new Map();
+			for (k in 0...list.length)
+				o.relocs.set(list[k].id, k);
 		}
-		writeVar(v, b, val);
-		var x = f.vals[val];
-		if (x.vty == null) x.vty = localTy.get(v);
-		return val;
-	}
-
-	// the locals' types (MIns.vty of the phis and zeros made for them)
-	var localTy = new Map<Int, Ty>();
-
-	// a zero constant at the start of b (after its phis)
-	function zeroAt(b:MBlock, t:MTy):Int {
-		var i = t == F64 ? mk(ConstF, F64) : mk(Const, t == Void ? I32 : t);
-		i.id = f.vals.length;
-		f.vals.push(i);
-		i.block = b;
-		var k = 0;
-		while (k < b.ins.length && b.ins[k].op == Phi)
-			k++;
-		b.ins.insert(k, i);
-		return i.id;
-	}
-
-	function seal(b:MBlock) {
-		if (b.sealed) return;
-		b.sealed = true;
-		var inc = incomplete[b.id];
-		if (inc == null) return;
-		for (v => phi in inc)
-			phi.args = readVars(v, b);
-		incomplete[b.id] = null;
-	}
-
-	// a phi's arguments: v at the end of each pred of b
-	function readVars(v:Int, b:MBlock):Vector<Int> {
-		var args = new Vector<Int>(b.preds.length);
-		for (k in 0...args.length)
-			args[k] = readVar(v, b.preds[k]);
-		return args;
+		o.spillBase = spillBase;
+		o.fr = fr >= 0;
+		var args = [];
+		if (list != null)
+			for (l in list) {
+				if (memSlot.exists(l)) throw new Unsupported("a cold site's reference in memory");
+				args.push(readLocal(l));
+			}
+		if (fr >= 0) args.push(fr);
+		var i = obj(op, ty, o, a, b, c);
+		i.args = Vector.fromArrayCopy(args);
+		if (list != null && hxmc.ir.Lower.nullChecks)
+			for (l in list)
+				checkedLocals.remove(l.id);
+		return i;
 	}
 
 	// ---- locals
@@ -686,12 +309,6 @@ class MirBuild {
 		writeVar(l.id, cur, v);
 	}
 
-	function stackAddr(slot:Int):Int {
-		var i = mk(StackAddr, I64);
-		i.imm = slot;
-		return add(i);
-	}
-
 	// ---- entry
 
 	// a function made up by hxmc (closure trampolines, main): `body` uses the
@@ -714,10 +331,21 @@ class MirBuild {
 		body(mb, ps);
 		for (b in f.blocks)
 			if (!b.sealed) mb.seal(b);
-		mb.prune();
-		mb.removeTrivialPhis();
+		mb.lower();
 		return f;
 	}
+
+	// the function's object-level Mir lowered to memory-level Mir
+	// (MemLower), its unreachable blocks dropped, its trivial phis replaced
+	function lower() {
+		var ml = new MemLower(p, abi, fn, f, icSym);
+		ml.run();
+		icaches = ml.icaches;
+		prune();
+		removeTrivialPhis();
+	}
+
+	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
 
 	public function build():MFunc {
 		f = new MFunc(p.funcSym(fn));
@@ -817,8 +445,7 @@ class MirBuild {
 		}
 		for (b in f.blocks)
 			if (!b.sealed) seal(b);
-		prune();
-		removeTrivialPhis();
+		lower();
 		return f;
 	}
 
@@ -863,34 +490,6 @@ class MirBuild {
 		tlsStore("rt_sp", top);
 		raiseHw(top);
 		return sp;
-	}
-
-	// rt_sp_hw = max(rt_sp_hw, top): rarely raised (after a collection), on a slow path;
-	// on WebAssembly also where the shadow stack overflows (past rt_sp_limit: a
-	// region of linear memory, no guard page; every new depth passes here first)
-	function raiseHw(top:Int) {
-		var hw = tlsLoad("rt_sp_hw");
-		var up = newBlock(), done = newBlock();
-		up.cold = true;
-		br(cmp(CUGt, top, hw), up, done);
-		seal(up);
-		cur = up;
-		if (abi.wasm) {
-			var over = newBlock(), fits = newBlock();
-			over.cold = true;
-			fits.cold = true;
-			br(cmp(CUGt, top, loadM(Opt.MCallOnly, I64, 8, symAddr("rt_sp_limit"), 0)), over, fits);
-			seal(over);
-			cur = over;
-			call("rt_stack_overflow", vector(), Void, true);
-			add(mk(Unreachable, Void));
-			seal(fits);
-			cur = fits;
-		}
-		tlsStore("rt_sp_hw", top);
-		jmp(done);
-		seal(done);
-		cur = done;
 	}
 
 	// a function with a frame returns through one block (one pop of the
@@ -999,11 +598,13 @@ class MirBuild {
 			case SSetField(c, idx, obj, v):
 				var o = nullCheck(ex(obj));
 				var x = ex(v);
-				storeSlot(o, c.locs[idx], c.fields[idx].ty, x, isNullConst(v));
+				var i = info();
+				i.cls = c;
+				setField(o, c.locs[idx], c.fields[idx].ty, x, isNullConst(v), i);
 			case SBoxSet(t, bx, v):
 				var o = ex(bx);
 				var x = ex(v);
-				storeSlot(o, 0, t, x, isNullConst(v));
+				setField(o, 0, t, x, isNullConst(v), info());
 			case SSetGlobal(g, _) if (p.p.globals[g].bss != null):
 				throw new Unsupported("a @:hxmc.bss static is constant (" + p.p.globals[g].name + ")");
 			case SSetGlobal(g, v) if (tlsGlobal(g) != null):
@@ -1198,110 +799,31 @@ class MirBuild {
 
 	// ---- object slots
 
-	function slotLoad(o:Int, loc:Int, t:Ty):Int
-		return switch t {
-			case TRef(_): loadM(Opt.MField, I64, 8, o, 8 * loc);
-			case TF64: loadM(Opt.MField, F64, 8, o, 8 * loc);
-			case TI64: loadM(Opt.MField, I64, 8, o, 8 * loc);
-			case TVoid: iconst(0);
-			case _: loadM(Opt.MField, I32, 4, o, 4 * loc);
-		};
-
-	// a store into a heap object; references go through the write barrier
-	function storeSlot(o:Int, loc:Int, t:Ty, v:Int, isNull:Bool) {
-		switch t {
-			case TRef(_):
-				if (isNull) storeM(Opt.MField, 8, o, 8 * loc, v) else setPtr(o, op2(Add, I64, o, lconst32(8 * loc)), v, Opt.MField);
-			case TF64 | TI64: storeM(Opt.MField, 8, o, 8 * loc, v);
-			case TVoid:
-			case _: storeM(Opt.MField, 4, o, 4 * loc, v);
-		}
+	function getField(o:Int, loc:Int, t:Ty, i:OInfo):Int {
+		if (t == TVoid) return iconst(0);
+		i.t = t;
+		i.loc = loc;
+		return obj(GetField, mty(t), i, o).id;
 	}
 
-	// rt_set_ptr(obj, slot, val): the runtime's part (GcPaths.barrierSlow)
-	// only for a young value stored into an object that is not young (a
-	// value that is null or old, the common store into an old object, needs
-	// nothing). The store publishes val (MIns.release): a thread that reads
-	// the reference sees the object's initialising stores, as the reference
-	// compiler's code may assume (OCaml's caml_modify is a release store,
-	// "publication safety for newly-allocated objects"): upstream's parallel
-	// phases read fields that other domains set meanwhile, such as Dce's
-	// `Meta.has Meta.Used a.a_meta` before it takes the lock to add the entry.
-	function setPtr(obj:Int, slot:Int, val:Int, cls = 0) {
-		var prev = loadM(cls, I64, 8, slot, 0);
-		storeM(cls, 8, slot, 0, val, -1, 1, true);
-		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
-		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
-		var size = op2(Sub, I64, ye, ys);
-		var check = newBlock(), slow = newBlock(), done = newBlock();
-		slow.cold = true;
-		br(cmp(CULt, op2(Sub, I64, val, ys), size), check, done);
-		seal(check);
-		cur = check;
-		br(cmp(CULt, op2(Sub, I64, obj, ys), size), done, slow);
-		seal(slow);
-		cur = slow;
-		call("hxmc_barrier_slow", vector(obj, slot, val, prev), Void);
-		jmp(done);
-		seal(done);
-		cur = done;
+	// a store into a heap object (isNull: a null literal, no barrier)
+	function setField(o:Int, loc:Int, t:Ty, v:Int, isNull:Bool, i:OInfo) {
+		if (t == TVoid) return;
+		i.t = t;
+		i.loc = loc;
+		i.flag = isNull;
+		obj(SetField, Void, i, o, v);
 	}
 
-	// Fixed arrays often outlive the values written into them. Avoid the
-	// barrier call altogether when the new value is null or outside the nursery.
-	function nativeSetPtr(obj:Int, slot:Int, val:Int) {
-		var prev = loadM(Opt.MElem, I64, 8, slot, 0);
-		storeM(Opt.MElem, 8, slot, 0, val, -1, 1, true);
-		var ys = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_start"), 0);
-		var ye = loadM(Opt.MCallOnly, I64, 8, symAddr("rt_young_end"), 0);
-		var size = op2(Sub, I64, ye, ys);
-		var check = newBlock(), slow = newBlock(), done = newBlock();
-		slow.cold = true;
-		br(cmp(CULt, op2(Sub, I64, val, ys), size), check, done);
-		seal(check);
-		cur = check;
-		br(cmp(CULt, op2(Sub, I64, obj, ys), size), done, slow);
-		seal(slow);
-		cur = slow;
-		call("hxmc_barrier_slow", vector(obj, slot, val, prev), Void);
-		jmp(done);
-		seal(done);
-		cur = done;
+	// a field of a new object (into its young storage: no barrier); next:
+	// the slot cleared after it (OInfo.next)
+	function initField(o:Int, loc:Int, t:Ty, v:Int, next = -1) {
+		var i = info();
+		i.t = t;
+		i.loc = loc;
+		i.next = next;
+		obj(InitField, Void, i, o, v);
 	}
-
-	// an element of a NativeArray seen as Dynamic (FnLower.nativeRead): of
-	// reference storage directly, else through the runtime (rt/NArray's
-	// hx_narray_get_slow, hx_narray_set_slow: the other kinds, wrappers). A
-	// wrapper's kind changes, but never to AK_PTR, so the test may be shared
-	// as that of a constant. At a cold site (Facts.markCold), the live
-	// references are spilled around that call only
-	function narrayDyn(name:String, xs:Vector<Int>):Int {
-		var a = xs[0];
-		var get = name == "hxmc_narray_dget";
-		var r = get ? newVar(I64) : -1;
-		var fast = newBlock(), slow = newBlock(), join = newBlock();
-		br(cmp(CEq, tindex(a), iconst(naType(Abi.AK_PTR))), fast, slow);
-		seal(fast);
-		seal(slow);
-		cur = fast;
-		var ix = op1(SExt, I64, xs[1]);
-		if (get) writeVar(r, cur, loadM(Opt.MElem, I64, 8, a, 0, false, ix, 8));
-		else nativeSetPtr(a, op2(Add, I64, a, op2(Shl, I64, ix, iconst(3))), xs[2]);
-		jmp(join);
-		cur = slow;
-		var list = coldList;
-		var sp = spillOpen(list, 0);
-		var c = call(get ? "hx_narray_get_slow" : "hx_narray_set_slow", xs, get ? I64 : Void);
-		spillClose(list, sp);
-		if (get) writeVar(r, cur, c);
-		jmp(join);
-		seal(join);
-		cur = join;
-		return get ? readVar(r, cur) : iconst(0);
-	}
-
-	function tindex(o:Int):Int
-		return loadM(Opt.MConst, I32, 2, o, Abi.HDR_TINDEX);
 
 	// ---- null access (docs/hxmc.md, "Null access")
 
@@ -1309,9 +831,9 @@ class MirBuild {
 	// on null (an object's fields are near its address) and the runtime's
 	// fault handler throws (hxmc.rt.Faults); with explicit tests
 	// (WebAssembly, where address 0 is memory and a trap cannot be caught,
-	// or -D hxmc.null-checks=1), null branches to the throw here. A test
-	// dominated by one of the same value is dropped (Opt.condProp). None in a
-	// @:hxmc.noGc function (FnLower.receiverCheck).
+	// or -D hxmc.null-checks=1), null branches to the throw (NullCheck,
+	// MemLower.nullTest). A test dominated by one of the same value is dropped
+	// (Opt.condProp). None in a @:hxmc.noGc function (FnLower.receiverCheck).
 	inline function nullCheck(v:Int):Int
 		return hxmc.ir.Lower.nullChecks && !fn.declNoGc ? nullTest(v) : v;
 
@@ -1319,11 +841,9 @@ class MirBuild {
 		if (nonNull(v)) return v;
 		var lid = localOfVal.get(v);
 		if (lid != null && checkedLocals.exists(lid)) return v;
-		var bad = nullBlock();
-		var ok = newBlock();
-		br(cmp(CEq, v, lconst(0, 0)), bad, ok);
-		seal(ok);
-		cur = ok;
+		var i = info();
+		i.key = tries.length == 0 ? -1 : tries[tries.length - 1];
+		obj(NullCheck, Void, i, v);
 		if (lid != null) checkedLocals.set(lid, true);
 		return v;
 	}
@@ -1354,22 +874,6 @@ class MirBuild {
 			st(s);
 	}
 
-	function nullBlock():MBlock {
-		var key = tries.length == 0 ? -1 : tries[tries.length - 1];
-		var b = nullBlocks.get(key);
-		if (b != null) return b;
-		b = newBlock();
-		b.cold = true;
-		nullBlocks.set(key, b);
-		var save = cur;
-		cur = b;
-		call("rt_null_access", vector(), Void, true);
-		add(mk(Unreachable, Void));
-		seal(b); // (it reads no variable: its predecessors may come later)
-		cur = save;
-		return b;
-	}
-
 	// a value never null: data at a symbol (literals, type objects, static
 	// closures), a frame address, an object made here, a constructor's
 	// object (new), a closure's own (its call tests it: ECallClos). A
@@ -1393,54 +897,28 @@ class MirBuild {
 
 	// ---- allocation
 
-	// an object of n slots: inline bump allocation; the slow path collects.
-	// zero: the slots must read as zeros (Mem.alloc), else every slot is
-	// written before it is read (Mem.allocRaw). The runtime zeroes the nursery
-	// in bulk, so neither stores zeros; they compare different limits, which
-	// differ with RT_VERIFY=1 (Gc.hx: zeroing allocations then take the slow
-	// path). At a cold site the live references are stored on the shadow
-	// stack around the slow call only
-	function alloc(n:Int, tidx:Int, kind:Int, zero:Bool):Int {
+	// an object of n slots (MemLower.alloc), what: OInfo.NEW_*; zero: its
+	// slots must read as zeros (else every one is written first)
+	function alloc(n:Int, tidx:Int, kind:Int, zero:Bool, ?i:OInfo, what = OInfo.NEW_RAW):Int {
 		f.allocs++;
-		var bytes = 8 * (n + 1);
-		var ptr = tlsLoad("rt_young_ptr");
-		var lim = tlsLoad(zero ? "rt_young_limit" : "rt_young_rlimit");
-		var res = newVar(I64);
-		var fast = newBlock(), slow = newBlock(), join = newBlock();
-		slow.cold = true;
-		br(cmp(CGe, op2(Sub, I64, lim, ptr), lconst32(bytes)), fast, slow);
-		seal(fast);
-		seal(slow);
-		cur = fast;
-		tlsStore("rt_young_ptr", op2(Add, I64, ptr, lconst32(bytes)));
-		// (the header, hxmc.rt.Types: K_OBJ a record, its type index, its slots,
-		// its hash 0; else an array of n 8-byte slots, its type index, its
-		// words, its length)
-		var record = kind == Abi.K_OBJ;
-		var flags = (n < 0xFFFF ? n : 0xFFFF) << 16;
-		storeM(Opt.MInit, 4, ptr, 0, tyConst(tidx, flags));
-		storeM(Opt.MInit, 4, ptr, 4, iconst(record ? 0 : n));
-		var o = op2(Add, I64, ptr, lconst32(8));
-		writeVar(res, cur, o);
-		jmp(join);
-		cur = slow;
-		var list = coldList;
-		var sp = spillOpen(list, 0);
-		// (the header is assembled in the runtime, rthxmc.c; a stub per
-		// header and size passes it, DataGen.allocStubs: one call here)
-		var ts = p.tySym(tidx);
-		var r = call(ALLOC_STUB + (record ? 0 : n) + "$" + (ts != null ? ts : "#" + (record ? tidx : tidx | flags)) + "$" + bytes, vector(), I64);
-		spillClose(list, sp);
-		writeVar(res, cur, r);
-		jmp(join);
-		seal(join);
-		cur = join;
-		var v = readVar(res, cur);
+		if (i == null) i = info();
+		i.name = what;
+		i.n = n;
+		i.tindex = tidx;
+		i.kind = kind;
+		i.zero = zero;
+		var v = gcPoint(New, I64, i).id;
 		if (hxmc.ir.Lower.nullChecks) fresh.set(v, true);
 		return v;
 	}
 
-	var spillBase = -1; // the frame's spill slots (none: pushed on the slow path)
+	// an object of a run-time size (n slots), its header's words w0 and w1
+	// (MemLower.allocDyn)
+	function allocDyn(n:Int, w0:Int, w1:Int, zero:Bool):Int {
+		var i = info();
+		i.zero = zero;
+		return gcPoint(NewDyn, I64, i, n, w0, w1).id;
+	}
 
 	static function hasArrayStore(ss:Vector<Stmt>):Bool {
 		var r = false;
@@ -1454,34 +932,6 @@ class MirBuild {
 		for (s in ss)
 			st(s);
 		return r;
-	}
-
-	// the allocation slow path's stubs: hxmc_new$<header low word>$<type symbol or #index>$<bytes>
-	public static inline var ALLOC_STUB = "hxmc_new$";
-
-	// stores the cold site's references in a pushed area (null: none)
-	function spillOpen(list:Null<Array<Local>>, extra:Int):Int {
-		if (list == null || list.length + extra == 0) return -1;
-		if (spillBase >= 0) {
-			var at = op2(Add, I64, fr, lconst32(8 * spillBase));
-			for (k in 0...list.length)
-				storeM(Opt.MFrame, 8, at, 8 * k, readLocal(list[k]));
-			return at;
-		}
-		var sp = tlsLoad("rt_sp");
-		var top = op2(Add, I64, sp, lconst32(8 * (list.length + extra)));
-		tlsStore("rt_sp", top);
-		raiseHw(top);
-		for (k in 0...list.length)
-			store(8, sp, 8 * k, readLocal(list[k]));
-		return sp;
-	}
-
-	function spillClose(list:Null<Array<Local>>, sp:Int) {
-		if (sp < 0) return;
-		for (k in 0...list.length)
-			writeLocal(list[k], spillBase >= 0 ? loadM(Opt.MFrame, I64, 8, sp, 8 * k) : load(I64, 8, sp, 8 * k));
-		if (spillBase < 0) tlsStore("rt_sp", sp);
 	}
 
 	// ---- cold statements
@@ -1503,308 +953,104 @@ class MirBuild {
 
 	// ---- arrays
 
-	static function arrKind(t:Ty):Int
-		return switch t {
-			case TI32: Abi.AK_I32;
-			case TBool: Abi.AK_BOOL;
-			case TF64: Abi.AK_F64;
-			case TI64: Abi.AK_I64;
-			case _: Abi.AK_PTR;
-		};
-
-	// (an Array's storage is a NativeArray of its kind: its length the
-	// capacity, then the elements, a Bool one byte; Boxes)
-	static function elemSize(t:Ty):Int
-		return switch t {
-			case TBool: 1;
-			case TI32: 4;
-			case _: 8;
-		};
-
-	function bits64(t:Ty, v:Int):Int
-		return switch t {
-			case TF64: op1(FToBits, I64, v);
-			case TI32 | TBool: op1(ZExt, I64, v);
-			case _: v;
-		};
-
-	// the address of the slot holding array local `a` (rooted, or in the cold site's spill area)
-	function arrSlot(a:Local, sp:Int, list:Null<Array<Local>>):Int {
+	// an array store's array: its local's shadow-stack slot, else its place
+	// among the cold site's references (MemLower.arrSlot)
+	function arrInfo(elem:Ty, a:Local, cold:Bool):OInfo {
+		var i = info();
+		i.t = elem;
 		var s = refSlot.get(a);
-		if (s != null) return op2(Add, I64, fr, lconst32(8 * s));
-		if (noShadow && (sp < 0 || list == null || list.indexOf(a) < 0)) {
-			// (measurement: a frame slot holding the array; nothing collects)
-			var addr = stackAddr(f.slot(8, 8));
-			store(8, addr, 0, readLocal(a));
-			return addr;
-		}
-		if (sp < 0 || list == null || list.indexOf(a) < 0) throw new Unsupported("array local neither rooted nor spilled");
-		return op2(Add, I64, sp, lconst32(8 * list.indexOf(a)));
+		if (s != null) i.rootSlot = s;
+		var list = cold ? coldList : null;
+		if (list != null) i.listIndex = list.indexOf(a);
+		return i;
 	}
 
 	function arrSet(elem:Ty, a:Local, i:Ex, v:Ex, cold:Bool) {
-		var list = cold ? coldList : null;
 		var iv = ex(i);
 		var vv = ex(v);
 		var av = nullCheck(readLocal(a));
-		var k = arrKind(elem);
-		var fast = newBlock(), slow = newBlock(), join = newBlock(), chk = newBlock();
-		slow.cold = true;
-		var kind = loadM(Opt.MHdr, I32, 4, av, 4);
-		var len = loadM(Opt.MHdr, I32, 4, av, 0);
-		var d = loadM(Opt.MHdr, I64, 8, av, 8);
-		br(cmp(CEq, kind, iconst(k)), chk, slow);
-		seal(chk);
-		cur = chk;
-		br(cmp(CULt, iv, len), fast, slow);
-		seal(fast);
-		seal(slow);
-		cur = fast;
-		var ix = op1(SExt, I64, iv);
-		if (k == Abi.AK_PTR) {
-			setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv, Opt.MElem);
-		} else storeM(Opt.MElem, elemSize(elem), d, 0, vv, ix, elemSize(elem));
-		jmp(join);
-		cur = slow;
-		if (k == Abi.AK_PTR) {
-			// the value is rooted in a pushed slot (after the spilled references)
-			var n = list == null ? 0 : list.length;
-			var sp = spillOpen(list == null ? [] : list, 1);
-			store(8, sp, 8 * n, vv);
-			call("hx_aset_slow", vector(arrSlot(a, sp, list), iv, iconst(k), op2(Add, I64, sp, lconst32(8 * n))), Void);
-			spillClose(list == null ? [] : list, sp);
-		} else {
-			var sp = spillOpen(list, 0);
-			call("hx_aset_slow", vector(arrSlot(a, sp, list), iv, iconst(k), bits64(elem, vv)), Void);
-			spillClose(list, sp);
+		var o = arrInfo(elem, a, cold);
+		if (cold) gcPoint(ArraySet, Void, o, av, iv, vv) else {
+			var save = coldList;
+			coldList = null;
+			gcPoint(ArraySet, Void, o, av, iv, vv);
+			coldList = save;
 		}
-		jmp(join);
-		seal(join);
-		cur = join;
 	}
 
 	function arrPush(elem:Ty, a:Local, v:Ex, cold:Bool) {
-		var list = cold ? coldList : null;
 		var vv = ex(v);
 		var av = nullCheck(readLocal(a));
-		var k = arrKind(elem);
-		var fast = newBlock(), slow = newBlock(), join = newBlock(), c1 = newBlock();
-		slow.cold = true;
-		br(cmp(CEq, loadM(Opt.MHdr, I32, 4, av, 4), iconst(k)), c1, slow);
-		seal(c1);
-		cur = c1;
-		// (the storage's length, the capacity, never changes; one without
-		// room is the empty one)
-		var d = loadM(Opt.MHdr, I64, 8, av, 8);
-		var len = loadM(Opt.MHdr, I32, 4, av, 0);
-		br(cmp(CULt, len, loadM(Opt.MConst, I32, 4, d, -4)), fast, slow);
-		seal(fast);
-		seal(slow);
-		cur = fast;
-		var ix = op1(SExt, I64, len);
-		if (k == Abi.AK_PTR) setPtr(d, op2(Add, I64, d, op2(Shl, I64, ix, iconst(3))), vv, Opt.MElem) else storeM(Opt.MElem, elemSize(elem), d, 0, vv, ix, elemSize(elem));
-		storeM(Opt.MHdr, 4, av, 0, op2(Add, I32, len, iconst(1)));
-		jmp(join);
-		cur = slow;
-		if (k == Abi.AK_PTR) {
-			var n = list == null ? 0 : list.length;
-			var sp = spillOpen(list == null ? [] : list, 1);
-			store(8, sp, 8 * n, vv);
-			call("hx_apush_slow", vector(arrSlot(a, sp, list), iconst(k), op2(Add, I64, sp, lconst32(8 * n))), I32);
-			spillClose(list == null ? [] : list, sp);
-		} else {
-			var sp = spillOpen(list, 0);
-			call("hx_apush_slow", vector(arrSlot(a, sp, list), iconst(k), bits64(elem, vv)), I32);
-			spillClose(list, sp);
+		var o = arrInfo(elem, a, cold);
+		if (cold) gcPoint(ArrayPush, Void, o, av, -1, vv) else {
+			var save = coldList;
+			coldList = null;
+			gcPoint(ArrayPush, Void, o, av, -1, vv);
+			coldList = save;
 		}
-		jmp(join);
-		seal(join);
-		cur = join;
 	}
 
 	function arrGet(elem:Ty, a:Ex, i:Ex, checked:Bool):Int {
 		var av = nullCheck(ex(a));
 		var iv = ex(i);
-		var k = arrKind(elem);
-		var t = mty(elem);
-		var res = newVar(t);
-		var fast = newBlock(), slow = newBlock(), join = newBlock();
-		slow.cold = true;
-		// the header is read before the checks (every array has one): later
-		// accesses the first dominates reuse it (Opt)
-		var kind = loadM(Opt.MHdr, I32, 4, av, 4);
-		var len = checked ? loadM(Opt.MHdr, I32, 4, av, 0) : -1;
-		var d = loadM(Opt.MHdr, I64, 8, av, 8);
-		if (checked) {
-			var chk = newBlock();
-			br(cmp(CEq, kind, iconst(k)), chk, slow);
-			seal(chk);
-			cur = chk;
-			br(cmp(CULt, iv, len), fast, slow);
-		} else br(cmp(CEq, kind, iconst(k)), fast, slow);
-		seal(fast);
-		seal(slow);
-		cur = fast;
-		writeVar(res, cur, loadM(Opt.MElem, t, elemSize(elem), d, 0, false, op1(SExt, I64, iv), elemSize(elem)));
-		jmp(join);
-		cur = slow;
-		var name = switch k {
-			case Abi.AK_I32 | Abi.AK_BOOL: "hx_aget_i_slow";
-			case Abi.AK_F64: "hx_aget_f_slow";
-			case Abi.AK_I64: "hx_aget_l_slow";
-			case _: "hx_aget_p_slow";
-		};
-		writeVar(res, cur, call(name, vector(av, iv), t));
-		jmp(join);
-		seal(join);
-		cur = join;
-		return readVar(res, cur);
+		var o = info();
+		o.t = elem;
+		o.flag = checked;
+		return obj(ArrayGet, mty(elem), o, av, iv).id;
 	}
 
 	// ---- structural access
 
-	function icache():Int {
-		var k = icaches++;
-		return symAddr(icSym, Abi.IC_SIZE * k);
+	function unboxTo(t:Ty, v:Int):Int {
+		if (!Ir.isScalar(t)) return v;
+		var i = info();
+		i.t = t;
+		return obj(Unbox, mty(t), i, v).id;
 	}
 
-	// rt_ic: the site's cache entry for the object's type (fid: a value)
-	function ic(o:Int, fid:Int):Int {
-		var c = icache();
-		var res = newVar(I64);
-		writeVar(res, cur, c);
-		var miss = newBlock(), join = newBlock();
-		miss.cold = true;
-		br(cmp(CNe, load(I32, 4, c, 0), tindex(o)), miss, join);
-		seal(miss);
-		cur = miss;
-		writeVar(res, cur, call("rt_icache_miss", vector(o, fid, c), I64));
-		jmp(join);
-		seal(join);
-		cur = join;
-		return readVar(res, cur);
-	}
-
-	function kindMatch(c:Int, t:Ty):Int {
-		var kind = load(I32, 1, c, Abi.IC_KIND);
-		return switch t {
-			case TI32 | TBool:
-				var r = newVar(I32);
-				writeVar(r, cur, cmp(CEq, kind, iconst("i".code)));
-				var no = newBlock(), join = newBlock();
-				br(readVar(r, cur), join, no);
-				seal(no);
-				cur = no;
-				writeVar(r, cur, cmp(CEq, kind, iconst("b".code)));
-				jmp(join);
-				seal(join);
-				cur = join;
-				readVar(r, cur);
-			case TF64: cmp(CEq, kind, iconst("f".code));
-			case TI64: cmp(CEq, kind, iconst("l".code));
-			case _: cmp(CEq, kind, iconst("p".code));
-		}
-	}
-
-	function unboxTo(t:Ty, v:Int):Int
-		return switch t {
-			case TI32: call("hx_unbox_int", vector(v), I32);
-			case TBool: call("hx_unbox_bool", vector(v), I32);
-			case TF64: call("hx_unbox_float", vector(v), F64);
-			case TI64: call("hx_unbox_i64", vector(v), I64);
-			case _: v;
-		};
-
-	function boxFrom(t:Ty, v:Int):Int
-		return switch t {
-			case TI32:
-				f.allocs++;
-				call("hx_box_int", vector(v), I64);
-			case TBool: call("hx_box_bool", vector(v), I64);
-			case TF64:
-				f.allocs++;
-				call("hx_box_float", vector(v), I64);
-			case TI64:
-				f.allocs++;
-				call("hx_box_i64", vector(v), I64);
-			case _: v;
-		};
-
-	// a field at a dynamic location (rt_icache.slot - 1)
-	function slotLoadDyn(o:Int, loc:Int, t:Ty):Int {
-		var ix = op1(SExt, I64, loc);
-		return switch t {
-			case TRef(_) | TI64: loadM(Opt.MField, I64, 8, o, 0, false, ix, 8);
-			case TF64: loadM(Opt.MField, F64, 8, o, 0, false, ix, 8);
-			case _: loadM(Opt.MField, I32, 4, o, 0, false, ix, 4);
-		}
+	function boxFrom(t:Ty, v:Int):Int {
+		if (!Ir.isScalar(t)) return v;
+		if (t != TBool) f.allocs++;
+		var i = info();
+		i.t = t;
+		return obj(Box, I64, i, v).id;
 	}
 
 	function anonGet(name:String, t:Ty, obj:Ex, hint:Null<ShapeInfo>):Int {
 		var o = nullCheck(ex(obj));
-		var fid = fidConst(name);
-		var mt = mty(t);
-		var res = newVar(mt);
-		var join = newBlock();
-		if (hint != null && hint.tindex >= 0) {
-			var direct = newBlock(), other = newBlock();
-			other.cold = true;
-			br(cmp(CEq, tindex(o), tyConst(hint.tindex)), direct, other);
-			seal(direct);
-			seal(other);
-			cur = direct;
-			var i = hint.slot(name) - 1;
-			writeVar(res, cur, slotLoad(o, hint.locs[i], t));
-			jmp(join);
-			cur = other;
-			coldNew = true;
-		}
-		var c = ic(o, fid);
-		var hit = newBlock(), miss = newBlock(), chk = newBlock();
-		miss.cold = true;
-		var slot = load(I32, 4, c, Abi.IC_SLOT);
-		br(cmp(CGt, slot, iconst(0)), chk, miss);
-		seal(chk);
-		cur = chk;
-		br(kindMatch(c, t), hit, miss);
-		seal(hit);
-		seal(miss);
-		cur = hit;
-		writeVar(res, cur, slotLoadDyn(o, op2(Sub, I32, slot, iconst(1)), t));
-		jmp(join);
-		cur = miss;
-		writeVar(res, cur, unboxTo(t, call("hx_anon_get_slow", vector(o, fid), I64)));
-		jmp(join);
-		coldNew = false;
-		seal(join);
-		cur = join;
-		return readVar(res, cur);
+		var i = info();
+		i.name = name;
+		i.t = t;
+		i.shape = hint;
+		return this.obj(AnonGet, mty(t), i, o).id;
 	}
 
+	// obj.name = v through the object's type's field table: the store in
+	// place when the inline cache gives a slot of the field's kind (hit),
+	// else the value boxed and hx_anon_set_slow (miss; C: the object
+	// expression evaluated again)
 	function anonSet(name:String, t:Ty, obj:Ex, v:Ex) {
 		var o = nullCheck(ex(obj));
 		var fid = fidConst(name);
-		var c = ic(o, fid);
-		var hit = newBlock(), miss = newBlock(), chk = newBlock(), join = newBlock();
+		var i = info();
+		i.name = name;
+		i.t = t;
+		var test = this.obj(AnonTest, Void, i, o, fid);
+		var from = cur;
+		var hit = newBlock(), miss = newBlock(), join = newBlock();
 		miss.cold = true;
-		var slot = load(I32, 4, c, Abi.IC_SLOT);
-		br(cmp(CGt, slot, iconst(0)), chk, miss);
-		seal(chk);
-		cur = chk;
-		br(kindMatch(c, t), hit, miss);
+		test.targets = vector(hit, miss);
+		edge(from, hit);
+		edge(from, miss);
 		seal(hit);
 		seal(miss);
 		cur = hit;
 		var x = ex(v);
-		var loc = op1(SExt, I64, op2(Sub, I32, slot, iconst(1)));
-		switch t {
-			case TRef(_): setPtr(o, op2(Add, I64, o, op2(Shl, I64, loc, iconst(3))), x, Opt.MField);
-			case TF64 | TI64: storeM(Opt.MField, 8, o, 0, x, loc, 8);
-			case _: storeM(Opt.MField, 4, o, 0, x, loc, 4);
-		}
+		var s = info();
+		s.t = t;
+		this.obj(AnonStore, Void, s, o, x, test.id);
 		jmp(join);
 		cur = miss;
-		// C: the value is boxed, then the object expression evaluated again
 		var b = boxFrom(t, ex(v));
 		call("hx_anon_set_slow", vector(ex(obj), fidConst(name), b), Void);
 		jmp(join);
@@ -1852,27 +1098,39 @@ class MirBuild {
 			case EConv(c, x): conv(c, ex(x));
 			case EBox(t, x): boxFrom(t, ex(x));
 			case EUnbox(t, x): unboxTo(t, ex(x));
-			case EField(c, idx, obj): slotLoad(nullCheck(ex(obj)), c.locs[idx], c.fields[idx].ty);
-			case EFieldAddr(c, idx, obj): op2(Add, I64, nullCheck(ex(obj)), lconst32(8 * c.locs[idx]));
+			case EField(c, idx, obj):
+				var i = info();
+				i.cls = c;
+				getField(nullCheck(ex(obj)), c.locs[idx], c.fields[idx].ty, i);
+			case EFieldAddr(c, idx, obj):
+				var i = info();
+				i.cls = c;
+				i.loc = c.locs[idx];
+				this.obj(FieldAddr, I64, i, nullCheck(ex(obj))).id;
 			case EAnonGet(name, t, obj, hint): anonGet(name, t, obj, hint);
+			// (unchecked: the value keeps its first type)
 			case ECast(_, x): ex(x);
-			case EInstOf(c, x): instOf(ex(x), c);
+			case EInstOf(c, x):
+				var i = info();
+				i.cls = c;
+				obj(TypeTest, I32, i, ex(x)).id;
 			case EEnumTag(x, en):
-				var base:Null<Int> = en == null || en.ctors.length == 0 ? null : en.ctors[0].tindex - en.ctors[0].tag;
-				if (base != null)
-					for (c in en.ctors)
-						if (c.tindex - c.tag != base) base = null;
 				var o = nullCheck(ex(x));
-				if (base != null) op2(Sub, I32, tindex(o), tyConst(en.ctors[0].tindex, -en.ctors[0].tag)) else {
-					var ti = op1(ZExt, I64, tindex(o));
-					loadM(Opt.MConst, I32, 4, symAddr("rt_types"), Abi.TYPE_TAG, false, op2(Mul, I64, ti, lconst32(Abi.TYPE_SIZE)), 1);
-				}
-			case EEnumParam(c, idx, x): slotLoad(nullCheck(ex(x)), at(idx, c.params[idx]), c.params[idx]);
-			case EArrLen(a): loadM(Opt.MHdr, I32, 4, nullCheck(ex(a)), 0);
+				var i = info();
+				i.en = en;
+				obj(EnumTag, I32, i, o).id;
+			case EEnumParam(c, idx, x):
+				var i = info();
+				i.ctor = c;
+				getField(nullCheck(ex(x)), at(idx, c.params[idx]), c.params[idx], i);
+			case EArrLen(a): obj(ArrayLength, I32, info(), nullCheck(ex(a))).id;
 			case EArrGet(elem, a, i): arrGet(elem, a, i, true);
 			case EArrGetU(elem, a, i): arrGet(elem, a, i, false);
-			case EBoxGet(t, bx): slotLoad(ex(bx), 0, t);
-			case ECapture(l, idx, clos): slotLoad(ex(clos), at(idx + 1, l.captures[idx].ty), l.captures[idx].ty);
+			case EBoxGet(t, bx): getField(ex(bx), 0, t, info());
+			case ECapture(l, idx, clos):
+				var i = info();
+				i.lambda = l;
+				getField(ex(clos), at(idx + 1, l.captures[idx].ty), l.captures[idx].ty, i);
 			case EType(t): symAddr(p.typeObjSym(typeIndex(t)));
 			case ECall(g, args):
 				var xs = exs(args);
@@ -1886,47 +1144,54 @@ class MirBuild {
 				id;
 			case ECallDispatch(sel, sig, args):
 				var xs = exs(args);
-				var o = nullCheck(xs[0]);
-				var row = symAddr(p.selectorSym(sel));
-				var ti = op1(ZExt, I64, tindex(o));
-				var fp = load(I64, 8, row, -8 * Abi.T_FIRST, false, ti, 8);
-				callInd(fp, xs, mty(sig.ret), sig.args.map(mty));
+				nullCheck(xs[0]);
+				var i = info();
+				i.sel = sel;
+				i.sig = sig;
+				var c = obj(VirtualCall, mty(sig.ret), i);
+				c.args = xs;
+				c.id;
 			case ECallClos(s, clos, args):
 				var c = ex(clos);
 				var xs = new Vector<Int>(args.length + 1);
 				xs[0] = c;
 				for (k in 0...args.length)
 					xs[k + 1] = ex(args[k]);
-				var fp = load(I64, 8, nullCheck(c), 0);
-				// (a struct result: the address of the caller's memory, last)
-				var sr = s.ret.match(TStruct(_));
-				var tys = new Vector<MTy>(s.args.length + (sr ? 2 : 1));
-				tys[0] = I64;
-				for (k in 0...s.args.length)
-					tys[k + 1] = mty(s.args[k]);
-				if (sr) tys[s.args.length + 1] = I64;
-				callInd(fp, xs, mty(s.ret), tys);
+				nullCheck(c);
+				var i = info();
+				i.sig = s;
+				var call = obj(ClosureCall, mty(s.ret), i);
+				call.args = xs;
+				call.id;
 			case ECallAnon(name, s, obj, args): callAnon(name, s, obj, args);
 			case ECallHost(name, args, ret): host(name, args, ret);
-			case ENewObj(c): alloc(c.nslots < 1 ? 1 : c.nslots, c.tindex, Abi.K_OBJ, true);
+			case ENewObj(c):
+				var i = info();
+				i.cls = c;
+				alloc(c.nslots < 1 ? 1 : c.nslots, c.tindex, Abi.K_OBJ, true, i, OInfo.NEW_OBJECT);
 			case ENewEnum(c, args):
+				// (the storage is not zeroed: an Int's or Bool's word is cleared
+				// before the parameter is evaluated, OInfo.next)
+				inline function next(i:Int):Int
+					return i < args.length && c.params[i].match(TI32 | TBool) ? i : -1;
 				var n = c.params.length == 0 ? 1 : c.params.length;
-				var o = alloc(n, c.tindex, Abi.K_OBJ, false);
-				if (c.params.length == 0) storeM(Opt.MInit, 8, o, 0, lconst(0, 0));
-				for (i in 0...args.length) {
-					if (c.params[i].match(TI32 | TBool)) storeM(Opt.MInit, 8, o, 8 * i, lconst(0, 0));
-					storeInit(o, at(i, c.params[i]), c.params[i], ex(args[i]));
-				}
+				var i = info();
+				i.ctor = c;
+				i.next = c.params.length == 0 ? 0 : next(0);
+				var o = alloc(n, c.tindex, Abi.K_OBJ, false, i, OInfo.NEW_ENUM);
+				for (i in 0...args.length)
+					initField(o, at(i, c.params[i]), c.params[i], ex(args[i]), next(i + 1));
 				o;
 			case ENewArr(elem, vs): newArr(elem, vs);
 			case ENewClos(l, []) if (p.staticClosures):
 				// (capturing nothing: an object in the data, DataGen.closures)
 				symAddr(p.closureSym(l));
 			case ENewClos(l, caps):
-				var o = alloc(l.captures.length + 1, l.tindex, Abi.K_OBJ, false);
-				storeM(Opt.MInit, 8, o, 0, symAddr(p.funcSym(l.fn)));
+				var i = info();
+				i.lambda = l;
+				var o = alloc(l.captures.length + 1, l.tindex, Abi.K_OBJ, false, i, OInfo.NEW_CLOSURE);
 				for (i in 0...caps.length)
-					storeInit(o, at(i + 1, l.captures[i].ty), l.captures[i].ty, ex(caps[i]));
+					initField(o, at(i + 1, l.captures[i].ty), l.captures[i].ty, ex(caps[i]));
 				o;
 			case ENewBox(t, v):
 				var tt = switch t {
@@ -1934,24 +1199,18 @@ class MirBuild {
 					case TI32 | TBool: Abi.T_REFBOX_I;
 					case _: Abi.T_REFBOX_P;
 				};
-				var o = alloc(1, tt, Abi.K_OBJ, false);
-				storeM(Opt.MInit, 8, o, 0, lconst(0, 0));
-				storeInit(o, 0, t, ex(v));
+				var i = info();
+				i.t = t;
+				var o = alloc(1, tt, Abi.K_OBJ, false, i, OInfo.NEW_BOX);
+				initField(o, 0, t, ex(v));
 				o;
 			case ENewAnon(sh, vals):
-				var o = alloc(sh.nslots, sh.tindex, Abi.K_OBJ, true);
+				var i = info();
+				i.shape = sh;
+				var o = alloc(sh.nslots, sh.tindex, Abi.K_OBJ, true, i, OInfo.NEW_ANON);
 				for (i in 0...vals.length)
-					storeInit(o, sh.locs[i], sh.fields[i].ty, ex(vals[i]));
+					initField(o, sh.locs[i], sh.fields[i].ty, ex(vals[i]));
 				o;
-		}
-	}
-
-	// a store into a new (young) object: no barrier
-	function storeInit(o:Int, loc:Int, t:Ty, v:Int) {
-		switch t {
-			case TRef(_) | TF64 | TI64: storeM(Opt.MInit, 8, o, 8 * loc, v);
-			case TVoid:
-			case _: storeM(Opt.MInit, 4, o, 4 * loc, v);
 		}
 	}
 
@@ -1976,45 +1235,36 @@ class MirBuild {
 				}
 		};
 
-	// hx_inst(o, lo, hi): o && KIND(o) == K_OBJ && lo <= TINDEX(o) <= hi
-	function instOf(o:Int, c:ClassInfo):Int {
-		var r = newVar(I32);
-		writeVar(r, cur, iconst(0));
-		var nn = newBlock(), join = newBlock();
-		br(cmp(CNe, o, lconst(0, 0)), nn, join);
-		seal(nn);
-		cur = nn;
-		var t = tindex(o);
-		// lo <= t <= hi as one unsigned comparison
-		writeVar(r, cur, cmp(CULe, op2(Sub, I32, t, tyConst(c.tindex)), idConst(p.spanSym(c), 0)));
-		jmp(join);
-		seal(join);
-		cur = join;
-		return readVar(r, cur);
-	}
-
+	// an Array literal: none, an empty Array (no room: the empty storage of
+	// its kind); else the runtime's, each element stored (ArrayInit)
 	function newArr(elem:Ty, vs:Vector<Ex>):Int {
-		var k = arrKind(elem);
-		var o:Int;
-		if (vs.length == 0) {
-			// (no room: the empty storage of the kind)
-			o = alloc(2, Abi.T_ARRAY, Abi.K_OBJ, true);
-			storeM(Opt.MInit, 4, o, 4, iconst(k));
-			storeM(Opt.MInit, 8, o, 8, symAddr(EMPTY_ARRAY + k, 8));
-			return o;
-		}
-		o = call("hx_arr_new_n", vector(iconst(k), iconst(vs.length)), I64);
-		for (i in 0...vs.length) {
-			var d = loadM(Opt.MHdr, I64, 8, o, 8);
-			var v = ex(vs[i]);
-			switch elem {
-				case TF64 | TI64: storeM(Opt.MElem, 8, d, 8 * i, v);
-				case TI32: storeM(Opt.MElem, 4, d, 4 * i, v);
-				case TBool: storeM(Opt.MElem, 1, d, i, v);
-				case _: setPtr(d, op2(Add, I64, d, lconst32(8 * i)), v, Opt.MElem);
-			}
+		var i = info();
+		i.t = elem;
+		i.n = vs.length;
+		if (vs.length == 0) return alloc(2, Abi.T_ARRAY, Abi.K_OBJ, true, i, OInfo.NEW_ARRAY);
+		var o = obj(NewArray, I64, i).id;
+		for (k in 0...vs.length) {
+			var e = info();
+			e.t = elem;
+			e.n = vs.length;
+			e.loc = k;
+			obj(ArrayInit, Void, e, o, ex(vs[k]));
 		}
 		return o;
+	}
+
+	// obj.name(args) through a structural type: a method of the object's
+	// class or a closure in a field (MemLower.callAnon)
+	function callAnon(name:String, s:SigInfo, obj:Ex, args:Vector<Ex>):Int {
+		var o = nullCheck(ex(obj));
+		var xs = exs(args);
+		var i = info();
+		i.name = name;
+		i.sig = s;
+		var rt = mty(s.ret);
+		var c = this.obj(AnonCall, rt, i, o);
+		c.args = xs;
+		return rt == Void ? iconst(0) : c.id;
 	}
 
 	function bin(op:BinOp, x:Ex, y:Ex):Int {
@@ -2219,59 +1469,35 @@ class MirBuild {
 			if (n == 0) return symAddr(EMPTY_ARRAY + k, 8);
 			if (n > Abi.akMax(k)) throw "hxmc: NativeArray literal of " + n + " elements";
 			var o = call("hx_narray_new_n", vector(iconst(k), iconst(n)), I64);
-			var size = Abi.akSize(k);
 			for (i in 0...n) {
-				var v = ex(args[i + 1]);
-				if (k == Abi.AK_PTR) setPtr(o, op2(Add, I64, o, lconst32(8 * i)), v, Opt.MElem);
-				else storeM(Opt.MElem, size, o, size * i, v);
+				var e = info();
+				e.kind = k;
+				e.loc = i;
+				obj(NArrayInit, Void, e, o, ex(args[i + 1]));
 			}
 			return o;
 		}
 		if (StringTools.startsWith(name, "hxmc_narray_")) {
 			var xs = exs(args);
+			var i = info();
 			if (name == "hxmc_narray_new") {
-				var k = intLiteral(args[0], "NativeArray kind");
-				var n = xs[1];
-				var res = newVar(I64);
-				// (1 to the most elements a header can count, by one unsigned
-				// test; none: the empty array of the kind, EMPTY_ARRAY)
-				var valid = newBlock(), other = newBlock(), empty = newBlock(), invalid = newBlock(), join = newBlock();
-				other.cold = true;
-				br(cmp(CULt, op2(Sub, I32, n, iconst(1)), iconst(Abi.akMax(k))), valid, other);
-				seal(other);
-				cur = other;
-				br(cmp(CEq, n, iconst(0)), empty, invalid);
-				seal(invalid);
-				cur = invalid;
-				var invalidSp = spillOpen(coldList, 0);
-				call("hx_narray_bad_length", vector(), Void);
-				spillClose(coldList, invalidSp);
-				jmp(empty);
-				seal(empty);
-				cur = empty;
-				writeVar(res, cur, symAddr(EMPTY_ARRAY + k, 8));
-				jmp(join);
-				seal(valid);
-				cur = valid;
-				// (the elements' words; the header holds the length, the type the kind)
-				var words = Abi.akSize(k) == 1 ? op2(Shr, I32, op2(Add, I32, n, iconst(7)), iconst(3))
-					: k == Abi.AK_I32 ? op2(Shr, I32, op2(Add, I32, n, iconst(1)), iconst(1)) : n;
-				var a = allocDyn(words, arrWord(iconst(naType(k)), words), n, true);
-				writeVar(res, cur, a);
-				jmp(join);
-				seal(join);
-				cur = join;
-				return readVar(res, cur);
+				// (1 to the most elements a header can count; none: the empty
+				// array of the kind, EMPTY_ARRAY: MemLower.newNArray)
+				i.kind = intLiteral(args[0], "NativeArray kind");
+				return gcPoint(NewNArray, I64, i, xs[1]).id;
 			}
 			nullCheck(xs[0]);
-			if (name == "hxmc_narray_length") return loadM(Opt.MConst, I32, 4, xs[0], -4);
-			if (name == "hxmc_narray_dget" || name == "hxmc_narray_dset") return narrayDyn(name, xs);
+			if (name == "hxmc_narray_length") return obj(NArrayLength, I32, i, xs[0]).id;
+			if (name == "hxmc_narray_dget") return gcPoint(NArrayDyn, I64, i, xs[0], xs[1]).id;
+			if (name == "hxmc_narray_dset") {
+				gcPoint(NArrayDyn, Void, i, xs[0], xs[1], xs[2]);
+				return iconst(0);
+			}
 			var suffix = name.substr(name.length - 1);
-			var size = suffix == "b" || suffix == "u" ? 1 : suffix == "i" ? 4 : 8;
-			var ix = op1(SExt, I64, xs[1]);
-			if (StringTools.startsWith(name, "hxmc_narray_get_")) return loadM(Opt.MElem, mty(ret), size, xs[0], 0, false, ix, size);
-			if (suffix == "p") nativeSetPtr(xs[0], op2(Add, I64, xs[0], op2(Shl, I64, ix, iconst(3))), xs[2]);
-			else storeM(Opt.MElem, size, xs[0], 0, xs[2], ix, size);
+			i.n = suffix == "b" || suffix == "u" ? 1 : suffix == "i" ? 4 : 8;
+			if (StringTools.startsWith(name, "hxmc_narray_get_")) return obj(NArrayGet, mty(ret), i, xs[0], xs[1]).id;
+			i.flag = suffix == "p";
+			obj(NArraySet, Void, i, xs[0], xs[1], xs[2]);
 			return iconst(0);
 		}
 		// Dynamic access by a literal name: the field id is known here
@@ -2739,10 +1965,6 @@ class MirBuild {
 		return {base: base, disp: disp, index: op1(SExt, I64, ex(i))};
 	}
 
-	// an inline expansion the instruction selection does (Call to hxmc$...)
-	function special(name:String, args:Vector<Int>, ret:MTy):Int
-		return call(SPECIAL + name, args, ret);
-
 	// instruction selection expands calls of these symbols inline
 	public static inline var SPECIAL = "hxmc$";
 
@@ -2839,7 +2061,7 @@ class MirBuild {
 					case x: op1(SExt, I64, ex(x));
 				};
 				var v = ex(args[2]);
-				setPtr(o, op2(Add, I64, o, off), v);
+				obj(RefStore, Void, info(), o, off, v);
 				iconst(0);
 			case "getU8At": ldAt(I32, 1);
 			case "getU16At": ldAt(I32, 2);
@@ -2890,41 +2112,6 @@ class MirBuild {
 			case _: throw new Unsupported("unknown intrinsic " + name);
 		}
 	}
-
-	// Mem.alloc: an object of a run-time size (n slots), type index and kind;
-	// zero as for alloc
-	// an object of n slots, its header's words w0 (the type index first) and
-	// w1 (hxmc.rt.Types), as alloc's; the slow path assembles it from them
-	// and the bytes (GcPaths)
-	function allocDyn(n:Int, w0:Int, w1:Int, zero:Bool):Int {
-		var n64 = op1(ZExt, I64, n);
-		var bytes = op2(Shl, I64, op2(Add, I64, n64, lconst(1, 0)), lconst(3, 0));
-		var ptr = tlsLoad("rt_young_ptr");
-		var lim = tlsLoad(zero ? "rt_young_limit" : "rt_young_rlimit");
-		var res = newVar(I64);
-		var fast = newBlock(), slow = newBlock(), join = newBlock();
-		slow.cold = true;
-		br(cmp(CGe, op2(Sub, I64, lim, ptr), bytes), fast, slow);
-		seal(fast);
-		seal(slow);
-		cur = fast;
-		tlsStore("rt_young_ptr", op2(Add, I64, ptr, bytes));
-		storeM(Opt.MInit, 4, ptr, 0, w0);
-		storeM(Opt.MInit, 4, ptr, 4, w1);
-		writeVar(res, cur, op2(Add, I64, ptr, lconst32(8)));
-		jmp(join);
-		cur = slow;
-		var list = coldList;
-		var sp = spillOpen(list, 0);
-		var r = call("hxmc_alloc_slow", vector(w1, w0, op1(Trunc, I32, bytes)), I64);
-		spillClose(list, sp);
-		writeVar(res, cur, r);
-		jmp(join);
-		seal(join);
-		cur = join;
-		return readVar(res, cur);
-	}
-
 	// a string's length (its payload's first word: hxmc.rt.Types)
 	function strLen(s:Int):Int
 		return loadM(Opt.MConst, I32, 4, s, 0);
@@ -2932,13 +2119,6 @@ class MirBuild {
 	// the type of NativeArray storage of element kind k (hxmc.rt.Types.naType)
 	public static function naType(k:Int):Int
 		return Abi.T_NATIVE_ARRAY - k;
-
-	// an array's first header word: its type t, its words (0xFFFF from that
-	// many on, without a branch: hxmc.rt.Types.arrWord)
-	function arrWord(t:Int, words:Int):Int {
-		var sat = op2(Sar, I32, op2(Sub, I32, iconst(0xFFFE), words), iconst(31));
-		return op2(Or, I32, t, op2(Shl, I32, op2(Or, I32, words, sat), iconst(16)));
-	}
 
 	function strEq(a:Int, b:Int):Int {
 		var r = newVar(I32);
@@ -3044,122 +2224,6 @@ class MirBuild {
 			}
 	}
 
-	function callAnon(name:String, s:SigInfo, obj:Ex, args:Vector<Ex>):Int {
-		var o = nullCheck(ex(obj));
-		var xs = exs(args);
-		var fid = fidConst(name);
-		var rt = mty(s.ret);
-		// (the method's or the closure's arguments: the receiver first)
-		var argTys = new Vector<MTy>(s.args.length + 1);
-		argTys[0] = I64;
-		for (k in 0...s.args.length)
-			argTys[k + 1] = mty(s.args[k]);
-		var res = rt == Void ? -1 : newVar(rt);
-		var c = ic(o, fid);
-		var join = newBlock();
-		var m1 = newBlock(), meth = newBlock(), notMeth = newBlock();
-		// a method of the object's class with the call's signature
-		var slot = load(I32, 4, c, Abi.IC_SLOT);
-		br(cmp(CEq, slot, iconst(0)), m1, notMeth);
-		seal(m1);
-		cur = m1;
-		br(cmp(CEq, load(I32, 4, c, Abi.IC_SIG), sigConst(s)), meth, notMeth);
-		seal(meth);
-		seal(notMeth);
-		cur = meth;
-		var r = callInd(load(I64, 8, c, Abi.IC_FN), VectorTools.cons(o, xs), rt, argTys);
-		if (res >= 0) writeVar(res, cur, r);
-		jmp(join);
-		// a closure in a field
-		cur = notMeth;
-		var c1 = newBlock(), c2 = newBlock(), clos = newBlock(), slow = newBlock();
-		slow.cold = true;
-		br(cmp(CGt, slot, iconst(0)), c1, slow);
-		seal(c1);
-		cur = c1;
-		br(cmp(CEq, load(I32, 1, c, Abi.IC_KIND), iconst("p".code)), c2, slow);
-		seal(c2);
-		cur = c2;
-		var k = load(I64, 8, o, 0, false, op1(SExt, I64, op2(Sub, I32, slot, iconst(1))), 8);
-		br(isSig(k, s), clos, slow);
-		seal(clos);
-		seal(slow);
-		cur = clos;
-		var r2 = callInd(load(I64, 8, k, 0), VectorTools.cons(k, xs), rt, argTys);
-		if (res >= 0) writeVar(res, cur, r2);
-		jmp(join);
-		// the slow path: arguments packed in 8-byte words
-		cur = slow;
-		var n = xs.length == 0 ? 1 : xs.length;
-		var area = f.slot(8 * n, 8);
-		var av = stackAddr(area);
-		if (xs.length == 0) store(8, av, 0, lconst(0, 0));
-		for (i in 0...xs.length)
-			store(8, av, 8 * i, switch s.args[i] {
-				case TF64: op1(FToBits, I64, xs[i]);
-				case TI32 | TBool: op1(ZExt, I64, xs[i]);
-				case _: xs[i];
-			});
-		var u = call("hx_anon_call_slow", vector(o, fid, sigConst(s), av), I64);
-		if (res >= 0) writeVar(res, cur, switch s.ret {
-			case TF64: op1(BitsToF, F64, u);
-			case TI32 | TBool: op1(Trunc, I32, u);
-			case _: u;
-		});
-		jmp(join);
-		seal(join);
-		cur = join;
-		return res >= 0 ? readVar(res, cur) : iconst(0);
-	}
-
-	// hx_is_sig(c, sig): a closure (TK_CLOSURE or TK_BOUND) of that signature
-	function isSig(k:Int, s:SigInfo):Int {
-		var r = newVar(I32);
-		writeVar(r, cur, iconst(0));
-		var nn = newBlock(), c2 = newBlock(), join = newBlock();
-		br(cmp(CNe, k, lconst(0, 0)), nn, join);
-		seal(nn);
-		cur = nn;
-		var ti = op1(ZExt, I64, tindex(k));
-		var te = op2(Add, I64, symAddr("rt_types"), op2(Mul, I64, ti, lconst32(Abi.TYPE_SIZE)));
-		var tk = load(I32, 1, te, 8);
-		// TK_CLOSURE = 6, TK_BOUND = 7
-		br(cmp(CULe, op2(Sub, I32, tk, iconst(6)), iconst(1)), c2, join);
-		seal(c2);
-		cur = c2;
-		writeVar(r, cur, cmp(CEq, load(I32, 4, te, 12), sigConst(s)));
-		jmp(join);
-		seal(join);
-		cur = join;
-		return readVar(r, cur);
-	}
-}
-
-// the values of SSA variables at the end of a block (Braun et al.'s
-// currentDef for one block): few entries, a linear list
-class BlockDefs {
-	var keys:Array<Int> = [];
-	var vals:Array<Int> = [];
-
-	public function new() {}
-
-	public function get(v:Int):Null<Int> {
-		var k = keys.length;
-		while (k-- > 0)
-			if (keys[k] == v) return vals[k];
-		return null;
-	}
-
-	public function set(v:Int, val:Int) {
-		var k = keys.length;
-		while (k-- > 0)
-			if (keys[k] == v) {
-				vals[k] = val;
-				return;
-			}
-		keys.push(v);
-		vals.push(val);
-	}
 }
 
 class Unsupported {

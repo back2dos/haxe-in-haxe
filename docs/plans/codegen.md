@@ -19,7 +19,7 @@ another thread can see them.
 (`HXMC_ESCAPE=0` turns it off; `HXMC_ESCAPE_LOG=1` says, per allocation
 analyzed, whether it is replaced and else why not). What it replaces:
 
-- objects MirBuild allocates inline (`MirBuild.alloc`: class instances,
+- objects allocated inline (`New`, `MemLower.alloc`: class instances,
   anonymous objects, enum values, closures, the boxes of captured
   variables), recognized by the allocation's shape (the phi of the fast
   path's address and the slow path's stub call), and the runtime's boxing of

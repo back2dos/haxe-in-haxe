@@ -61,7 +61,7 @@ class LinkWasm {
 	// (name => bytes, zeroed)
 	static var CELLS:Map<String, Int> = [
 		"rt_globals" => 8, "rt_young_start" => 8, "rt_young_end" => 8, "rt_argc" => 8, "rt_argv" => 8, "rt_nthreads" => 8,
-		"rt_sp_limit" => 8, // the shadow stack's end (MirBuild.raiseHw)
+		"rt_sp_limit" => 8, // the shadow stack's end (MirWriter.raiseHw)
 	];
 
 	public function new(objs:Array<Obj>, stackSize = 64 << 10) {

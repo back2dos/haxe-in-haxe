@@ -66,6 +66,101 @@ enum abstract Op(Int) to Int {
 	var Unreachable; // after a call that does not return
 	// values (late additions)
 	var Rotr; // a rotated right by the constant b (I32/I64)
+	// object-level operations (docs/plans/codegen.md, "Object-level Mir"):
+	// MirBuild makes them, MemLower lowers them to the instructions above
+	// (layouts, loads and stores, allocation, barriers, the shadow stack);
+	// no back end sees them. Their static part is MIns.info (OInfo)
+	var NullCheck; // a: a reference about to be dereferenced (explicit null tests only); info.key
+	var New; // a new object (info: what, its allocation); args: the cold site's references (OInfo.cold)
+	var NewDyn; // a: slots, b, c: the header's words (Mem.alloc of a run-time size); args as New
+	var InitField; // a: a new object, b: the value of its field (info.t, loc, next)
+	var GetField; // a: an object (info.t, loc)
+	var SetField; // a: an object, b: the value (info.t, loc, flag: a null literal)
+	var FieldAddr; // a: an object (info.loc): the address of a struct field's memory
+	var EnumTag; // a: an enum value (info.en)
+	var TypeTest; // a: a reference (info.cls): an instance of the class or a subclass
+	var Box; // a: a scalar (info.t) as Dynamic
+	var Unbox; // a: a Dynamic (info.t)
+	var VirtualCall; // args: the receiver first (info.sel, sig)
+	var ClosureCall; // args: the closure first (info.sig)
+	var AnonGet; // a: an object (info.name, t, shape: the hint)
+	var AnonTest; // a: an object, b: the field's id (info.name, t); targets: hit (the object has the field, of the kind), miss
+	var AnonStore; // a: an object, b: the value, c: its AnonTest (in the hit block; info.t)
+	var AnonCall; // a: an object; args: the arguments (info.name, sig)
+	var ArrayLength; // a: an Array
+	var ArrayGet; // a: an Array, b: the index (info.t, flag: checked)
+	var ArraySet; // a: an Array, b: the index, c: the value (info.t, rootSlot, listIndex); args as New
+	var ArrayPush; // a: an Array, c: the value; as ArraySet
+	var NewArray; // an Array literal of info.n elements of info.t (ArrayInit stores them); args as New
+	var ArrayInit; // a: a NewArray, b: an element's value (info.loc: its index)
+	var NewNArray; // a: the length (info.kind); args as New
+	var NArrayInit; // a: NativeArray storage just made (hx_narray_new_n), b: an element's value (info.loc: its index, kind)
+	var NArrayLength; // a: NativeArray storage
+	var NArrayGet; // a: storage, b: the index (info.n: the element's bytes)
+	var NArraySet; // a: storage, b: the index, c: the value (info.n; info.flag: a reference)
+	var NArrayDyn; // a: storage, b: the index, c: the value (-1: a read) of a NativeArray seen as Dynamic; args as New
+	var RefStore; // a: an object, b: the offset of a reference in it, c: the value (Mem.setRefBarrier)
+}
+
+// the static part of an object-level operation (MIns.info): what it is about
+class OInfo {
+	// the object-level blocks MirBuild made before the operation: MemLower
+	// orders the blocks it makes for it among them, as one pass would have
+	// made them (block numbers and order reach the output)
+	public var at = 0;
+	public var t:hxmc.ir.Ir.Ty = hxmc.ir.Ir.Ty.TVoid; // the field's, element's or boxed value's type
+	public var loc = 0; // a field's slot (an Int or Bool its 4-byte index: ClassInfo.locs); an element's index
+	public var cls:Null<hxmc.ir.Ir.ClassInfo>;
+	public var ctor:Null<hxmc.ir.Ir.CtorInfo>;
+	public var lambda:Null<hxmc.ir.Ir.LambdaInfo>;
+	public var shape:Null<hxmc.ir.Ir.ShapeInfo>;
+	public var en:Null<hxmc.ir.Ir.EnumInfo>;
+	public var sig:Null<hxmc.ir.Ir.SigInfo>;
+	// AnonGet, AnonTest, AnonCall: the field's name; New: what it makes (NEW_*)
+	public var name:Null<String>;
+
+	public static inline var NEW_OBJECT = "object"; // a class instance (cls), its fields zero
+	public static inline var NEW_ENUM = "enum"; // an enum value (ctor); InitField sets its parameters
+	public static inline var NEW_CLOSURE = "closure"; // a closure (lambda); InitField sets its captures
+	public static inline var NEW_BOX = "box"; // a captured variable's box (t); InitField sets it
+	public static inline var NEW_ANON = "anon"; // an anonymous object (shape); InitField sets its fields
+	public static inline var NEW_ARRAY = "array"; // an empty Array of elements t
+	public static inline var NEW_RAW = "raw"; // Mem.alloc: an object of the runtime's own layout
+
+	// New: its slots, type index, kind (Abi.K_OBJ...) and whether they must
+	// read as zeros (else every one is written first); NewArray: its elements
+	public var n = 0;
+	public var tindex = -1;
+	public var kind = 0;
+	public var zero = false;
+	public var flag = false;
+	// New and InitField of an enum value: the 8-byte slot whose upper half
+	// is cleared after them, before the next parameter is evaluated (an
+	// Int's or Bool's: the storage is not zeroed; -1: none)
+	public var next = -1;
+	public var sel = -1; // VirtualCall: the selector
+	public var key = -1; // NullCheck: the frame slot of the enclosing handler (-1: none)
+	// a GC point at a cold site (SCold, hxmc.Roots): the references live
+	// across its slow path (MIns.args, nspill of them) are stored on the
+	// shadow stack there (spillBase: in the frame's slots from that one,
+	// else pushed) and read back after it: in its continuation, the phi of
+	// such a local (relocs: the local's index among them) gets a value per
+	// edge from MemLower (MIns.imm: that index + 1)
+	public var cold = false;
+	public var nspill = 0;
+	public var relocs:Null<Map<Int, Int>>;
+	// the frame slots MirBuild made before it (MemLower numbers the slots it
+	// makes among them, as one pass would have)
+	public var slots = 0;
+	// the block the code after it is in, whose predecessors are its
+	// lowering's last edges (MirBuild.obj: MemLower.branches)
+	public var cont:Null<MBlock>;
+	public var spillBase = -1;
+	public var fr = false; // the frame's address (MirBuild's fr) follows the spills in args
+	public var rootSlot = -1; // ArraySet, ArrayPush: the array local's shadow-stack slot (-1: spilled at listIndex)
+	public var listIndex = -1;
+
+	public function new() {}
 }
 
 enum abstract Cond(Int) to Int from Int {
@@ -98,6 +193,7 @@ class MIns {
 	// what a lowering computes). Object-level passes read it (docs/plans/codegen.md,
 	// "Object-level Mir"); the back ends never do
 	public var vty:Null<hxmc.ir.Ir.Ty>;
+	public var info:Null<OInfo>; // an object-level operation's static part
 	public var id:Int = -1; // value number (every instruction gets one)
 	public var a:Int = -1;
 	public var b:Int = -1;
@@ -140,7 +236,7 @@ class MIns {
 	public var cRet:Vector<CAbi.CPart> = vector();
 	public var dead = false;
 	public var mem = 0; // Load/Store: the memory class (Opt.MOther...)
-	// Store of a reference into the heap or a static (MirBuild.setPtr): it
+	// Store of a reference into the heap or a static (MemLower.setPtr): it
 	// publishes what it stores, so the thread's stores before it (the
 	// initialising stores of the object) are seen first by a thread that
 	// reads the reference (arm64: dmb ishst before it; x86-64 orders stores)
@@ -153,7 +249,11 @@ class MIns {
 	}
 
 	public inline function isTerm():Bool
-		return op == Jmp || op == Br || op == Switch || op == Ret || op == Unreachable;
+		return op == Jmp || op == Br || op == Switch || op == Ret || op == Unreachable || op == AnonTest;
+
+	// an object-level operation (lowered by MemLower)
+	public inline function isObj():Bool
+		return (op : Int) >= (NullCheck : Int);
 
 	// Phi: the argument of the k-th pred dropped (its edge removed; the
 	// arguments are reallocated, as edges change rarely; none when there is no
@@ -288,6 +388,15 @@ class MFunc {
 			if (x >= 0) parts.push('v$x');
 		if (i.op == Load || i.op == Store) parts.push('disp ${i.imm} scale ${i.imm2} size ${i.size}${i.signed ? " s" : ""}');
 		if (i.op == Param || i.op == StackAddr) parts.push(Std.string(i.imm));
+		var o = i.info;
+		if (o != null) {
+			if (o.cls != null) parts.push(o.cls.name);
+			if (o.ctor != null) parts.push(o.ctor.en.name + "." + o.ctor.name);
+			if (o.lambda != null) parts.push("lambda" + o.lambda.id);
+			if (o.name != null) parts.push(o.name);
+			if (!o.t.match(TVoid)) parts.push(vtyName(o.t) + " at " + o.loc);
+			if (o.cold) parts.push('cold ${o.nspill}');
+		}
 		if (i.op == Call || i.op == Phi || i.args.length > 0) parts.push("(" + [for (x in i.args) 'v$x'].join(", ") + ")");
 		if (i.op == Switch || i.cases.length > 0) parts.push("[" + i.cases.join(",") + "]");
 		if (i.targets.length > 0) parts.push("-> " + [for (t in i.targets) 'b${t.id}'].join(", "));
@@ -332,7 +441,10 @@ class MFunc {
 
 	static final OPS:Vector<String> = vector("param", "const", "constf", "symaddr", "tlsload", "tlsstore", "stackaddr", "copy", "phi", "add", "sub", "mul", "and",
 		"or", "xor", "shl", "sar", "shr", "neg", "not", "div", "rem", "fadd", "fsub", "fmul", "fdiv", "fneg", "fsqrt", "fabs", "cmp", "sext", "zext", "trunc",
-		"i2f", "f2i", "bitstof", "ftobits", "select", "load", "store", "call", "jmp", "br", "switch", "ret", "unreachable", "rotr");
+		"i2f", "f2i", "bitstof", "ftobits", "select", "load", "store", "call", "jmp", "br", "switch", "ret", "unreachable", "rotr", "nullcheck", "new",
+		"newdyn", "initfield", "getfield", "setfield", "fieldaddr", "enumtag", "typetest", "box", "unbox", "virtualcall", "closurecall", "anonget", "anontest",
+		"anonstore", "anoncall", "arraylength", "arrayget", "arrayset", "arraypush", "newarray", "arrayinit", "newnarray", "narrayinit", "narraylength",
+		"narrayget", "narrayset", "narraydyn", "refstore");
 
 	public static function opName(o:Op):String
 		return OPS[(o : Int)];

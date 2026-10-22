@@ -415,7 +415,7 @@ class Dyn {
 		return new haxe.iterators.ArrayKeyValueIterator<Dynamic>(a);
 
 	// obj.name(args) through a structural type, slow path: the arguments
-	// packed in 8-byte words (MirBuild.callAnon), the result likewise
+	// packed in 8-byte words (MemLower.callAnon), the result likewise
 	@:hxmc.export("hx_anon_call_slow") static function anonCallSlow(o:Dynamic, fid:Int, sig:Int, args:Ptr):I64 {
 		var n = sigArgs(sig);
 		var k = Mem.getPtr(Mem.sym("rt_sig_keys"), 8 * sig);

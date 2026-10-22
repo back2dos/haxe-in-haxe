@@ -234,7 +234,7 @@ class FuncInfo {
 	public var collects:Bool = false;
 	public var cSymbol:Null<String>; // @:hxmc.export: the symbol (the runtime's C code calls it)
 	// (Facts) of the runtime's exports: the families hxmc.ir.RuntimeSymbols
-	// lists it for, which MirBuild.call checks; -1: not the runtime's
+	// lists it for, which MirWriter.call checks; -1: not the runtime's
 	public var rtFamilies:Int = -1;
 	// the Haxe module the function comes from (dot path): hxmc compiles the
 	// functions of a module into one object

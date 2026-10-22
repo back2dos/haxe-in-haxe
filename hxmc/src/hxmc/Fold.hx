@@ -4,7 +4,7 @@ import hxmc.Mir;
 import core.ds.VectorTools.vector;
 
 // Allocation folding: an allocation of the nursery of a constant size
-// (MirBuild.alloc's shape) that follows another one with nothing between them
+// (MemLower.alloc's shape) that follows another one with nothing between them
 // that could collect or allocate becomes part of it: one test of the room
 // left and one bump for both, the second's header written where the first's
 // object ends (the two are objects of their own from there: the collector
@@ -157,7 +157,7 @@ class Fold {
 			case _: true;
 		}
 
-	// MirBuild.alloc's shape (a constant size): head: ptr = rt_young_ptr,
+	// MemLower.alloc's shape (a constant size): head: ptr = rt_young_ptr,
 	// lim = rt_young_(r)limit, br (lim - ptr >= bytes) fast, slow; fast:
 	// rt_young_ptr = ptr + bytes, the header's two words at ptr, o = ptr +
 	// 8, jmp join; slow (cold): an allocation stub's call (spills and reloads
@@ -226,7 +226,7 @@ class Fold {
 			}
 			for (i in b.ins)
 				if (!i.dead && i.op == Call) {
-					if (s.call != null || i.sym == null || !StringTools.startsWith(i.sym, MirBuild.ALLOC_STUB)) return null;
+					if (s.call != null || i.sym == null || !StringTools.startsWith(i.sym, MemLower.ALLOC_STUB)) return null;
 					s.call = i;
 				}
 		}
