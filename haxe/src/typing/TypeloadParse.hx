@@ -152,6 +152,10 @@ class TypeloadParse {
 
 	public static var parseHook:CommonContext->ResolvedFile->Pos->ParseResult<Package> = parseFile;
 
+	// port: tsmm: set by the ts-- frontend (tsmm/src) when it is compiled in: the file of a module other than its `.hx`
+	// port: tsmm: (`base` is `pack/Name`), looked up first; null keeps upstream's lookup
+	public static var moduleFileHook:Null<(com:CommonContext, base:String) -> Null<core.ClassPaths.FileLookup>>;
+
 	public static function handleParserResult(com:CommonContext, p:Pos, result:ParseResult<Package>):SourceParseResult {
 		inline function handleError(error:ParseErrorInfo):Void {
 			var msg = Parser.errorMsg(error.message);
@@ -193,7 +197,9 @@ class TypeloadParse {
 			case null:
 		}
 		// port: findFileNoRaise returns null where upstream raises Not_found.
-		var lookup = classPaths.findFileNoRaise(pack.concat([path.name]).join("/") + ".hx");
+		var base = pack.concat([path.name]).join("/"); // port: tsmm
+		var lookup = moduleFileHook == null ? null : moduleFileHook(com, base); // port: tsmm
+		if (lookup == null) lookup = classPaths.findFileNoRaise(base + ".hx"); // port: tsmm
 		if (lookup == null) throw NotFound.raise();
 		var rfile = lookup.resolvedFile;
 		if (Sys.systemName() == "Windows") switch path.name.toLowerCase() {
